@@ -466,17 +466,23 @@ class MyVpnService : VpnService() {
                     continue
                 }
 
-                // Quick check: give Xray 5s to stabilise, then verify traffic actually flows
-                delay(5_000L)
-                if (!isTelegramReachableViaSocks(currentSocksPort)) {
-                    Log.w(TAG, "${nextServer.name} started but internet check failed — trying next")
+                // Give XRay 3s to stabilise, then speed test validates both connectivity and speed
+                delay(3_000L)
+                val speedMbps = withContext(Dispatchers.IO) { measureDownloadSpeedMbps(currentSocksPort) }
+                if (speedMbps > 0f) {
+                    configRepository.updateSpeed(nextServer.id, speedMbps)
+                    Log.d(TAG, "${nextServer.name} speed: ${"%.2f".format(speedMbps)} MB/s")
+                }
+                // 0f = tunnel dead (test failed), 0.01-0.49 = too slow — skip both
+                if (speedMbps < 0.5f) {
+                    val reason = if (speedMbps == 0f) "unreachable" else "${"%.0f".format(speedMbps * 1024)} KB/s"
+                    Log.w(TAG, "${nextServer.name} failed ($reason) — trying next")
                     configRepository.recordFailure(nextServer.id)
                     triedIds += nextServer.id
-                    // Track consecutive failures on the same port — after 3, exclude that port
+                    // Track port failures
                     if (nextServer.port == lastFailedPort) {
                         consecutivePortFails++
                         if (consecutivePortFails >= 3) {
-                            Log.w(TAG, "Port ${nextServer.port} failed 3 times — deprioritising")
                             failedPorts += nextServer.port
                             consecutivePortFails = 0
                         }
@@ -484,18 +490,6 @@ class MyVpnService : VpnService() {
                         lastFailedPort = nextServer.port
                         consecutivePortFails = 1
                     }
-                    continue
-                }
-
-                // Speed test — skip servers that are reachable but too slow (< 0.5 MB/s)
-                val speedMbps = withContext(Dispatchers.IO) { measureDownloadSpeedMbps(currentSocksPort) }
-                if (speedMbps > 0f) {
-                    configRepository.updateSpeed(nextServer.id, speedMbps)
-                    Log.d(TAG, "${nextServer.name} speed: ${"%.2f".format(speedMbps)} MB/s")
-                }
-                if (speedMbps in 0.01f..0.49f) {
-                    Log.w(TAG, "${nextServer.name} too slow (${"%.2f".format(speedMbps)} MB/s) — skipping")
-                    triedIds += nextServer.id
                     continue
                 }
 
