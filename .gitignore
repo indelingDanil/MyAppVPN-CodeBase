@@ -1,0 +1,39 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+
+# Local properties
+local.properties
+
+# Keystore (NEVER commit signing keys)
+*.jks
+*.keystore
+release.properties
+
+# Android / NDK build cache
+app/.cxx/
+app/release/
+app/debug/
+*.apk
+*.aab
+*.ap_
+
+# Logs
+*.log
+
+# Binaries (download per SETUP.md)
+app/src/main/assets/xray/xray-*
+app/src/main/assets/xray/geoip.dat
+app/src/main/assets/xray/geosite.dat
+app/src/main/assets/tun2socks/tun2socks-*
+
+# Claude Code
+.claude/

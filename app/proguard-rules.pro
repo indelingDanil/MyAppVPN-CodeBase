@@ -1,0 +1,7 @@
+-keep class com.myappvpn.data.model.** { *; }
+-keep class com.myappvpn.data.remote.** { *; }
+-keep class com.google.gson.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**
