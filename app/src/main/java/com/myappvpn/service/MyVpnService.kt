@@ -15,6 +15,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.myappvpn.R
 import com.myappvpn.data.datastore.AppPreferences
+import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.data.repository.ConfigRepository
 import com.myappvpn.ui.MainActivity
@@ -47,6 +48,9 @@ class MyVpnService : VpnService() {
 
         private val _hotspotProxyInfo = MutableStateFlow<String?>(null)
         val hotspotProxyInfo: StateFlow<String?> = _hotspotProxyInfo.asStateFlow()
+
+        private val _connectedServer = MutableStateFlow<ServerProfile?>(null)
+        val connectedServer: StateFlow<ServerProfile?> = _connectedServer.asStateFlow()
     }
 
     @Inject lateinit var preferences: AppPreferences
@@ -123,6 +127,7 @@ class MyVpnService : VpnService() {
             trafficMonitor.start()
 
             _vpnState.value = VpnState.CONNECTED
+            _connectedServer.value = configRepository.getSelectedServer()
             updateNotification(serverName, VpnState.CONNECTED)
             _hotspotProxyInfo.value = if (hotspotSharingEnabled) HotspotHelper.getHotspotIp()?.let { "$it:10808" } else null
             Log.i(TAG, "VPN connected via $serverName")
@@ -293,6 +298,22 @@ class MyVpnService : VpnService() {
                             Log.d(TAG, "Recorded success for ${server.name}")
                         }
                     }
+
+                    // ── Quick speed check: detect DPI throttling ──
+                    val speed = withContext(Dispatchers.IO) {
+                        measureQuickSpeedMbps(currentSocksPort)
+                    }
+                    if (speed > 0f) {
+                        configRepository.getSelectedServer()?.let {
+                            configRepository.updateSpeed(it.id, speed)
+                        }
+                        Log.d(TAG, "Speed: ${"%.0f".format(speed * 1024)} KB/s")
+                    }
+                    if (speed in 0.01f..0.09f) {
+                        Log.w(TAG, "Throttled! ${"%.0f".format(speed * 1024)} KB/s — switching server")
+                        switchToNextServer()
+                        break
+                    }
                 }
             }
         }
@@ -309,30 +330,67 @@ class MyVpnService : VpnService() {
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
-    private val TELEGRAM_DC_ENDPOINTS = listOf(
-        "149.154.167.50" to 443,   // DC2 — primary, Europe
-        "149.154.175.50" to 443,   // DC1
-        "91.108.56.100"  to 443,   // DC5
+    /**
+     * Telegram endpoints for health check — actual HTTPS requests, not just TCP connect.
+     * TCP SYN/ACK can pass DPI even when Telegram traffic is blocked/throttled.
+     * HTTPS request validates real data delivery through the tunnel.
+     */
+    private val TELEGRAM_CHECK_URLS = listOf(
+        "https://t.me/",                    // primary — lightweight, blocked in RU
+        "https://web.telegram.org/",        // fallback — WebSocket transport endpoint
     )
 
     /**
-     * Checks that Telegram DCs are reachable through the VLESS tunnel.
-     * Telegram IPs are blocked in Russia → reachability = DPI bypass confirmed.
-     * Tries up to 3 DCs sequentially; success on any one = pass.
+     * Checks that Telegram is reachable through the VLESS tunnel by making
+     * an actual HTTPS request (not just TCP connect).
+     * DPI in Russia can pass TCP handshake but block/throttle MTProto data —
+     * an HTTP request catches this.
      */
     private fun isTelegramReachableViaSocks(port: Int): Boolean {
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-        for ((host, dcPort) in TELEGRAM_DC_ENDPOINTS) {
+        for (url in TELEGRAM_CHECK_URLS) {
             try {
-                Socket(proxy).use { socket ->
-                    socket.soTimeout = 5_000
-                    socket.connect(InetSocketAddress(host, dcPort), 5_000)
-                }
-                return true
-            } catch (_: Exception) { /* try next DC */ }
+                val conn = java.net.URL(url)
+                    .openConnection(proxy) as java.net.HttpURLConnection
+                conn.connectTimeout = 5_000
+                conn.readTimeout    = 5_000
+                conn.requestMethod  = "HEAD"
+                conn.instanceFollowRedirects = true
+                val code = conn.responseCode
+                conn.disconnect()
+                if (code in 200..399) return true
+            } catch (_: Exception) { /* try next URL */ }
         }
-        Log.d(TAG, "Telegram health check failed — all DCs unreachable")
+        Log.d(TAG, "Telegram health check failed — all endpoints unreachable")
         return false
+    }
+
+    /**
+     * Quick speed probe: downloads 50 KB through the tunnel.
+     * Lighter than measureDownloadSpeedMbps (200 KB) — completes in ~2s even on throttled links.
+     * Used by watchdog to detect DPI throttling every 30s.
+     */
+    private fun measureQuickSpeedMbps(socksPort: Int): Float = try {
+        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+        val conn = java.net.URL("https://speed.cloudflare.com/__down?bytes=51200")
+            .openConnection(proxy) as java.net.HttpURLConnection
+        conn.connectTimeout = 5_000
+        conn.readTimeout    = 8_000
+        conn.instanceFollowRedirects = true
+        conn.connect()
+        val start = System.currentTimeMillis()
+        var bytes = 0L
+        val buf = ByteArray(4096)
+        conn.inputStream.use { stream ->
+            var read: Int
+            while (stream.read(buf).also { read = it } != -1) bytes += read
+        }
+        conn.disconnect()
+        val elapsed = (System.currentTimeMillis() - start) / 1000.0
+        if (elapsed > 0 && bytes > 5_000) (bytes / elapsed / (1024.0 * 1024.0)).toFloat() else 0f
+    } catch (e: Exception) {
+        Log.d(TAG, "Quick speed test failed: ${e.message}")
+        0f
     }
 
     /**
@@ -445,6 +503,7 @@ class MyVpnService : VpnService() {
                 currentServerName = nextServer.name
                 configRepository.selectServer(nextServer.id)
                 configRepository.recordSuccess(nextServer.id)
+                _connectedServer.value = nextServer
                 _vpnState.value = VpnState.CONNECTED
                 updateNotification(nextServer.name, VpnState.CONNECTED)
                 if (hotspotSharingEnabled) _hotspotProxyInfo.value = HotspotHelper.getHotspotIp()?.let { "$it:10808" }
@@ -478,6 +537,7 @@ class MyVpnService : VpnService() {
         xrayManager.stop()
         tunFd?.close(); tunFd = null
         _hotspotProxyInfo.value = null
+        _connectedServer.value = null
     }
 
     override fun onRevoke() {

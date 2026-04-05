@@ -57,26 +57,26 @@ class HomeViewModel @Inject constructor(
                 _selectedServer.value = it
             }
             configRepository.servers.collect { servers ->
-                _selectedServer.value = servers.firstOrNull { it.isSelected }
-                    ?: servers.firstOrNull()
+                // Only update from DB when VPN is not connected (avoid race with service)
+                if (vpnState.value != VpnState.CONNECTED) {
+                    _selectedServer.value = servers.firstOrNull { it.isSelected }
+                        ?: servers.firstOrNull()
+                }
             }
         }
     }
 
     /**
-     * Re-fetches the selected server each time VPN transitions to CONNECTED.
-     * Fixes the race where UI recomposes before Room Flow emits the new server
-     * after an auto-switch.
+     * Observes the connected server directly from MyVpnService companion.
+     * Bypasses Room DB round-trip — updates UI immediately on server switch.
      */
     private fun observeConnectedServer() {
         viewModelScope.launch {
-            vpnState
-                .filter { it == VpnState.CONNECTED }
-                .collect {
-                    configRepository.getSelectedServer()?.let { server ->
-                        _selectedServer.value = server
-                    }
+            MyVpnService.connectedServer.collect { server ->
+                if (server != null) {
+                    _selectedServer.value = server
                 }
+            }
         }
     }
 

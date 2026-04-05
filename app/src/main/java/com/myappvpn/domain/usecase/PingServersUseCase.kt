@@ -18,6 +18,10 @@ class PingServersUseCase @Inject constructor(
     private val configRepository: ConfigRepository,
     private val serverDao: ServerDao
 ) {
+    companion object {
+        /** Servers slower than this (ms) are deleted after ping sweep. */
+        const val MAX_ACCEPTABLE_LATENCY = 50
+    }
     /**
      * Pings all servers in parallel and emits real-time progress as each result arrives.
      * Uses channelFlow so concurrent coroutines can emit to the flow simultaneously.
@@ -47,8 +51,11 @@ class PingServersUseCase @Inject constructor(
             }
         }.awaitAll()
 
+        // Remove servers with ping > 80ms or timeout — keep only fast ones
+        serverDao.deleteSlowServers(MAX_ACCEPTABLE_LATENCY)
+
         val best = results.entries
-            .filter { it.value > 0 }
+            .filter { it.value in 1..MAX_ACCEPTABLE_LATENCY }
             .minByOrNull { it.value }
         send(PingProgress.Done(best?.key))
     }

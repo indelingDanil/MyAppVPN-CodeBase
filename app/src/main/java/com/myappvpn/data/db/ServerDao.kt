@@ -46,6 +46,9 @@ interface ServerDao {
     @Query("DELETE FROM servers WHERE id NOT IN (:ids)")
     suspend fun deleteNotIn(ids: List<String>)
 
+    @Query("DELETE FROM servers WHERE latencyMs != -1 AND (latencyMs = 0 OR latencyMs > :maxLatency) AND isSelected = 0")
+    suspend fun deleteSlowServers(maxLatency: Int)
+
     @Query("SELECT COUNT(*) FROM servers")
     suspend fun getCount(): Int
 
