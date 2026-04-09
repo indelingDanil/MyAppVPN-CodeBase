@@ -68,10 +68,10 @@
                 android:value="androidx.startup" />
         </provider>
 
-        <!-- Boot receiver for reconnect -->
+        <!-- Boot receiver for reconnect (not exported — system BOOT_COMPLETED still delivered) -->
         <receiver
             android:name=".service.BootReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

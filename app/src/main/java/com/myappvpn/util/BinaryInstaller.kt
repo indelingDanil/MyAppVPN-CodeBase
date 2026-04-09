@@ -7,7 +7,8 @@ import java.io.File
 /**
  * Provides paths to xray and tun2socks executables.
  *
- * Binaries are packaged as .so files in jniLibs/ (libxray.so, libtun2socks.so).
+ * Binaries are packaged as .so files in jniLibs/ with generic names (libcore.so, libnetstack.so)
+ * to avoid detection by other apps scanning /proc for known VPN process names.
  * Android extracts them to nativeLibraryDir which allows execution (unlike filesDir on API 29+).
  * geoip.dat / geosite.dat are copied from assets/xray/ to filesDir on first run.
  */
@@ -15,14 +16,17 @@ object BinaryInstaller {
 
     private const val TAG = "BinaryInstaller"
 
+    // Generic binary names — not identifiable as VPN tools by other apps
+    private const val XRAY_BINARY = "libcore.so"
+    private const val TUN2SOCKS_BINARY = "libnetstack.so"
+
     /**
      * Returns path to xray executable (from nativeLibraryDir).
      * Also ensures geoip.dat and geosite.dat are in filesDir.
      */
     fun getXrayBinaryPath(context: Context): String {
         val nativeDir = context.applicationInfo.nativeLibraryDir
-        val xrayBin = File(nativeDir, "libxray.so")
-        Log.d(TAG, "XRay binary path: ${xrayBin.absolutePath}, exists=${xrayBin.exists()}")
+        val xrayBin = File(nativeDir, XRAY_BINARY)
         copyGeoData(context)
         return xrayBin.absolutePath
     }
@@ -32,8 +36,7 @@ object BinaryInstaller {
      */
     fun getTun2SocksBinaryPath(context: Context): String {
         val nativeDir = context.applicationInfo.nativeLibraryDir
-        val tun2socksBin = File(nativeDir, "libtun2socks.so")
-        Log.d(TAG, "tun2socks binary path: ${tun2socksBin.absolutePath}, exists=${tun2socksBin.exists()}")
+        val tun2socksBin = File(nativeDir, TUN2SOCKS_BINARY)
         return tun2socksBin.absolutePath
     }
 

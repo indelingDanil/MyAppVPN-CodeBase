@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.myappvpn.BuildConfig
 import com.myappvpn.R
 import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.data.model.ServerProfile
@@ -24,9 +25,14 @@ import com.myappvpn.util.XrayConfigBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.Authenticator
 import java.net.InetSocketAddress
+import java.net.PasswordAuthentication
 import java.net.Proxy
 import java.net.Socket
+import java.util.UUID
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -68,6 +74,11 @@ class MyVpnService : VpnService() {
     private var watchdogJob: Job? = null
     private var splitTunnelObserverJob: Job? = null
 
+    // Per-session SOCKS5 auth credentials — prevents other apps from using our proxy
+    // (CVE: unauthenticated local SOCKS proxy deanonymization, see habr.com/ru/articles/1020080)
+    private var proxyUser: String = ""
+    private var proxyPass: String = ""
+
     override fun onCreate() {
         super.onCreate()
         xrayManager = XrayManager(this)
@@ -99,8 +110,13 @@ class MyVpnService : VpnService() {
             _vpnState.value = VpnState.CONNECTING
             startForeground(NOTIFICATION_ID, buildNotification(serverName, VpnState.CONNECTING))
 
+            // Generate per-session proxy auth to prevent other apps from using our SOCKS5 proxy
+            generateProxyAuth()
+            val authedConfig = injectProxyAuth(xrayConfig)
+            installProxyAuthenticator()
+
             // 1. Start XRay
-            if (!xrayManager.start(xrayConfig)) {
+            if (!xrayManager.start(authedConfig)) {
                 Log.e(TAG, "Failed to start XRay")
                 _vpnState.value = VpnState.ERROR
                 return
@@ -115,7 +131,7 @@ class MyVpnService : VpnService() {
             }
 
             // 3. Start tun2socks (native fork+exec for proper fd inheritance)
-            if (!tun2SocksManager.start(tunFd = tunFd!!.fd, socksPort = socksPort)) {
+            if (!tun2SocksManager.start(tunFd = tunFd!!.fd, socksPort = socksPort, proxyUser = proxyUser, proxyPass = proxyPass)) {
                 Log.e(TAG, "Failed to start tun2socks")
                 xrayManager.stop()
                 tunFd?.close(); tunFd = null
@@ -130,7 +146,7 @@ class MyVpnService : VpnService() {
             _connectedServer.value = configRepository.getSelectedServer()
             updateNotification(serverName, VpnState.CONNECTED)
             _hotspotProxyInfo.value = if (hotspotSharingEnabled) HotspotHelper.getHotspotIp()?.let { "$it:10808" } else null
-            Log.i(TAG, "VPN connected via $serverName")
+            if (BuildConfig.DEBUG) Log.i(TAG, "VPN connected via $serverName")
 
             // 5. Observe split-tunnel changes → rebuild TUN seamlessly
             startSplitTunnelObserver()
@@ -143,6 +159,55 @@ class MyVpnService : VpnService() {
             _vpnState.value = VpnState.ERROR
             cleanupProcesses()
         }
+    }
+
+    // ── Proxy auth (CVE mitigation) ──────────────────────────────────────────
+
+    /** Generate random credentials for this VPN session. */
+    private fun generateProxyAuth() {
+        proxyUser = "u" + UUID.randomUUID().toString().replace("-", "").take(8)
+        proxyPass = UUID.randomUUID().toString().replace("-", "")
+    }
+
+    /**
+     * Inject SOCKS5/HTTP auth into an existing XRay config JSON.
+     * This ensures no unauthenticated app can use our local proxy to discover the exit IP.
+     */
+    private fun injectProxyAuth(configJson: String): String {
+        val root = JSONObject(configJson)
+        val inbounds = root.getJSONArray("inbounds")
+        for (i in 0 until inbounds.length()) {
+            val inbound = inbounds.getJSONObject(i)
+            val settings = inbound.getJSONObject("settings")
+            val accounts = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("user", proxyUser)
+                    put("pass", proxyPass)
+                })
+            }
+            when (inbound.optString("protocol")) {
+                "socks" -> {
+                    settings.put("auth", "password")
+                    settings.put("accounts", accounts)
+                }
+                "http" -> {
+                    settings.put("accounts", accounts)
+                }
+            }
+        }
+        return root.toString(2)
+    }
+
+    /**
+     * Set a global Java Authenticator so our own health-check HTTP requests
+     * (which go through the SOCKS5 proxy) can authenticate automatically.
+     */
+    private fun installProxyAuthenticator() {
+        Authenticator.setDefault(object : Authenticator() {
+            override fun getPasswordAuthentication(): PasswordAuthentication {
+                return PasswordAuthentication(proxyUser, proxyPass.toCharArray())
+            }
+        })
     }
 
     // ── TUN building ───────────────────────────────────────────────────────────
@@ -159,13 +224,12 @@ class MyVpnService : VpnService() {
         val builder = Builder()
             .setSession("MyAppVPN")
             .addAddress("10.0.0.2", 24)
+            .addAddress("fd00::2", 128)     // IPv6 — prevents leak outside tunnel
             .addRoute("0.0.0.0", 0)
             .addRoute("::", 0)
             .setMtu(1500)
             .addDnsServer("1.1.1.1")       // Cloudflare
             .addDnsServer("8.8.8.8")       // Google
-            .addDnsServer("9.9.9.9")       // Quad9
-            .addDnsServer("208.67.222.222") // OpenDNS
 
         // Always exclude our own package to prevent XRay→TUN routing loop
         try {
@@ -234,7 +298,7 @@ class MyVpnService : VpnService() {
         tunFd = newFd
 
         // Restart tun2socks with the fresh fd
-        if (!tun2SocksManager.start(tunFd = newFd.fd, socksPort = currentSocksPort)) {
+        if (!tun2SocksManager.start(tunFd = newFd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass)) {
             Log.e(TAG, "Failed to restart tun2socks after TUN rebuild")
             _vpnState.value = VpnState.ERROR
             cleanupProcesses()
@@ -249,12 +313,13 @@ class MyVpnService : VpnService() {
     private fun startWatchdog() {
         watchdogJob?.cancel()
         watchdogJob = serviceScope.launch {
-            delay(30_000L) // initial grace period
+            delay(30_000L + (Math.random() * 10_000L).toLong()) // jittered grace period
             var successRecorded = false
             var failStreak = 0
             while (isActive) {
-                // After first failure: recheck in 10s. When healthy: check every 30s.
-                delay(if (failStreak == 0) 30_000L else 10_000L)
+                // Randomized intervals to avoid DPI fingerprinting fixed-cadence health checks
+                val jitter = (Math.random() * 15_000L).toLong()
+                delay(if (failStreak == 0) 30_000L + jitter else 8_000L + jitter)
                 if (_vpnState.value != VpnState.CONNECTED) break
 
                 // XRay process crash → switch immediately
@@ -277,7 +342,7 @@ class MyVpnService : VpnService() {
                     Log.w(TAG, "XRay errorRate=${xrayManager.errorRate} — treating as internet fail")
                     false
                 } else {
-                    isTelegramReachableViaSocks(currentSocksPort)
+                    isInternetReachableViaSocks(currentSocksPort)
                 }
 
                 if (!internetOk) {
@@ -331,24 +396,26 @@ class MyVpnService : VpnService() {
     }
 
     /**
-     * Telegram endpoints for health check — actual HTTPS requests, not just TCP connect.
-     * TCP SYN/ACK can pass DPI even when Telegram traffic is blocked/throttled.
-     * HTTPS request validates real data delivery through the tunnel.
+     * Standard connectivity check endpoints — look like normal Android/Chrome traffic to DPI.
+     * Randomly rotated to avoid a fixed request pattern.
      */
-    private val TELEGRAM_CHECK_URLS = listOf(
-        "https://t.me/",                    // primary — lightweight, blocked in RU
-        "https://web.telegram.org/",        // fallback — WebSocket transport endpoint
+    private val HEALTH_CHECK_URLS = listOf(
+        "https://www.google.com/generate_204",              // Android default captive portal check
+        "https://cp.cloudflare.com/",                       // Cloudflare connectivity
+        "https://connectivitycheck.gstatic.com/generate_204", // Google captive portal
+        "https://www.gstatic.com/generate_204",             // Google static
+        "https://t.me/",                                    // Telegram — also validates RU-blocking bypass
     )
 
     /**
-     * Checks that Telegram is reachable through the VLESS tunnel by making
-     * an actual HTTPS request (not just TCP connect).
-     * DPI in Russia can pass TCP handshake but block/throttle MTProto data —
-     * an HTTP request catches this.
+     * Checks internet reachability through the VLESS tunnel.
+     * Uses standard connectivity check endpoints (indistinguishable from normal Android traffic).
+     * Randomly picks 2 from the pool to avoid a fixed pattern.
      */
-    private fun isTelegramReachableViaSocks(port: Int): Boolean {
+    private fun isInternetReachableViaSocks(port: Int): Boolean {
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-        for (url in TELEGRAM_CHECK_URLS) {
+        val urls = HEALTH_CHECK_URLS.shuffled().take(2)
+        for (url in urls) {
             try {
                 val conn = java.net.URL(url)
                     .openConnection(proxy) as java.net.HttpURLConnection
@@ -361,18 +428,17 @@ class MyVpnService : VpnService() {
                 if (code in 200..399) return true
             } catch (_: Exception) { /* try next URL */ }
         }
-        Log.d(TAG, "Telegram health check failed — all endpoints unreachable")
         return false
     }
 
     /**
-     * Quick speed probe: downloads 50 KB through the tunnel.
-     * Lighter than measureDownloadSpeedMbps (200 KB) — completes in ~2s even on throttled links.
-     * Used by watchdog to detect DPI throttling every 30s.
+     * Quick speed probe: downloads 30-70 KB through the tunnel (randomized to avoid DPI fingerprinting).
+     * Used by watchdog to detect DPI throttling.
      */
     private fun measureQuickSpeedMbps(socksPort: Int): Float = try {
+        val downloadBytes = 30_000 + (Math.random() * 40_000).toInt() // 30-70 KB
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
-        val conn = java.net.URL("https://speed.cloudflare.com/__down?bytes=51200")
+        val conn = java.net.URL("https://speed.cloudflare.com/__down?bytes=$downloadBytes")
             .openConnection(proxy) as java.net.HttpURLConnection
         conn.connectTimeout = 5_000
         conn.readTimeout    = 8_000
@@ -431,7 +497,7 @@ class MyVpnService : VpnService() {
             val failedServer = configRepository.getSelectedServer()
             if (failedServer != null) {
                 configRepository.recordFailure(failedServer.id)
-                Log.w(TAG, "Recorded failure for ${failedServer.name}")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Recorded failure for ${failedServer.name}")
             }
 
             val triedIds = mutableSetOf<String>()
@@ -453,14 +519,15 @@ class MyVpnService : VpnService() {
 
                 val vlessConfig = VlessUriParser.parse(nextServer.vlessUri)
                 if (vlessConfig == null) {
-                    Log.w(TAG, "Cannot parse VLESS URI for ${nextServer.name} — skipping")
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Cannot parse VLESS URI for ${nextServer.name} — skipping")
                     triedIds += nextServer.id
                     continue
                 }
 
                 xrayManager.stop()
-                if (!xrayManager.start(XrayConfigBuilder.build(vlessConfig, currentSocksPort, hotspotSharingEnabled))) {
-                    Log.w(TAG, "XRay failed to start with ${nextServer.name} — skipping")
+                val failoverConfig = injectProxyAuth(XrayConfigBuilder.build(vlessConfig, currentSocksPort, hotspotSharingEnabled))
+                if (!xrayManager.start(failoverConfig)) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "XRay failed to start with ${nextServer.name} — skipping")
                     configRepository.recordFailure(nextServer.id)
                     triedIds += nextServer.id
                     continue
@@ -471,12 +538,12 @@ class MyVpnService : VpnService() {
                 val speedMbps = withContext(Dispatchers.IO) { measureDownloadSpeedMbps(currentSocksPort) }
                 if (speedMbps > 0f) {
                     configRepository.updateSpeed(nextServer.id, speedMbps)
-                    Log.d(TAG, "${nextServer.name} speed: ${"%.2f".format(speedMbps)} MB/s")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "${nextServer.name} speed: ${"%.2f".format(speedMbps)} MB/s")
                 }
                 // 0f = tunnel dead (test failed), 0.01-0.49 = too slow — skip both
                 if (speedMbps < 0.5f) {
                     val reason = if (speedMbps == 0f) "unreachable" else "${"%.0f".format(speedMbps * 1024)} KB/s"
-                    Log.w(TAG, "${nextServer.name} failed ($reason) — trying next")
+                    if (BuildConfig.DEBUG) Log.w(TAG, "${nextServer.name} failed ($reason) — trying next")
                     configRepository.recordFailure(nextServer.id)
                     triedIds += nextServer.id
                     // Track port failures
@@ -501,7 +568,7 @@ class MyVpnService : VpnService() {
                 _vpnState.value = VpnState.CONNECTED
                 updateNotification(nextServer.name, VpnState.CONNECTED)
                 if (hotspotSharingEnabled) _hotspotProxyInfo.value = HotspotHelper.getHotspotIp()?.let { "$it:10808" }
-                Log.i(TAG, "Switched to ${nextServer.name} (${nextServer.address})")
+                if (BuildConfig.DEBUG) Log.i(TAG, "Switched to ${nextServer.name} (${nextServer.address})")
                 startWatchdog()
                 return
             }
@@ -517,6 +584,9 @@ class MyVpnService : VpnService() {
     private suspend fun disconnect() {
         _vpnState.value = VpnState.DISCONNECTING
         cleanupProcesses()
+        Authenticator.setDefault(null)
+        proxyUser = ""
+        proxyPass = ""
         _vpnState.value = VpnState.DISCONNECTED
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -549,8 +619,8 @@ class MyVpnService : VpnService() {
     // ── Notifications ──────────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, "VPN Service", NotificationManager.IMPORTANCE_LOW).apply {
-            description = "VPN connection status"
+        val channel = NotificationChannel(CHANNEL_ID, "Connection Service", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Secure connection status"
             setShowBadge(false)
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -563,20 +633,21 @@ class MyVpnService : VpnService() {
             Intent(this, MyVpnService::class.java).apply { action = ACTION_DISCONNECT },
             PendingIntent.FLAG_IMMUTABLE
         )
+        // Generic status text — no server names or VPN keywords to prevent detection
         val statusText = when (state) {
-            VpnState.CONNECTING -> "Connecting to $serverName..."
-            VpnState.CONNECTED -> "Connected · $serverName"
-            VpnState.DISCONNECTING -> "Disconnecting..."
-            else -> "VPN"
+            VpnState.CONNECTING -> "Establishing..."
+            VpnState.CONNECTED -> "Active"
+            VpnState.DISCONNECTING -> "Closing..."
+            else -> "Idle"
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("MyAppVPN")
+            .setContentTitle("Secure Connection")
             .setContentText(statusText)
             .setSmallIcon(R.drawable.ic_vpn_key)
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setSilent(true)
-            .addAction(R.drawable.ic_close, "Disconnect", disconnectIntent)
+            .addAction(R.drawable.ic_close, "Stop", disconnectIntent)
             .build()
     }
 

@@ -21,14 +21,13 @@ object XrayConfigBuilder {
             put("loglevel", "warning")
         })
 
-        // DNS — DoH as primary (encrypted, port 443, hard to intercept)
+        // DNS — DoH only (encrypted, port 443, indistinguishable from normal HTTPS)
         // IP-based URLs avoid bootstrap DNS resolution problem
+        // No plain DNS fallback — prevents unencrypted DNS leak if DoH fails
         root.put("dns", JSONObject().apply {
             put("servers", JSONArray().apply {
                 put("https://1.1.1.1/dns-query")   // Cloudflare DoH
                 put("https://8.8.8.8/dns-query")   // Google DoH
-                put("8.8.8.8")                     // plain DNS fallback
-                put("localhost")
             })
         })
 

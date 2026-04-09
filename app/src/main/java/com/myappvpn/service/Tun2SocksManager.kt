@@ -26,6 +26,8 @@ class Tun2SocksManager(private val context: Context) {
     suspend fun start(
         tunFd: Int,
         socksPort: Int = 10808,
+        proxyUser: String? = null,
+        proxyPass: String? = null,
         tunAddr: String = "10.0.0.2",
         tunGw: String = "10.0.0.1",
         dnsPrimary: String = "1.1.1.1"
@@ -35,7 +37,7 @@ class Tun2SocksManager(private val context: Context) {
         try {
             val tun2socksBin = BinaryInstaller.getTun2SocksBinaryPath(context)
 
-            pid = NativeHelper.startTun2Socks(tun2socksBin, tunFd, socksPort)
+            pid = NativeHelper.startTun2Socks(tun2socksBin, tunFd, socksPort, proxyUser, proxyPass)
             if (pid <= 0) {
                 Log.e(TAG, "NativeHelper.startTun2Socks failed (returned $pid)")
                 return@withContext false

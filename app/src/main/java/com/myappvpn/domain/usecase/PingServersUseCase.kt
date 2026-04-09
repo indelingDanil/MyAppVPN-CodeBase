@@ -20,7 +20,7 @@ class PingServersUseCase @Inject constructor(
 ) {
     companion object {
         /** Servers slower than this (ms) are deleted after ping sweep. */
-        const val MAX_ACCEPTABLE_LATENCY = 50
+        const val MAX_ACCEPTABLE_LATENCY = 80
     }
     /**
      * Pings all servers in parallel and emits real-time progress as each result arrives.

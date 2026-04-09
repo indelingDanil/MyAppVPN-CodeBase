@@ -24,10 +24,30 @@ extern "C" {
 JNIEXPORT jint JNICALL
 Java_com_myappvpn_util_NativeHelper_startTun2Socks(
         JNIEnv *env, jclass /*cls*/,
-        jstring jBinary, jint tunFd, jint socksPort)
+        jstring jBinary, jint tunFd, jint socksPort,
+        jstring jProxyUser, jstring jProxyPass)
 {
     const char *binary = env->GetStringUTFChars(jBinary, nullptr);
     if (!binary) { LOGE("null binary string"); return -1; }
+
+    const char *proxyUser = jProxyUser ? env->GetStringUTFChars(jProxyUser, nullptr) : nullptr;
+    const char *proxyPass = jProxyPass ? env->GetStringUTFChars(jProxyPass, nullptr) : nullptr;
+
+    // Build args before fork (JNI is not safe after fork)
+    char fd_arg[64];
+    snprintf(fd_arg, sizeof(fd_arg), "fd://%d", (int)tunFd);
+
+    char proxy_arg[256];
+    if (proxyUser && proxyPass && strlen(proxyUser) > 0) {
+        snprintf(proxy_arg, sizeof(proxy_arg), "socks5://%s:%s@127.0.0.1:%d",
+                 proxyUser, proxyPass, (int)socksPort);
+    } else {
+        snprintf(proxy_arg, sizeof(proxy_arg), "socks5://127.0.0.1:%d", (int)socksPort);
+    }
+
+    // Release JNI strings before fork
+    if (proxyUser) env->ReleaseStringUTFChars(jProxyUser, proxyUser);
+    if (proxyPass) env->ReleaseStringUTFChars(jProxyPass, proxyPass);
 
     // Clear FD_CLOEXEC so the fd survives execv() in the child process
     int flags = fcntl((int)tunFd, F_GETFD, 0);
@@ -73,11 +93,7 @@ Java_com_myappvpn_util_NativeHelper_startTun2Socks(
             }
         }
 
-        char fd_arg[64];
-        snprintf(fd_arg, sizeof(fd_arg), "fd://%d", (int)tunFd);
-        char proxy_arg[80];
-        snprintf(proxy_arg, sizeof(proxy_arg), "socks5://127.0.0.1:%d", (int)socksPort);
-
+        // binary pointer is still valid (COW after fork, used before parent releases)
         char *const argv[] = {
             const_cast<char*>(binary),
             const_cast<char*>("-device"),   fd_arg,
@@ -97,7 +113,7 @@ Java_com_myappvpn_util_NativeHelper_startTun2Socks(
         fcntl((int)tunFd, F_SETFD, flags | FD_CLOEXEC);
     }
 
-    LOGI("tun2socks started: pid=%d tunFd=%d socksPort=%d", pid, (int)tunFd, (int)socksPort);
+    LOGI("process started: pid=%d", pid);
     env->ReleaseStringUTFChars(jBinary, binary);
     return (jint)pid;
 }
