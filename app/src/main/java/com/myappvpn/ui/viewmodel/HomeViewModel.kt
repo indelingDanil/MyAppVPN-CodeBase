@@ -7,6 +7,7 @@ import android.net.VpnService
 import androidx.activity.result.ActivityResultLauncher
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.model.TrafficStats
 import com.myappvpn.data.repository.ConfigRepository
@@ -26,10 +27,15 @@ class HomeViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val configRepository: ConfigRepository,
     private val connectVpnUseCase: ConnectVpnUseCase,
+    private val preferences: AppPreferences,
     getTrafficStatsUseCase: GetTrafficStatsUseCase
 ) : ViewModel() {
 
     val vpnState: StateFlow<VpnState> = MyVpnService.vpnState
+
+    /** Auto (balancer) vs manual mode. Drives the single Connect button. */
+    val autoMode: StateFlow<Boolean> = preferences.autoMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     val hotspotProxyInfo: StateFlow<String?> = MyVpnService.hotspotProxyInfo
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
@@ -45,6 +51,9 @@ class HomeViewModel @Inject constructor(
 
     private val _vpnPermissionNeeded = MutableSharedFlow<Intent>()
     val vpnPermissionNeeded: SharedFlow<Intent> = _vpnPermissionNeeded.asSharedFlow()
+
+    // True when a pending permission grant should start AUTO (balancer) mode.
+    private var pendingAuto = false
 
     init {
         loadSelectedServer()
@@ -80,6 +89,9 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Single Connect button. In Auto mode → balancer; in manual mode → the pinned server.
+     */
     fun onConnectClick() {
         viewModelScope.launch {
             when (vpnState.value) {
@@ -87,30 +99,35 @@ class HomeViewModel @Inject constructor(
                     connectVpnUseCase.disconnect()
                 }
                 VpnState.DISCONNECTED, VpnState.ERROR -> {
+                    val auto = autoMode.value
                     val server = _selectedServer.value
-                    if (server == null) {
-                        _error.emit("No server selected. Please choose a server first.")
+                    if (!auto && server == null) {
+                        _error.emit("Выберите сервер или включите авто-режим.")
                         return@launch
                     }
-
-                    // Check VPN permission
+                    pendingAuto = auto
                     val intent = VpnService.prepare(context)
-                    if (intent != null) {
-                        // Need to request permission
-                        _vpnPermissionNeeded.emit(intent)
-                    } else {
-                        // Permission already granted — connect
-                        startConnection(server)
-                    }
+                    if (intent != null) _vpnPermissionNeeded.emit(intent)
+                    else if (auto) startAutoConnection() else startConnection(server!!)
                 }
                 else -> {}
             }
         }
     }
 
+    /** Return to Auto (balancer) mode. */
+    fun switchToAuto() {
+        viewModelScope.launch { preferences.setAutoMode(true) }
+    }
+
     fun onVpnPermissionGranted() {
         viewModelScope.launch {
-            _selectedServer.value?.let { startConnection(it) }
+            if (pendingAuto) {
+                pendingAuto = false
+                startAutoConnection()
+            } else {
+                _selectedServer.value?.let { startConnection(it) }
+            }
         }
     }
 
@@ -119,6 +136,14 @@ class HomeViewModel @Inject constructor(
             connectVpnUseCase(server)
         }.onFailure { e ->
             _error.emit("Connection failed: ${e.message}")
+        }
+    }
+
+    private suspend fun startAutoConnection() {
+        runCatching {
+            connectVpnUseCase.connectAuto()
+        }.onFailure { e ->
+            _error.emit("Auto-connect failed: ${e.message}")
         }
     }
 

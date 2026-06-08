@@ -46,12 +46,29 @@ interface ServerDao {
     @Query("DELETE FROM servers WHERE id NOT IN (:ids)")
     suspend fun deleteNotIn(ids: List<String>)
 
-    @Query("DELETE FROM servers WHERE latencyMs != -1 AND (latencyMs = 0 OR latencyMs > :maxLatency) AND isSelected = 0")
-    suspend fun deleteSlowServers(maxLatency: Int)
-
     @Query("SELECT COUNT(*) FROM servers")
     suspend fun getCount(): Int
 
     @Query("SELECT * FROM servers WHERE country = :country ORDER BY latencyMs ASC")
     fun getServersByCountry(country: String): Flow<List<ServerProfile>>
+
+    // v2.0: multi-stage validation queries
+
+    @Query("UPDATE servers SET medianLatencyMs = :median, pingCount = :count, latencyMs = :median, validationState = CASE WHEN :median > 0 THEN 'REACHABLE' ELSE validationState END WHERE id = :id")
+    suspend fun updatePingResult(id: String, median: Int, count: Int)
+
+    @Query("UPDATE servers SET handshakeOk = :ok, validationState = CASE WHEN :ok = 1 THEN 'HANDSHAKE_OK' ELSE validationState END WHERE id = :id")
+    suspend fun updateHandshakeResult(id: String, ok: Boolean)
+
+    @Query("UPDATE servers SET validationState = 'VERIFIED', verifiedAt = :time, lastValidatedAt = :time, consecutiveFailures = 0 WHERE id = :id")
+    suspend fun markVerified(id: String, time: Long)
+
+    @Query("UPDATE servers SET consecutiveFailures = consecutiveFailures + 1, validationState = CASE WHEN consecutiveFailures >= 2 THEN 'STALE' ELSE validationState END WHERE id = :id")
+    suspend fun incrementConsecutiveFailure(id: String)
+
+    @Query("UPDATE servers SET consecutiveFailures = 0 WHERE id = :id")
+    suspend fun resetConsecutiveFailures(id: String)
+
+    @Query("SELECT * FROM servers WHERE validationState = 'VERIFIED' AND verifiedAt > :since ORDER BY medianLatencyMs ASC")
+    suspend fun getRecentlyVerifiedServers(since: Long): List<ServerProfile>
 }

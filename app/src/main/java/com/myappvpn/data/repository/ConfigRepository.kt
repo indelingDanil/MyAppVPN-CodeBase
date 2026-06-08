@@ -27,37 +27,24 @@ class ConfigRepository @Inject constructor(
     val servers: Flow<List<ServerProfile>> = serverDao.getAllServers()
 
     suspend fun fetchAndSaveServers(): Result<Int> = runCatching {
-        // Fetch all sources in parallel; ignore individual failures so one dead source
-        // doesn't block the others.
-        val igareckUrl = if (preferences.igareckFullSubscription.first())
-            SubscriptionUrls.IGARECK_BLACK_FULL
-        else
-            SubscriptionUrls.IGARECK_BLACK_MOBILE
-
-        val urls = listOf(
-            SubscriptionUrls.VLESS_LITE,
-            SubscriptionUrls.VLESS_LITE_MIRROR,
-            igareckUrl,
-        )
-        // null = fetch failed; non-null (even empty) = source responded
-        val fetched: List<List<ServerProfile>?> = coroutineScope {
-            urls.map { url ->
-                async {
-                    runCatching { apiService.fetchRawFile(url) }
-                        .getOrNull()
-                        ?.let { text ->
-                            VlessUriParser.parseSubscription(text)
-                                .map { (config, uri) -> VlessUriParser.toServerProfile(config, uri) }
-                        }
-                }
+        // Each source is a fallback chain (identical mirrors) — take the first that works.
+        // Chains are fetched in parallel; their results are merged.
+        val texts: List<String?> = coroutineScope {
+            SubscriptionUrls.ALL_CHAINS.map { chain ->
+                async { fetchFirstWorking(chain) }
             }.map { it.await() }
         }
         // If ALL sources failed → no network → throw so Worker retries with backoff
         // instead of silently reporting "0 servers updated" and waiting a full hour.
-        if (fetched.all { it == null }) throw IOException("All sources unreachable")
-        val newProfiles = fetched.filterNotNull().flatten()
+        if (texts.all { it == null }) throw IOException("All subscription sources unreachable")
+
+        val newProfiles = texts.filterNotNull()
+            .flatMap { text ->
+                VlessUriParser.parseSubscription(text)
+                    .map { (config, uri) -> VlessUriParser.toServerProfile(config, uri) }
+            }
             .filter { it.country !in BLOCKED_COUNTRIES }
-        // De-duplicate by ID (same server may appear in multiple sources)
+        // De-duplicate by ID (same server may appear in multiple sources/mirrors)
         val deduplicated = newProfiles.distinctBy { it.id }
         if (deduplicated.isNotEmpty()) {
             // Preserve learned data (ping latency, score counters, current selection)
@@ -66,11 +53,18 @@ class ConfigRepository @Inject constructor(
             val merged = deduplicated.map { fresh ->
                 val old = existing[fresh.id]
                 if (old != null) fresh.copy(
-                    latencyMs    = old.latencyMs,
-                    successCount = old.successCount,
-                    failCount    = old.failCount,
-                    isSelected   = old.isSelected,
-                    speedMbps    = old.speedMbps,
+                    latencyMs            = old.latencyMs,
+                    successCount         = old.successCount,
+                    failCount            = old.failCount,
+                    isSelected           = old.isSelected,
+                    speedMbps            = old.speedMbps,
+                    validationState      = old.validationState,
+                    lastValidatedAt      = old.lastValidatedAt,
+                    medianLatencyMs      = old.medianLatencyMs,
+                    pingCount            = old.pingCount,
+                    consecutiveFailures  = old.consecutiveFailures,
+                    handshakeOk          = old.handshakeOk,
+                    verifiedAt           = old.verifiedAt,
                 ) else fresh
             }
             serverDao.insertAll(merged)                    // upsert (REPLACE strategy)
@@ -78,6 +72,24 @@ class ConfigRepository @Inject constructor(
         }
         deduplicated.size
     }
+
+    /** Try mirrors in order; return the first response that contains vless:// links. */
+    private suspend fun fetchFirstWorking(chain: List<String>): String? {
+        for (url in chain) {
+            val text = runCatching { apiService.fetchRawFile(url) }.getOrNull()
+            if (text != null && text.contains("vless://")) return text
+        }
+        return null
+    }
+
+    /**
+     * Servers eligible for the balancer pool / manual list: drops blocked countries
+     * and any user-excluded countries (e.g. "Russia" by default). Ordered by latency
+     * (DB already sorts by latencyMs) so callers can take the top N.
+     */
+    suspend fun getServersExcludingCountries(excluded: Set<String>): List<ServerProfile> =
+        serverDao.getAllServers().first()
+            .filter { it.country !in BLOCKED_COUNTRIES && it.country !in excluded }
 
     suspend fun getSelectedServer(): ServerProfile? = serverDao.getSelectedServer()
 
@@ -103,18 +115,48 @@ class ConfigRepository @Inject constructor(
     }
 
     /**
-     * Selects the best server using a composite score (see ServerProfile.score()).
-     * Only considers servers that responded to ping (latencyMs > 0).
-     * [excludeIds] lets the caller skip servers already tried in this failover round.
+     * Selects the best server using composite score (see ServerProfile.score()).
+     * Prefers VERIFIED servers, then falls back to any tested server.
      */
     suspend fun selectBestServer(
         excludeIds: Set<String> = emptySet(),
         excludePorts: Set<Int> = emptySet(),
     ): ServerProfile? {
-        val tested = serverDao.getAllServers().first()
-            .filter { it.latencyMs > 0 && it.id !in excludeIds }
-        // Prefer servers on non-blocked ports; fall back to any port if none left
-        return tested.filter { it.port !in excludePorts }.minByOrNull { it.score() }
-            ?: tested.minByOrNull { it.score() }
+        val all = serverDao.getAllServers().first()
+            .filter { it.id !in excludeIds }
+
+        val eligible = all.filter { it.port !in excludePorts }.ifEmpty { all }
+
+        // First: recently verified servers (last hour)
+        val verified = eligible.filter {
+            it.validationState == "VERIFIED" &&
+            (System.currentTimeMillis() - it.verifiedAt) < 60 * 60_000L
+        }
+        if (verified.isNotEmpty()) return verified.minByOrNull { it.score() }
+
+        // Fallback: any server with latency data
+        return eligible.filter { it.latencyMs > 0 || it.medianLatencyMs > 0 }
+            .minByOrNull { it.score() }
+            ?: eligible.minByOrNull { it.score() }
+    }
+
+    /** Best verified server — for pre-connect validation fallback. */
+    suspend fun selectBestVerifiedServer(excludeIds: Set<String> = emptySet()): ServerProfile? {
+        val verified = serverDao.getRecentlyVerifiedServers(
+            since = System.currentTimeMillis() - 60 * 60_000L
+        )
+        return verified.filter { it.id !in excludeIds }.minByOrNull { it.score() }
+    }
+
+    suspend fun markVerified(serverId: String) {
+        serverDao.markVerified(serverId, System.currentTimeMillis())
+    }
+
+    suspend fun incrementConsecutiveFailure(serverId: String) {
+        serverDao.incrementConsecutiveFailure(serverId)
+    }
+
+    suspend fun resetConsecutiveFailures(serverId: String) {
+        serverDao.resetConsecutiveFailures(serverId)
     }
 }

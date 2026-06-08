@@ -37,18 +37,17 @@ fun ServersScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val isPinging by viewModel.isPinging.collectAsState()
     val pingProgress by viewModel.pingProgress.collectAsState()
+    val pingStageDetail by viewModel.pingStageDetail.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val excludedCountries by viewModel.excludedCountries.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // After auto-select, navigate back to home
+    // After auto-select completes, navigate back to home.
+    // Server selection is handled in ViewModel — this only triggers navigation.
     LaunchedEffect(Unit) {
         viewModel.bestServerId.collectLatest { bestId ->
             if (bestId != null) {
-                val bestServer = servers.find { it.id == bestId }
-                if (bestServer != null) {
-                    viewModel.selectServer(bestServer)
-                    onServerSelected()
-                }
+                onServerSelected()
             }
         }
     }
@@ -90,10 +89,10 @@ fun ServersScreen(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Auto-select button
+                        // Ping (latency-only) button
                         SmallActionButton(
                             icon = Icons.Default.AutoAwesome,
-                            label = "Auto",
+                            label = "Ping",
                             enabled = !isPinging && !isLoading,
                             onClick = { viewModel.pingAllServers() },
                             color = AetherPurple
@@ -109,7 +108,26 @@ fun ServersScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Exclude-Russia filter (default on): RU servers can't unblock Telegram/YouTube
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Исключить серверы РФ",
+                        color = AetherTextSecondary,
+                        fontSize = 13.sp
+                    )
+                    Switch(
+                        checked = "Russia" in excludedCountries,
+                        onCheckedChange = { viewModel.setExcludeRussia(it) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Search bar
                 OutlinedTextField(
@@ -153,7 +171,7 @@ fun ServersScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                "Testing servers...",
+                                text = pingStageDetail.ifEmpty { "Validating servers..." },
                                 color = AetherTextSecondary,
                                 fontSize = 12.sp
                             )

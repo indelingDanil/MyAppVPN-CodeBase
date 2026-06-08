@@ -21,6 +21,8 @@ class TrafficMonitor @Inject constructor(
     private val _statsFlow = MutableStateFlow(TrafficStatsModel.Empty)
     val statsFlow: StateFlow<TrafficStatsModel> = _statsFlow.asStateFlow()
 
+    // Single long-lived scope so repeated start()/stop() never leak competing monitors.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var monitorJob: Job? = null
     private var sessionStartMs = 0L
 
@@ -33,16 +35,30 @@ class TrafficMonitor @Inject constructor(
     private var prevSessionRx = 0L
     private var prevTimestamp = 0L
 
+    // EMA smoothing to prevent 0 B/s flickering on bursty VPN traffic
+    private var smoothedUpload = 0.0
+    private var smoothedDownload = 0.0
+    private companion object {
+        const val EMA_ALPHA = 0.3 // 0.3 = responsive but smooth (lower = smoother)
+    }
+
     fun start() {
+        // Cancel any previous monitor first so we never run two concurrently
+        // (repeated CONNECT intents / reconnects would otherwise stack competing
+        // monitors that fight over statsFlow and make UP/DOWN jump or freeze).
+        monitorJob?.cancel()
+
         sessionStartMs = System.currentTimeMillis()
         baselineTx = totalTxBytes()
         baselineRx = totalRxBytes()
         prevSessionTx = 0L
         prevSessionRx = 0L
         prevTimestamp = 0L
+        smoothedUpload = 0.0
+        smoothedDownload = 0.0
         _statsFlow.value = TrafficStatsModel.Empty
 
-        monitorJob = CoroutineScope(Dispatchers.IO).launch {
+        monitorJob = scope.launch {
             while (isActive) {
                 updateStats()
                 delay(1000L)
@@ -61,9 +77,15 @@ class TrafficMonitor @Inject constructor(
         val sessionRx = (totalRxBytes() - baselineRx).coerceAtLeast(0L)
         val now = System.currentTimeMillis()
 
-        val elapsed = if (prevTimestamp > 0) (now - prevTimestamp) / 1000.0 else 1.0
-        val uploadSpeed = if (prevTimestamp > 0) ((sessionTx - prevSessionTx) / elapsed).toLong() else 0L
-        val downloadSpeed = if (prevTimestamp > 0) ((sessionRx - prevSessionRx) / elapsed).toLong() else 0L
+        if (prevTimestamp > 0) {
+            val elapsed = (now - prevTimestamp) / 1000.0
+            val rawUpload = ((sessionTx - prevSessionTx) / elapsed)
+            val rawDownload = ((sessionRx - prevSessionRx) / elapsed)
+
+            // EMA smoothing: prevents 0 B/s flicker on bursty VPN traffic
+            smoothedUpload = EMA_ALPHA * rawUpload + (1 - EMA_ALPHA) * smoothedUpload
+            smoothedDownload = EMA_ALPHA * rawDownload + (1 - EMA_ALPHA) * smoothedDownload
+        }
 
         prevSessionTx = sessionTx
         prevSessionRx = sessionRx
@@ -72,8 +94,8 @@ class TrafficMonitor @Inject constructor(
         _statsFlow.value = TrafficStatsModel(
             uploadBytes = sessionTx,
             downloadBytes = sessionRx,
-            uploadSpeed = uploadSpeed.coerceAtLeast(0L),
-            downloadSpeed = downloadSpeed.coerceAtLeast(0L),
+            uploadSpeed = smoothedUpload.toLong().coerceAtLeast(0L),
+            downloadSpeed = smoothedDownload.toLong().coerceAtLeast(0L),
             sessionDurationMs = now - sessionStartMs,
         )
     }

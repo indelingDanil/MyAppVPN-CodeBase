@@ -9,15 +9,34 @@ interface GithubApiService {
     suspend fun fetchRawFile(@Url url: String): String
 }
 
+/**
+ * Subscription sources. Each source is a *fallback chain*: mirrors are identical,
+ * so we try them in order and take the first that responds with vless:// links.
+ *
+ * - UNIVERSAL: zieng2/wl unified "Universal" list (formerly the xync source).
+ *   Last two entries are experimental mirrors that keep working under restrictions
+ *   (note: different filename `list_universal.txt`, and GitVerse uses the `master` branch).
+ * - IGARECK_BLACK: igareck/vpn-configs-for-russia BLACK list — a separate project,
+ *   used as an additional pool.
+ */
 object SubscriptionUrls {
-    const val VLESS_LITE =
-        "https://raw.githubusercontent.com/zieng2/wl/main/vless_lite.txt"
-    const val VLESS_LITE_MIRROR =
-        "https://wl.xync.net/vless_lite.txt"
 
-    // igareck/vpn-configs-for-russia — Russia-oriented VLESS Reality configs
-    const val IGARECK_BLACK_MOBILE =
-        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
-    const val IGARECK_BLACK_FULL =
-        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt"
+    val UNIVERSAL_CHAIN = listOf(
+        "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+        "https://codeberg.org/zieng2/wl/raw/branch/main/vless_universal.txt",
+        "https://gitlab.com/zieng2/wl/raw/main/vless_universal.txt",
+        // Experimental mirrors (work under white-list restrictions). Different filename.
+        "https://hub.mos.ru/zieng2/wl/raw/main/list_universal.txt",
+        "https://gitverse.ru/api/repos/zieng2/wl/raw/branch/master/list_universal.txt",
+    )
+
+    val IGARECK_BLACK_CHAIN = listOf(
+        "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
+        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
+        "https://gitlab.com/igareck/vpn-configs-for-russia/-/raw/main/BLACK_VLESS_RUS.txt",
+        "https://codeberg.org/igareck/vpn-configs-for-russia/raw/branch/main/BLACK_VLESS_RUS.txt",
+    )
+
+    /** All fallback chains, fetched and merged by ConfigRepository. */
+    val ALL_CHAINS = listOf(UNIVERSAL_CHAIN, IGARECK_BLACK_CHAIN)
 }

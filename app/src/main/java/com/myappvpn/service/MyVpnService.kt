@@ -46,6 +46,7 @@ class MyVpnService : VpnService() {
         const val EXTRA_SOCKS_PORT = "socks_port"
         const val EXTRA_SERVER_NAME = "server_name"
         const val EXTRA_HOTSPOT_SHARING = "hotspot_sharing"
+        const val EXTRA_BALANCER_MODE = "balancer_mode"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "vpn_service"
 
@@ -62,6 +63,7 @@ class MyVpnService : VpnService() {
     @Inject lateinit var preferences: AppPreferences
     @Inject lateinit var trafficMonitor: TrafficMonitor
     @Inject lateinit var configRepository: ConfigRepository
+    @Inject lateinit var xrayMicroTest: com.myappvpn.domain.validation.XrayMicroTest
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var xrayManager: XrayManager
@@ -71,8 +73,12 @@ class MyVpnService : VpnService() {
     private var currentSocksPort: Int = 10808
     private var currentServerName: String = "Unknown"
     private var hotspotSharingEnabled = false
+    // Balancer (auto) mode: Xray observatory picks/switches the active server in-core.
+    private var balancerMode = false
+    private var lastXrayConfig: String = ""   // authed config of the current session (for restart)
     private var watchdogJob: Job? = null
     private var splitTunnelObserverJob: Job? = null
+    private var backgroundProbeJob: Job? = null
 
     // Per-session SOCKS5 auth credentials — prevents other apps from using our proxy
     // (CVE: unauthenticated local SOCKS proxy deanonymization, see habr.com/ru/articles/1020080)
@@ -93,7 +99,8 @@ class MyVpnService : VpnService() {
                 val socksPort = intent.getIntExtra(EXTRA_SOCKS_PORT, 10808)
                 val serverName = intent.getStringExtra(EXTRA_SERVER_NAME) ?: "Unknown"
                 val hotspotSharing = intent.getBooleanExtra(EXTRA_HOTSPOT_SHARING, false)
-                serviceScope.launch { connect(xrayConfig, socksPort, serverName, hotspotSharing) }
+                val balancer = intent.getBooleanExtra(EXTRA_BALANCER_MODE, false)
+                serviceScope.launch { connect(xrayConfig, socksPort, serverName, hotspotSharing, balancer) }
             }
             ACTION_DISCONNECT -> serviceScope.launch { disconnect() }
         }
@@ -102,10 +109,11 @@ class MyVpnService : VpnService() {
 
     // ── Connect ────────────────────────────────────────────────────────────────
 
-    private suspend fun connect(xrayConfig: String, socksPort: Int, serverName: String, hotspotSharing: Boolean = false) {
+    private suspend fun connect(xrayConfig: String, socksPort: Int, serverName: String, hotspotSharing: Boolean = false, balancer: Boolean = false) {
         currentSocksPort = socksPort
         currentServerName = serverName
         hotspotSharingEnabled = hotspotSharing
+        balancerMode = balancer
         try {
             _vpnState.value = VpnState.CONNECTING
             startForeground(NOTIFICATION_ID, buildNotification(serverName, VpnState.CONNECTING))
@@ -113,6 +121,7 @@ class MyVpnService : VpnService() {
             // Generate per-session proxy auth to prevent other apps from using our SOCKS5 proxy
             generateProxyAuth()
             val authedConfig = injectProxyAuth(xrayConfig)
+            lastXrayConfig = authedConfig
             installProxyAuthenticator()
 
             // 1. Start XRay
@@ -142,8 +151,19 @@ class MyVpnService : VpnService() {
             // 4. Start traffic monitoring
             trafficMonitor.start()
 
+            // Balancer: stay in CONNECTING (UI shows "searching") until the observatory finds
+            // a server that actually reaches Telegram, so CONNECTED is honest. Bounded wait.
+            if (balancerMode) {
+                awaitTelegramReachable(timeoutMs = 30_000L)
+            }
+
             _vpnState.value = VpnState.CONNECTED
-            _connectedServer.value = configRepository.getSelectedServer()
+            _connectedServer.value = if (balancerMode) {
+                ServerProfile(id = "__balancer__", name = serverName, flag = "⚖️",
+                    country = "Auto", address = "", port = 0, vlessUri = "")
+            } else {
+                configRepository.getSelectedServer()
+            }
             updateNotification(serverName, VpnState.CONNECTED)
             _hotspotProxyInfo.value = if (hotspotSharingEnabled) HotspotHelper.getHotspotIp()?.let { "$it:10808" } else null
             if (BuildConfig.DEBUG) Log.i(TAG, "VPN connected via $serverName")
@@ -322,9 +342,18 @@ class MyVpnService : VpnService() {
                 delay(if (failStreak == 0) 30_000L + jitter else 8_000L + jitter)
                 if (_vpnState.value != VpnState.CONNECTED) break
 
-                // XRay process crash → switch immediately
+                // XRay process crash → restart (balancer) or switch (single)
                 if (!xrayManager.isRunning) {
+                    if (balancerMode) {
+                        Log.w(TAG, "XRay died (balancer) — restarting same config")
+                        if (!restartXray()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
+                        failStreak = 0
+                        continue
+                    }
                     Log.w(TAG, "XRay process died — switching immediately")
+                    configRepository.getSelectedServer()?.let {
+                        configRepository.incrementConsecutiveFailure(it.id)
+                    }
                     switchToNextServer()
                     break
                 }
@@ -338,49 +367,117 @@ class MyVpnService : VpnService() {
 
                 // High XRay error rate = VLESS tunnel broken → count as fail without HTTP probe
                 val xrayErrorsHigh = xrayManager.errorRate > 10
-                val internetOk = if (xrayErrorsHigh) {
-                    Log.w(TAG, "XRay errorRate=${xrayManager.errorRate} — treating as internet fail")
-                    false
-                } else {
-                    isInternetReachableViaSocks(currentSocksPort)
+                val internetOk = when {
+                    xrayErrorsHigh -> {
+                        Log.w(TAG, "XRay errorRate=${xrayManager.errorRate} — treating as internet fail")
+                        false
+                    }
+                    // Balancer mode: success means the active route actually reaches Telegram (HTTP 200).
+                    balancerMode -> isTelegramReachableViaSocks(currentSocksPort)
+                    else -> isInternetReachableViaSocks(currentSocksPort)
                 }
 
                 if (!internetOk) {
                     failStreak++
                     Log.w(TAG, "Health check failed #$failStreak (xrayErrors=${xrayManager.errorRate})")
-                    if (failStreak >= 2) {
-                        // 2 consecutive failures (30s + 10s apart) → switch
+                    if (balancerMode) {
+                        // Observatory switches between servers in-core. Only act if the whole
+                        // pool looks dead for a sustained period.
+                        if (failStreak >= 4) {
+                            Log.w(TAG, "Balancer: sustained failure — rebuilding pool")
+                            if (!rebuildBalancer()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
+                            failStreak = 0
+                        }
+                    } else if (failStreak >= 2) {
                         Log.w(TAG, "2 consecutive failures — switching server")
+                        configRepository.getSelectedServer()?.let {
+                            configRepository.incrementConsecutiveFailure(it.id)
+                            configRepository.recordFailure(it.id)
+                        }
                         switchToNextServer()
                         break
                     }
+                } else if (balancerMode) {
+                    failStreak = 0   // balancer healthy — Xray manages per-server selection
                 } else {
                     failStreak = 0
-                    if (!successRecorded) {
-                        successRecorded = true
-                        configRepository.getSelectedServer()?.let { server ->
+                    configRepository.getSelectedServer()?.let { server ->
+                        // Mark as verified + reset consecutive failures on first success
+                        if (!successRecorded) {
+                            successRecorded = true
                             configRepository.recordSuccess(server.id)
-                            Log.d(TAG, "Recorded success for ${server.name}")
+                            configRepository.markVerified(server.id)
+                            configRepository.resetConsecutiveFailures(server.id)
+                            Log.d(TAG, "Server verified: ${server.name}")
+                            // Start background probe to build failover reserve
+                            startBackgroundProbe()
                         }
-                    }
 
-                    // ── Quick speed check: detect DPI throttling ──
-                    val speed = withContext(Dispatchers.IO) {
-                        measureQuickSpeedMbps(currentSocksPort)
-                    }
-                    if (speed > 0f) {
-                        configRepository.getSelectedServer()?.let {
-                            configRepository.updateSpeed(it.id, speed)
+                        // ── Quick speed check: detect DPI throttling ──
+                        val speed = withContext(Dispatchers.IO) {
+                            measureQuickSpeedMbps(currentSocksPort)
                         }
-                        Log.d(TAG, "Speed: ${"%.0f".format(speed * 1024)} KB/s")
-                    }
-                    if (speed in 0.01f..0.09f) {
-                        Log.w(TAG, "Throttled! ${"%.0f".format(speed * 1024)} KB/s — switching server")
-                        switchToNextServer()
-                        break
+                        if (speed > 0f) {
+                            configRepository.updateSpeed(server.id, speed)
+                            Log.d(TAG, "Speed: ${"%.0f".format(speed * 1024)} KB/s")
+                        }
+                        if (speed in 0.01f..0.09f) {
+                            Log.w(TAG, "Throttled! ${"%.0f".format(speed * 1024)} KB/s — switching server")
+                            configRepository.incrementConsecutiveFailure(server.id)
+                            switchToNextServer()
+                            return@launch
+                        }
                     }
                 }
             }
+        }
+    }
+
+    // ── Background Probe ──────────────────────────────────────────────────────
+
+    /**
+     * Runs in background while VPN is connected.
+     * Tests HANDSHAKE_OK servers that didn't make it to Stage 3 during initial validation.
+     * Uses port 10903 (separate from main 10808 and micro-test 10900-10902).
+     * Verified servers are saved to DB — available for watchdog failover.
+     */
+    private fun startBackgroundProbe() {
+        backgroundProbeJob?.cancel()
+        backgroundProbeJob = serviceScope.launch {
+            delay(60_000L) // wait 1 min after connection stabilizes
+            val currentId = configRepository.getSelectedServer()?.id ?: return@launch
+
+            // Get HANDSHAKE_OK servers that aren't already VERIFIED
+            val candidates = configRepository.servers.first()
+                .filter {
+                    it.id != currentId &&
+                    it.handshakeOk &&
+                    it.validationState != "VERIFIED" &&
+                    it.country != "Russia" // respect geo preference
+                }
+                .sortedBy { it.medianLatencyMs.let { ms -> if (ms <= 0) Int.MAX_VALUE else ms } }
+                .take(20)
+
+            if (candidates.isEmpty()) {
+                Log.d(TAG, "Background probe: no candidates")
+                return@launch
+            }
+
+            Log.i(TAG, "Background probe: testing ${candidates.size} servers")
+            var verified = 0
+            for (server in candidates) {
+                if (!isActive || _vpnState.value != VpnState.CONNECTED) break
+                // Slow pace: 1 test every 30s to avoid draining battery/data
+                delay(30_000L)
+                val result = xrayMicroTest.test(server, testPort = 10903)
+                if (result.success) {
+                    configRepository.markVerified(server.id)
+                    verified++
+                    Log.i(TAG, "Background verified: ${server.name} (${server.country})")
+                }
+                if (verified >= 5) break // enough reserves
+            }
+            Log.i(TAG, "Background probe done: $verified new verified servers")
         }
     }
 
@@ -429,6 +526,43 @@ class MyVpnService : VpnService() {
             } catch (_: Exception) { /* try next URL */ }
         }
         return false
+    }
+
+    /**
+     * Strict Telegram reachability check through the tunnel: requires HTTP 200 from t.me.
+     * Used in balancer mode — a route is only "good" if it actually unblocks Telegram,
+     * which TCP ping / generic connectivity cannot guarantee.
+     */
+    /**
+     * Poll Telegram reachability until success or timeout (balancer warm-up).
+     * Returns true as soon as t.me responds 200 through the tunnel.
+     */
+    private suspend fun awaitTelegramReachable(timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (_vpnState.value != VpnState.CONNECTING) return false
+            if (withContext(Dispatchers.IO) { isTelegramReachableViaSocks(currentSocksPort) }) return true
+            delay(1_500L)
+        }
+        return false
+    }
+
+    private fun isTelegramReachableViaSocks(port: Int): Boolean {
+        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
+        return try {
+            val conn = java.net.URL("https://t.me/")
+                .openConnection(proxy) as java.net.HttpURLConnection
+            conn.connectTimeout = 6_000
+            conn.readTimeout = 6_000
+            conn.requestMethod = "GET"
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+            val code = conn.responseCode
+            conn.disconnect()
+            code == 200
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**
@@ -487,6 +621,39 @@ class MyVpnService : VpnService() {
         0f
     }
 
+    // ── Balancer recovery ───────────────────────────────────────────────────────
+
+    /** Restart Xray with the current (balancer) config — used when the process dies. */
+    private suspend fun restartXray(): Boolean {
+        xrayManager.stop()
+        return if (lastXrayConfig.isNotEmpty()) xrayManager.start(lastXrayConfig) else false
+    }
+
+    /**
+     * Rebuild the balancer pool from scratch: best-effort re-fetch of the subscription,
+     * re-filter by excluded countries, regenerate the balancer config and restart Xray.
+     * Used when the entire pool appears dead.
+     */
+    private suspend fun rebuildBalancer(): Boolean = try {
+        runCatching { configRepository.fetchAndSaveServers() }   // best-effort refresh
+        val excluded = preferences.excludedCountries.first()
+        val candidates = configRepository.getServersExcludingCountries(excluded)
+        val configs = candidates.take(50).mapNotNull { VlessUriParser.parse(it.vlessUri) }
+        if (configs.isEmpty()) {
+            false
+        } else {
+            val json = injectProxyAuth(
+                XrayConfigBuilder.buildBalancer(configs, currentSocksPort, hotspotSharingEnabled)
+            )
+            lastXrayConfig = json
+            xrayManager.stop()
+            xrayManager.start(json)
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "rebuildBalancer failed: ${e.message}")
+        false
+    }
+
     // ── Server failover ────────────────────────────────────────────────────────
 
     private suspend fun switchToNextServer() {
@@ -540,11 +707,12 @@ class MyVpnService : VpnService() {
                     configRepository.updateSpeed(nextServer.id, speedMbps)
                     if (BuildConfig.DEBUG) Log.d(TAG, "${nextServer.name} speed: ${"%.2f".format(speedMbps)} MB/s")
                 }
-                // 0f = tunnel dead (test failed), 0.01-0.49 = too slow — skip both
-                if (speedMbps < 0.5f) {
+                // 0f = tunnel dead (test failed), 0.01-0.09 = extremely slow — skip
+                if (speedMbps < 0.1f) {
                     val reason = if (speedMbps == 0f) "unreachable" else "${"%.0f".format(speedMbps * 1024)} KB/s"
                     if (BuildConfig.DEBUG) Log.w(TAG, "${nextServer.name} failed ($reason) — trying next")
                     configRepository.recordFailure(nextServer.id)
+                    configRepository.incrementConsecutiveFailure(nextServer.id)
                     triedIds += nextServer.id
                     // Track port failures
                     if (nextServer.port == lastFailedPort) {
@@ -560,10 +728,12 @@ class MyVpnService : VpnService() {
                     continue
                 }
 
-                // Server is confirmed working
+                // Server is confirmed working — mark as verified
                 currentServerName = nextServer.name
                 configRepository.selectServer(nextServer.id)
                 configRepository.recordSuccess(nextServer.id)
+                configRepository.markVerified(nextServer.id)
+                configRepository.resetConsecutiveFailures(nextServer.id)
                 _connectedServer.value = nextServer
                 _vpnState.value = VpnState.CONNECTED
                 updateNotification(nextServer.name, VpnState.CONNECTED)
@@ -587,6 +757,8 @@ class MyVpnService : VpnService() {
         Authenticator.setDefault(null)
         proxyUser = ""
         proxyPass = ""
+        balancerMode = false
+        lastXrayConfig = ""
         _vpnState.value = VpnState.DISCONNECTED
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -596,6 +768,7 @@ class MyVpnService : VpnService() {
     private fun cleanupProcesses() {
         watchdogJob?.cancel(); watchdogJob = null
         splitTunnelObserverJob?.cancel(); splitTunnelObserverJob = null
+        backgroundProbeJob?.cancel(); backgroundProbeJob = null
         trafficMonitor.stop()
         tun2SocksManager.stop()
         xrayManager.stop()

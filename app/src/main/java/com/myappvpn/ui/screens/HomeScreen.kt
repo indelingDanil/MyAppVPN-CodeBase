@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ fun HomeScreen(
     val vpnState by viewModel.vpnState.collectAsState()
     val trafficStats by viewModel.trafficStats.collectAsState()
     val selectedServer by viewModel.selectedServer.collectAsState()
+    val autoMode by viewModel.autoMode.collectAsState()
     val hotspotProxyInfo by viewModel.hotspotProxyInfo.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -108,11 +110,11 @@ fun HomeScreen(
                 ) { state ->
                     Text(
                         text = when (state) {
-                            VpnState.CONNECTED -> "Protected"
-                            VpnState.CONNECTING -> "Establishing connection..."
-                            VpnState.DISCONNECTING -> "Disconnecting..."
-                            VpnState.ERROR -> "Connection failed"
-                            else -> "Not protected"
+                            VpnState.CONNECTED -> "Защищено"
+                            VpnState.CONNECTING -> "Поиск рабочего сервера…"
+                            VpnState.DISCONNECTING -> "Отключение…"
+                            VpnState.ERROR -> "Ошибка подключения"
+                            else -> "Не защищено"
                         },
                         color = when (state) {
                             VpnState.CONNECTED -> AetherConnected
@@ -126,15 +128,17 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Server selector card
-                ServerSelectorCard(
+                // Mode card: Auto (balancer) by default, or the pinned manual server.
+                ModeCard(
+                    autoMode = autoMode,
                     server = selectedServer,
-                    onClick = onNavigateToServers
+                    onClick = onNavigateToServers,
+                    onSwitchToAuto = { viewModel.switchToAuto() }
                 )
 
                 Spacer(modifier = Modifier.height(40.dp))
 
-                // Main connect button
+                // Single connect button — connects via balancer (Auto) or the pinned server.
                 ConnectButton(
                     vpnState = vpnState,
                     onClick = { viewModel.onConnectClick() },
@@ -234,9 +238,11 @@ private fun HotspotBanner(ip: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ServerSelectorCard(
+private fun ModeCard(
+    autoMode: Boolean,
     server: ServerProfile?,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onSwitchToAuto: () -> Unit
 ) {
     GlassCard(
         modifier = Modifier
@@ -250,33 +256,55 @@ private fun ServerSelectorCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = server?.flag ?: "🌐",
-                fontSize = 32.sp
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = server?.country ?: "Select Server",
-                    color = AetherTextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
+            if (autoMode) {
+                Text(text = "⚡", fontSize = 30.sp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Авто-режим",
+                        color = AetherTextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Выбирает лучший сервер автоматически",
+                        color = AetherTextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowRight,
+                    contentDescription = "Выбрать вручную",
+                    tint = AetherTextTertiary
                 )
+            } else {
+                Text(text = server?.flag ?: "🌐", fontSize = 30.sp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = server?.country ?: "Выберите сервер",
+                        color = AetherTextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (server != null && server.latencyMs > 0)
+                            "Ручной выбор · ${server.latencyMs}ms"
+                        else "Ручной выбор",
+                        color = AetherTextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+                // Quick return to Auto
                 Text(
-                    text = if (server != null) {
-                        buildString {
-                            if (server.latencyMs > 0) append("${server.latencyMs}ms · ")
-                            append("VLESS Reality")
-                        }
-                    } else "Tap to select a server",
-                    color = AetherTextSecondary,
-                    fontSize = 12.sp
+                    text = "⚡ Авто",
+                    color = AetherCyan,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onSwitchToAuto)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowRight,
-                contentDescription = "Select server",
-                tint = AetherTextTertiary
-            )
         }
     }
 }

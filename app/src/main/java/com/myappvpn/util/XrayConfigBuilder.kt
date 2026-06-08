@@ -6,6 +6,9 @@ import org.json.JSONObject
 
 object XrayConfigBuilder {
 
+    /** Observatory probe target — server must reach Telegram (HTTP 200) to be "alive". */
+    const val TELEGRAM_PROBE_URL = "https://t.me/"
+
     /**
      * Builds a minimal but complete xray JSON config for VLESS with various transport types.
      * Inbound: SOCKS5 on listenAddr:socksPort
@@ -95,9 +98,110 @@ object XrayConfigBuilder {
         return root.toString(2)
     }
 
-    private fun buildVlessOutbound(config: VlessConfig): JSONObject {
+    /**
+     * Builds a balancer config: one VLESS outbound per server (tags "proxy-0"…"proxy-N"),
+     * an observatory that probes each via a real HTTP request, and routing through a
+     * balancerTag with the `leastPing` strategy. Xray picks the best alive server and
+     * switches seamlessly in-core when one dies — no tunnel restart.
+     */
+    fun buildBalancer(
+        configs: List<VlessConfig>,
+        socksPort: Int = 10808,
+        listenOnAllInterfaces: Boolean = false,
+    ): String {
+        val listenAddr = if (listenOnAllInterfaces) "0.0.0.0" else "127.0.0.1"
+        val root = JSONObject()
+
+        root.put("log", JSONObject().apply { put("loglevel", "warning") })
+
+        root.put("dns", JSONObject().apply {
+            put("servers", JSONArray().apply {
+                put("https://1.1.1.1/dns-query")
+                put("https://8.8.8.8/dns-query")
+            })
+        })
+
+        root.put("inbounds", JSONArray().apply {
+            put(JSONObject().apply {
+                put("tag", "socks")
+                put("port", socksPort)
+                put("listen", listenAddr)
+                put("protocol", "socks")
+                put("settings", JSONObject().apply {
+                    put("auth", "noauth")
+                    put("udp", true)
+                    put("ip", listenAddr)
+                })
+            })
+            put(JSONObject().apply {
+                put("tag", "http")
+                put("port", socksPort + 1)
+                put("listen", listenAddr)
+                put("protocol", "http")
+                put("settings", JSONObject().apply { put("allowTransparent", false) })
+            })
+        })
+
+        // One VLESS outbound per server, tagged proxy-0 … proxy-N
+        root.put("outbounds", JSONArray().apply {
+            configs.forEachIndexed { index, cfg ->
+                put(buildVlessOutbound(cfg, "proxy-$index"))
+            }
+            put(JSONObject().apply {
+                put("tag", "direct")
+                put("protocol", "freedom")
+                put("settings", JSONObject())
+            })
+            put(JSONObject().apply {
+                put("tag", "block")
+                put("protocol", "blackhole")
+                put("settings", JSONObject().apply {
+                    put("response", JSONObject().apply { put("type", "none") })
+                })
+            })
+        })
+
+        // Observatory — periodic real HTTP probe of every proxy-* outbound.
+        // Probe Telegram specifically: a server is only considered "alive" if it can
+        // actually reach t.me (HTTP 200), so the balancer never routes through servers
+        // that ping fast but can't unblock Telegram. TCP ping alone is insufficient.
+        root.put("observatory", JSONObject().apply {
+            put("subjectSelector", JSONArray().apply { put("proxy-") })
+            put("probeURL", TELEGRAM_PROBE_URL)
+            put("probeInterval", "2m")
+            put("enableConcurrency", true)
+        })
+
+        // Routing: private → direct; everything else → balancer (leastPing)
+        root.put("routing", JSONObject().apply {
+            put("domainStrategy", "IPIfNonMatch")
+            put("balancers", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("tag", "balancer")
+                    put("selector", JSONArray().apply { put("proxy-") })
+                    put("strategy", JSONObject().apply { put("type", "leastPing") })
+                })
+            })
+            put("rules", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("outboundTag", "direct")
+                    put("ip", JSONArray().apply { put("geoip:private") })
+                })
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("network", "tcp,udp")
+                    put("balancerTag", "balancer")
+                })
+            })
+        })
+
+        return root.toString(2)
+    }
+
+    private fun buildVlessOutbound(config: VlessConfig, tag: String = "proxy"): JSONObject {
         return JSONObject().apply {
-            put("tag", "proxy")
+            put("tag", tag)
             put("protocol", "vless")
             put("settings", JSONObject().apply {
                 put("vnext", JSONArray().apply {

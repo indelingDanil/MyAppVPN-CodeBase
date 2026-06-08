@@ -1,80 +1,81 @@
 package com.myappvpn.domain.usecase
 
+import android.util.Log
 import com.myappvpn.data.db.ServerDao
-import com.myappvpn.data.repository.ConfigRepository
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import com.myappvpn.domain.validation.ServerValidationPipeline
+import com.myappvpn.domain.validation.ValidationProgress
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.first
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 
 class PingServersUseCase @Inject constructor(
-    private val configRepository: ConfigRepository,
+    private val pipeline: ServerValidationPipeline,
     private val serverDao: ServerDao
 ) {
     companion object {
-        /** Servers slower than this (ms) are deleted after ping sweep. */
-        const val MAX_ACCEPTABLE_LATENCY = 80
+        private const val TAG = "PingServersUseCase"
     }
+
     /**
-     * Pings all servers in parallel and emits real-time progress as each result arrives.
-     * Uses channelFlow so concurrent coroutines can emit to the flow simultaneously.
+     * Runs the full 3-stage validation pipeline (TCP ping → TLS handshake → XRay micro-test).
+     * Progress is mapped: Stage1=0-40%, Stage2=40-70%, Stage3=70-100%.
      */
     fun invoke(): Flow<PingProgress> = channelFlow {
-        val servers = serverDao.getAllServers().first()
-        if (servers.isEmpty()) {
+        val allServers = serverDao.getAllServers().first()
+        if (allServers.isEmpty()) {
             send(PingProgress.Done(null))
             return@channelFlow
         }
 
-        val total = servers.size
-        send(PingProgress.Started(total))
+        // Pre-filter: skip servers known to be dead — saves minutes of TCP probing
+        val now = System.currentTimeMillis()
+        val servers = allServers.filter { server ->
+            // Skip STALE servers with 3+ consecutive failures
+            if (server.validationState == "STALE" && server.consecutiveFailures >= 3) return@filter false
+            // Skip servers that failed TCP ping recently (<1 hour ago)
+            if (server.medianLatencyMs == 0 && server.lastValidatedAt > 0 &&
+                (now - server.lastValidatedAt) < 60 * 60_000L) return@filter false
+            true
+        }
+        Log.i(TAG, "Pre-filter: ${allServers.size} → ${servers.size} candidates")
 
-        val completed = AtomicInteger(0)
-        // thread-safe map: serverId → latencyMs
-        val results = ConcurrentHashMap<String, Int>()
+        send(PingProgress.Started(servers.size))
 
-        // Ping all servers in parallel — each async emits progress immediately on completion
-        servers.map { server ->
-            async(Dispatchers.IO) {
-                val latency = tcpPing(server.address, server.port)
-                serverDao.updateLatency(server.id, latency)
-                results[server.id] = latency
-                val count = completed.incrementAndGet()
-                send(PingProgress.Progress(count.toFloat() / total, server.id, latency))
+        pipeline.validate(servers).collect { progress ->
+            when (progress) {
+                is ValidationProgress.Stage1Progress ->
+                    send(PingProgress.StageProgress(
+                        fraction = progress.fraction * 0.4f,
+                        stage = 1,
+                        stageDetail = "Checking reachability... (${progress.reachableCount} found)"
+                    ))
+                is ValidationProgress.Stage2Progress ->
+                    send(PingProgress.StageProgress(
+                        fraction = 0.4f + progress.fraction * 0.3f,
+                        stage = 2,
+                        stageDetail = "Testing handshakes... (${progress.handshakeOkCount} OK)"
+                    ))
+                is ValidationProgress.Stage3Progress ->
+                    send(PingProgress.StageProgress(
+                        fraction = 0.7f + progress.fraction * 0.3f,
+                        stage = 3,
+                        stageDetail = "Verifying servers... (${progress.verifiedCount} verified)"
+                    ))
+                is ValidationProgress.Complete ->
+                    send(PingProgress.Done(progress.bestServerId))
+                is ValidationProgress.Error ->
+                    send(PingProgress.Done(null))
             }
-        }.awaitAll()
-
-        // Remove servers with ping > 80ms or timeout — keep only fast ones
-        serverDao.deleteSlowServers(MAX_ACCEPTABLE_LATENCY)
-
-        val best = results.entries
-            .filter { it.value in 1..MAX_ACCEPTABLE_LATENCY }
-            .minByOrNull { it.value }
-        send(PingProgress.Done(best?.key))
-    }
-
-    private fun tcpPing(host: String, port: Int, timeoutMs: Int = 3000): Int {
-        return try {
-            val start = System.currentTimeMillis()
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(host, port), timeoutMs)
-            }
-            (System.currentTimeMillis() - start).toInt().coerceAtLeast(1)
-        } catch (e: Exception) {
-            0 // timeout / unreachable
         }
     }
 }
 
 sealed class PingProgress {
     data class Started(val total: Int) : PingProgress()
+    /** Legacy: kept for backward compat with existing UI collectors. */
     data class Progress(val fraction: Float, val serverId: String, val latencyMs: Int) : PingProgress()
+    /** v2.0: multi-stage progress with description. */
+    data class StageProgress(val fraction: Float, val stage: Int, val stageDetail: String) : PingProgress()
     data class Done(val bestServerId: String?) : PingProgress()
 }

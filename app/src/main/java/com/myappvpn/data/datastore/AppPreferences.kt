@@ -32,6 +32,11 @@ class AppPreferences @Inject constructor(
         val KEY_SOCKS_PORT = intPreferencesKey("socks_port")
         val KEY_HOTSPOT_SHARING = booleanPreferencesKey("hotspot_sharing")
         val KEY_IGARECK_FULL = booleanPreferencesKey("igareck_full_subscription")
+        val KEY_AUTO_MODE = booleanPreferencesKey("auto_mode")
+        val KEY_EXCLUDED_COUNTRIES = stringSetPreferencesKey("excluded_countries")
+        // Sentinel so an empty user selection is distinguishable from "never set" (→ default).
+        private const val EXCLUDED_NONE = "__none__"
+        private val DEFAULT_EXCLUDED = setOf("Russia")
     }
 
     val useLiteSubscription: Flow<Boolean> = dataStore.data
@@ -124,5 +129,36 @@ class AppPreferences @Inject constructor(
 
     suspend fun setIgareckFullSubscription(v: Boolean) {
         dataStore.edit { it[KEY_IGARECK_FULL] = v }
+    }
+
+    /**
+     * Connection mode. true = Auto (Xray balancer picks/switches servers); false = manual
+     * (connect to the single pinned server). Default Auto.
+     */
+    val autoMode: Flow<Boolean> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_AUTO_MODE] ?: true }
+
+    suspend fun setAutoMode(value: Boolean) {
+        dataStore.edit { it[KEY_AUTO_MODE] = value }
+    }
+
+    /**
+     * Countries excluded from the server list and the balancer pool.
+     * Defaults to {"Russia"} (RU servers have lowest latency but can't unblock
+     * Telegram/YouTube, so the balancer would otherwise prefer them).
+     */
+    val excludedCountries: Flow<Set<String>> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { prefs ->
+            val stored = prefs[KEY_EXCLUDED_COUNTRIES] ?: return@map DEFAULT_EXCLUDED
+            if (stored.contains(EXCLUDED_NONE)) emptySet() else stored
+        }
+
+    suspend fun setExcludedCountries(countries: Set<String>) {
+        dataStore.edit {
+            it[KEY_EXCLUDED_COUNTRIES] =
+                if (countries.isEmpty()) setOf(EXCLUDED_NONE) else countries
+        }
     }
 }

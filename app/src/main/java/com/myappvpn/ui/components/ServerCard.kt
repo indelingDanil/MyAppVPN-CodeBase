@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -72,6 +74,9 @@ fun ServerCard(
                 )
             }
 
+            // Validation state badge
+            ValidationBadge(server = server)
+
             // Latency badge
             LatencyBadge(server = server)
 
@@ -86,6 +91,22 @@ fun ServerCard(
             }
         }
     }
+}
+
+@Composable
+fun ValidationBadge(server: ServerProfile) {
+    val (icon, tint) = when (server.validationState) {
+        "VERIFIED" -> Icons.Default.VerifiedUser to AetherConnected
+        "HANDSHAKE_OK" -> Icons.Default.Shield to LatencyMedium
+        "STALE" -> Icons.Default.Shield to LatencyBad
+        else -> return // UNTESTED, REACHABLE — no badge
+    }
+    Icon(
+        imageVector = icon,
+        contentDescription = server.validationState,
+        tint = tint,
+        modifier = Modifier.size(16.dp)
+    )
 }
 
 @Composable

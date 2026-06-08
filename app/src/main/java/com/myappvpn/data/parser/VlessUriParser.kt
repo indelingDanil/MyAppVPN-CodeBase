@@ -123,7 +123,7 @@ object VlessUriParser {
     }
 
     private fun extractFlagAndCountry(name: String): Pair<String, String> {
-        // Country code to country name mapping
+        // Country code to (flag, displayName) mapping
         val countryMap = mapOf(
             "RU" to ("🇷🇺" to "Russia"),
             "DE" to ("🇩🇪" to "Germany"),
@@ -137,6 +137,7 @@ object VlessUriParser {
             "US" to ("🇺🇸" to "USA"),
             "NL" to ("🇳🇱" to "Netherlands"),
             "GB" to ("🇬🇧" to "UK"),
+            "UK" to ("🇬🇧" to "UK"),
             "FR" to ("🇫🇷" to "France"),
             "FI" to ("🇫🇮" to "Finland"),
             "SE" to ("🇸🇪" to "Sweden"),
@@ -157,22 +158,80 @@ object VlessUriParser {
             "KR" to ("🇰🇷" to "South Korea"),
             "SG" to ("🇸🇬" to "Singapore"),
             "HK" to ("🇭🇰" to "Hong Kong"),
+            "CA" to ("🇨🇦" to "Canada"),
+            "IN" to ("🇮🇳" to "India"),
+            "IR" to ("🇮🇷" to "Iran"),
+            "IE" to ("🇮🇪" to "Ireland"),
+            "IT" to ("🇮🇹" to "Italy"),
+            "ES" to ("🇪🇸" to "Spain"),
+            "PT" to ("🇵🇹" to "Portugal"),
+            "DK" to ("🇩🇰" to "Denmark"),
+            "GR" to ("🇬🇷" to "Greece"),
+            "RS" to ("🇷🇸" to "Serbia"),
+            "HR" to ("🇭🇷" to "Croatia"),
+            "SK" to ("🇸🇰" to "Slovakia"),
+            "SI" to ("🇸🇮" to "Slovenia"),
+            "TW" to ("🇹🇼" to "Taiwan"),
+            "ID" to ("🇮🇩" to "Indonesia"),
+            "MY" to ("🇲🇾" to "Malaysia"),
+            "TH" to ("🇹🇭" to "Thailand"),
+            "VN" to ("🇻🇳" to "Vietnam"),
+            "PH" to ("🇵🇭" to "Philippines"),
+            "AE" to ("🇦🇪" to "UAE"),
+            "ZA" to ("🇿🇦" to "South Africa"),
+            "MX" to ("🇲🇽" to "Mexico"),
+            "AR" to ("🇦🇷" to "Argentina"),
+            "CL" to ("🇨🇱" to "Chile"),
+            "CO" to ("🇨🇴" to "Colombia"),
+            "AM" to ("🇦🇲" to "Armenia"),
+            "GE" to ("🇬🇪" to "Georgia"),
+            "AZ" to ("🇦🇿" to "Azerbaijan"),
+            "UZ" to ("🇺🇿" to "Uzbekistan"),
         )
 
-        // Try to extract flag from name string (first 2 chars might be emoji flag)
-        // Flag emojis are stored in the name like "🇩🇪 DE #12"
-        for ((code, pair) in countryMap) {
-            if (name.contains(code, ignoreCase = true) || name.contains(pair.first)) {
+        // Full country name → code lookup for names like "United States", "Germany", etc.
+        val nameToCode = mapOf(
+            "russia" to "RU", "germany" to "DE", "albania" to "AL", "austria" to "AT",
+            "ukraine" to "UA", "belarus" to "BY", "bulgaria" to "BG", "australia" to "AU",
+            "brazil" to "BR", "united states" to "US", "usa" to "US", "netherlands" to "NL",
+            "holland" to "NL", "united kingdom" to "GB", "france" to "FR", "finland" to "FI",
+            "sweden" to "SE", "norway" to "NO", "switzerland" to "CH", "poland" to "PL",
+            "czech" to "CZ", "hungary" to "HU", "romania" to "RO", "moldova" to "MD",
+            "lithuania" to "LT", "latvia" to "LV", "estonia" to "EE", "kazakhstan" to "KZ",
+            "turkey" to "TR", "turkiye" to "TR", "israel" to "IL", "japan" to "JP",
+            "korea" to "KR", "singapore" to "SG", "hong kong" to "HK", "canada" to "CA",
+            "india" to "IN", "iran" to "IR", "ireland" to "IE", "italy" to "IT",
+            "spain" to "ES", "portugal" to "PT", "denmark" to "DK", "greece" to "GR",
+            "serbia" to "RS", "croatia" to "HR", "slovakia" to "SK", "slovenia" to "SI",
+            "taiwan" to "TW", "indonesia" to "ID", "malaysia" to "MY", "thailand" to "TH",
+            "vietnam" to "VN", "philippines" to "PH", "emirates" to "AE", "uae" to "AE",
+            "south africa" to "ZA", "mexico" to "MX", "argentina" to "AR", "chile" to "CL",
+            "colombia" to "CO", "armenia" to "AM", "georgia" to "GE", "azerbaijan" to "AZ",
+            "uzbekistan" to "UZ",
+        )
+
+        val nameLower = name.lowercase()
+
+        // 1. Check flag emoji at start (e.g. "🇩🇪 DE #12")
+        for ((_, pair) in countryMap) {
+            if (name.startsWith(pair.first)) {
                 return pair.first to pair.second
             }
         }
 
-        // Check for flag emoji at start of name
-        val flagEmojis = countryMap.values.map { it.first }
-        for (flag in flagEmojis) {
-            if (name.startsWith(flag)) {
-                val country = countryMap.values.find { it.first == flag }?.second ?: "Unknown"
-                return flag to country
+        // 2. Check full country names (e.g. "United States #3", "Germany-vless-1")
+        for ((fullName, code) in nameToCode) {
+            if (nameLower.contains(fullName)) {
+                val pair = countryMap[code] ?: continue
+                return pair.first to pair.second
+            }
+        }
+
+        // 3. Check 2-letter codes with word boundary (e.g. "DE-1", "US #3")
+        // Match codes that appear as whole tokens, not substrings of other words
+        for ((code, pair) in countryMap) {
+            if (Regex("(?<![A-Za-z])${Regex.escape(code)}(?![A-Za-z])", RegexOption.IGNORE_CASE).containsMatchIn(name)) {
+                return pair.first to pair.second
             }
         }
 
