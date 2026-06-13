@@ -76,6 +76,11 @@ class MyVpnService : VpnService() {
     // Balancer (auto) mode: Xray observatory picks/switches the active server in-core.
     private var balancerMode = false
     private var lastXrayConfig: String = ""   // authed config of the current session (for restart)
+    // Minimal anti-throttle guard: pool server ids (lowest-latency first ≈ leastPing's pick),
+    // a throttled-exclusion set, and a consecutive-slow streak counter.
+    private var balancerPoolIds: List<String> = emptyList()
+    private val throttledIds = mutableSetOf<String>()
+    private var throttleStreak = 0
     private var watchdogJob: Job? = null
     private var splitTunnelObserverJob: Job? = null
     private var backgroundProbeJob: Job? = null
@@ -154,6 +159,9 @@ class MyVpnService : VpnService() {
             // Balancer: stay in CONNECTING (UI shows "searching") until the observatory finds
             // a server that actually reaches Telegram, so CONNECTED is honest. Bounded wait.
             if (balancerMode) {
+                throttledIds.clear(); throttleStreak = 0
+                val excluded = preferences.excludedCountries.first()
+                balancerPoolIds = configRepository.getServersExcludingCountries(excluded).take(50).map { it.id }
                 awaitTelegramReachable(timeoutMs = 30_000L)
             }
 
@@ -381,10 +389,13 @@ class MyVpnService : VpnService() {
                     failStreak++
                     Log.w(TAG, "Health check failed #$failStreak (xrayErrors=${xrayManager.errorRate})")
                     if (balancerMode) {
-                        // Observatory switches between servers in-core. Only act if the whole
-                        // pool looks dead for a sustained period.
-                        if (failStreak >= 4) {
-                            Log.w(TAG, "Balancer: sustained failure — rebuilding pool")
+                        // Xray's observatory + leastPing already reroute OFF a genuinely dead
+                        // server in-core, WITHOUT dropping the SOCKS session. So a single failing
+                        // probe means nothing — never restart Xray for it. Only rebuild when the
+                        // probe fails for a long sustained stretch (~minutes), which signals the
+                        // WHOLE pool is dead (operator blocked everything), not one slow server.
+                        if (failStreak >= 8) {
+                            Log.w(TAG, "Balancer: whole pool unreachable for ~minutes — rebuilding")
                             if (!rebuildBalancer()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
                             failStreak = 0
                         }
@@ -398,7 +409,27 @@ class MyVpnService : VpnService() {
                         break
                     }
                 } else if (balancerMode) {
-                    failStreak = 0   // balancer healthy — Xray manages per-server selection
+                    failStreak = 0   // Telegram-reachable; now a minimal anti-throttle check.
+                    // On a throttled route even DoH/download stalls → measureQuickSpeedMbps ≈ 0/low.
+                    // Lenient threshold + 3-in-a-row streak so we never churn on a transient glitch.
+                    val speed = withContext(Dispatchers.IO) { measureQuickSpeedMbps(currentSocksPort) }
+                    // speed == 0 means the cloudflare probe couldn't even run (DoH/connect failed
+                    // through the tunnel) — NOT proof the route is throttled. Real traffic still
+                    // flows on such routes (Telegram probe just passed). Only treat a *measurable*
+                    // crawl (>0 but <40 KB/s) as throttling, so we never kill a working route on a
+                    // failed measurement.
+                    if (speed in 0.0001f..0.04f) {
+                        throttleStreak++
+                        Log.w(TAG, "Balancer route slow #$throttleStreak (${"%.0f".format(speed * 1024)} KB/s)")
+                        if (throttleStreak >= 3) {
+                            // leastPing routes through the lowest-latency pool server — exclude it.
+                            balancerPoolIds.firstOrNull()?.let { throttledIds.add(it) }
+                            if (throttledIds.size >= 20) throttledIds.clear()  // don't shrink pool forever
+                            Log.w(TAG, "Excluding throttled server, rebuilding balancer pool")
+                            rebuildBalancerPool()
+                            throttleStreak = 0
+                        }
+                    } else throttleStreak = 0
                 } else {
                     failStreak = 0
                     configRepository.getSelectedServer()?.let { server ->
@@ -552,14 +583,17 @@ class MyVpnService : VpnService() {
         return try {
             val conn = java.net.URL("https://t.me/")
                 .openConnection(proxy) as java.net.HttpURLConnection
-            conn.connectTimeout = 6_000
-            conn.readTimeout = 6_000
+            conn.connectTimeout = 8_000
+            conn.readTimeout = 8_000
             conn.requestMethod = "GET"
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("User-Agent", "Mozilla/5.0")
             val code = conn.responseCode
             conn.disconnect()
-            code == 200
+            // Any 2xx/3xx = the route reached Telegram. A redirect (301/302) still proves
+            // reachability, so don't treat it as a failure — strict ==200 caused false negatives
+            // that tore down working-but-slow routes (the exact "kills a live proxy" bug).
+            code in 200..399
         } catch (_: Exception) {
             false
         }
@@ -651,6 +685,31 @@ class MyVpnService : VpnService() {
         }
     } catch (e: Exception) {
         Log.e(TAG, "rebuildBalancer failed: ${e.message}")
+        false
+    }
+
+    /**
+     * Rebuild the balancer pool from the existing DB (no re-fetch), excluding servers we
+     * detected as throttled. leastPing then picks a different server. Restarts Xray (brief).
+     */
+    private suspend fun rebuildBalancerPool(): Boolean = try {
+        val excluded = preferences.excludedCountries.first()
+        val candidates = configRepository.getServersExcludingCountries(excluded)
+            .filter { it.id !in throttledIds }
+        balancerPoolIds = candidates.take(50).map { it.id }
+        val configs = candidates.take(50).mapNotNull { VlessUriParser.parse(it.vlessUri) }
+        if (configs.isEmpty()) {
+            false
+        } else {
+            val json = injectProxyAuth(
+                XrayConfigBuilder.buildBalancer(configs, currentSocksPort, hotspotSharingEnabled)
+            )
+            lastXrayConfig = json
+            xrayManager.stop()
+            xrayManager.start(json)
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "rebuildBalancerPool failed: ${e.message}")
         false
     }
 
@@ -759,6 +818,9 @@ class MyVpnService : VpnService() {
         proxyPass = ""
         balancerMode = false
         lastXrayConfig = ""
+        balancerPoolIds = emptyList()
+        throttledIds.clear()
+        throttleStreak = 0
         _vpnState.value = VpnState.DISCONNECTED
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()

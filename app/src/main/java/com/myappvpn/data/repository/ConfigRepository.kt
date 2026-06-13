@@ -6,10 +6,14 @@ import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.data.remote.GithubApiService
 import com.myappvpn.data.remote.SubscriptionUrls
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -73,13 +77,26 @@ class ConfigRepository @Inject constructor(
         deduplicated.size
     }
 
-    /** Try mirrors in order; return the first response that contains vless:// links. */
-    private suspend fun fetchFirstWorking(chain: List<String>): String? {
-        for (url in chain) {
-            val text = runCatching { apiService.fetchRawFile(url) }.getOrNull()
-            if (text != null && text.contains("vless://")) return text
+    /**
+     * RACE all mirrors of a chain in parallel (≤10s each); return the FIRST that responds with
+     * vless:// links. Critical for RU mobile: blocked mirrors (github/codeberg/gitlab) just time
+     * out in the background while a working experimental mirror (Mos.Hub / GitVerse) wins fast —
+     * instead of sequentially waiting ~30s on each blocked one before reaching the good mirror.
+     */
+    private suspend fun fetchFirstWorking(chain: List<String>): String? = coroutineScope {
+        val winner = CompletableDeferred<String?>()
+        val jobs = chain.map { url ->
+            launch {
+                val text = withTimeoutOrNull(10_000) {
+                    runCatching { apiService.fetchRawFile(url) }.getOrNull()
+                }
+                if (text != null && text.contains("vless://")) winner.complete(text)
+            }
         }
-        return null
+        launch { jobs.joinAll(); winner.complete(null) }   // all failed → null
+        val result = winner.await()
+        jobs.forEach { it.cancel() }                       // stop the losers
+        result
     }
 
     /**
