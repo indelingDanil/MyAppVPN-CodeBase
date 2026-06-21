@@ -25,11 +25,11 @@ import com.myappvpn.ui.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
-    onNavigateToSplitTunnel: () -> Unit
+    onNavigateToSplitTunnel: () -> Unit,
+    onNavigateToSubscriptions: () -> Unit
 ) {
     val autoConnect by viewModel.autoConnect.collectAsState()
     val hotspotSharing by viewModel.hotspotSharing.collectAsState()
-    val igareckFull by viewModel.igareckFull.collectAsState()
     val splitTunnelEnabled by viewModel.splitTunnelEnabled.collectAsState()
 
     Column(
@@ -49,32 +49,12 @@ fun SettingsScreen(
 
         // Subscription section
         SettingsSection(title = "Subscription") {
-            SettingsInfoItem(
+            SettingsNavigateItem(
                 icon = Icons.Default.CloudDownload,
-                title = "Config Sources",
-                value = "zieng2/wl + igareck"
+                title = "Подписки / Subscriptions",
+                subtitle = "Добавить свои источники, включить/выключить",
+                onClick = onNavigateToSubscriptions
             )
-            Divider(color = AetherDivider, thickness = 1.dp)
-            SettingsSwitchItem(
-                icon = Icons.Default.Warning,
-                title = "igareck: полная подписка",
-                subtitle = "BLACK_VLESS_RUS.txt вместо mobile",
-                checked = igareckFull,
-                onCheckedChange = { viewModel.setIgareckFull(it) }
-            )
-            if (igareckFull) {
-                Text(
-                    text = "⚠ Внимание! Полная подписка содержит 1000-2000+ конфигураций. " +
-                           "Телефон может тяжело обработать такое количество! " +
-                           "Рекомендовано только для ПК.\n" +
-                           "⚠ Warning! Full subscription has 1000-2000+ configs. " +
-                           "Phones struggle with this many! Recommended for PC only.",
-                    color = AetherDisconnected,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 12.dp)
-                )
-            }
         }
 
         // Connection section

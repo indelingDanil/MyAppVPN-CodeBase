@@ -7,4 +7,5 @@ sealed class Screen(val route: String) {
     object Settings : Screen("settings")
     object SplitTunnel : Screen("split_tunnel")
     object HotspotSetup : Screen("hotspot_setup")
+    object Subscriptions : Screen("subscriptions")
 }

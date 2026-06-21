@@ -20,7 +20,6 @@ class AppPreferences @Inject constructor(
     private val dataStore = context.dataStore
 
     companion object {
-        val KEY_USE_LITE_SUBSCRIPTION = booleanPreferencesKey("use_lite_subscription")
         val KEY_LAST_REFRESH_TIME = longPreferencesKey("last_refresh_time")
         val KEY_SELECTED_SERVER_ID = stringPreferencesKey("selected_server_id")
         val KEY_AUTO_CONNECT = booleanPreferencesKey("auto_connect")
@@ -31,17 +30,16 @@ class AppPreferences @Inject constructor(
         val KEY_SHOW_STATS = booleanPreferencesKey("show_stats")
         val KEY_SOCKS_PORT = intPreferencesKey("socks_port")
         val KEY_HOTSPOT_SHARING = booleanPreferencesKey("hotspot_sharing")
-        val KEY_IGARECK_FULL = booleanPreferencesKey("igareck_full_subscription")
         val KEY_AUTO_MODE = booleanPreferencesKey("auto_mode")
         val KEY_EXCLUDED_COUNTRIES = stringSetPreferencesKey("excluded_countries")
+        // Custom subscriptions: JSON array of {name,url,enabled}. Built-in sources that the user
+        // turned OFF are tracked by id in KEY_DISABLED_BUILTINS (empty = all built-ins enabled).
+        val KEY_CUSTOM_SUBS = stringPreferencesKey("custom_subscriptions")
+        val KEY_DISABLED_BUILTINS = stringSetPreferencesKey("disabled_builtin_sources")
         // Sentinel so an empty user selection is distinguishable from "never set" (→ default).
         private const val EXCLUDED_NONE = "__none__"
         private val DEFAULT_EXCLUDED = setOf("Russia")
     }
-
-    val useLiteSubscription: Flow<Boolean> = dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { it[KEY_USE_LITE_SUBSCRIPTION] ?: true }
 
     val lastRefreshTime: Flow<Long> = dataStore.data
         .catch { emit(emptyPreferences()) }
@@ -78,10 +76,6 @@ class AppPreferences @Inject constructor(
     val socksPort: Flow<Int> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { it[KEY_SOCKS_PORT] ?: 10808 }
-
-    suspend fun setUseLiteSubscription(value: Boolean) {
-        dataStore.edit { it[KEY_USE_LITE_SUBSCRIPTION] = value }
-    }
 
     suspend fun setLastRefreshTime(time: Long) {
         dataStore.edit { it[KEY_LAST_REFRESH_TIME] = time }
@@ -123,12 +117,22 @@ class AppPreferences @Inject constructor(
         dataStore.edit { it[KEY_HOTSPOT_SHARING] = v }
     }
 
-    val igareckFullSubscription: Flow<Boolean> = dataStore.data
+    /** Raw JSON of user-added custom subscriptions (decoded by SubscriptionRepository). */
+    val customSubscriptionsJson: Flow<String> = dataStore.data
         .catch { emit(emptyPreferences()) }
-        .map { it[KEY_IGARECK_FULL] ?: false }
+        .map { it[KEY_CUSTOM_SUBS] ?: "[]" }
 
-    suspend fun setIgareckFullSubscription(v: Boolean) {
-        dataStore.edit { it[KEY_IGARECK_FULL] = v }
+    suspend fun setCustomSubscriptionsJson(json: String) {
+        dataStore.edit { it[KEY_CUSTOM_SUBS] = json }
+    }
+
+    /** Ids of built-in sources the user disabled (empty = all built-ins enabled). */
+    val disabledBuiltinSources: Flow<Set<String>> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_DISABLED_BUILTINS] ?: emptySet() }
+
+    suspend fun setDisabledBuiltinSources(ids: Set<String>) {
+        dataStore.edit { it[KEY_DISABLED_BUILTINS] = ids }
     }
 
     /**

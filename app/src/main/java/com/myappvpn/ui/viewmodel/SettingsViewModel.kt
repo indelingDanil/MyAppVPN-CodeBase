@@ -24,16 +24,10 @@ class SettingsViewModel @Inject constructor(
     private val preferences: AppPreferences
 ) : ViewModel() {
 
-    val useLiteSubscription: StateFlow<Boolean> = preferences.useLiteSubscription
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), true)
-
     val autoConnect: StateFlow<Boolean> = preferences.autoConnect
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
 
     val hotspotSharing: StateFlow<Boolean> = preferences.hotspotSharing
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
-
-    val igareckFull: StateFlow<Boolean> = preferences.igareckFullSubscription
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
 
     val splitTunnelEnabled: StateFlow<Boolean> = preferences.splitTunnelEnabled
@@ -94,16 +88,8 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setUseLiteSubscription(value: Boolean) = viewModelScope.launch {
-        preferences.setUseLiteSubscription(value)
-    }
-
     fun setHotspotSharing(value: Boolean) = viewModelScope.launch {
         preferences.setHotspotSharing(value)
-    }
-
-    fun setIgareckFull(value: Boolean) = viewModelScope.launch {
-        preferences.setIgareckFullSubscription(value)
     }
 
     fun setAutoConnect(value: Boolean) = viewModelScope.launch {

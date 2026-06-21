@@ -77,9 +77,12 @@ object VlessUriParser {
 
     /**
      * Parse list of VLESS URIs from subscription text (one per line).
+     * If the text contains no `vless://` lines, try decoding it as base64 first — many third-party
+     * subscriptions ship the whole list as a single base64 blob.
      */
     fun parseSubscription(text: String): List<Pair<VlessConfig, String>> {
-        return text.lines()
+        val effective = if (text.contains("vless://")) text else (decodeBase64(text) ?: text)
+        return effective.lines()
             .map { it.trim() }
             .filter { it.startsWith("vless://") }
             .mapNotNull { uri ->
@@ -87,12 +90,21 @@ object VlessUriParser {
             }
     }
 
+    /** Best-effort base64 decode of a whole subscription body; null if it isn't valid base64. */
+    private fun decodeBase64(text: String): String? = runCatching {
+        val cleaned = text.trim().replace("\n", "").replace("\r", "")
+        if (cleaned.isEmpty()) return null
+        val decoded = android.util.Base64.decode(cleaned, android.util.Base64.DEFAULT)
+        String(decoded, Charsets.UTF_8).takeIf { it.contains("vless://") }
+    }.getOrNull()
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     private fun parseHostPort(hostPort: String): Pair<String, Int> {
         return if (hostPort.startsWith("[")) {
             // IPv6: [::1]:443
             val closeBracket = hostPort.indexOf(']')
+            if (closeBracket < 0) return hostPort to 443   // malformed (unclosed bracket) — don't crash
             val host = hostPort.substring(1, closeBracket)
             val port = hostPort.substring(closeBracket + 2).toIntOrNull() ?: 443
             host to port

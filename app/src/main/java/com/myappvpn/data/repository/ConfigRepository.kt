@@ -5,7 +5,6 @@ import com.myappvpn.data.db.ServerDao
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.data.remote.GithubApiService
-import com.myappvpn.data.remote.SubscriptionUrls
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -22,7 +21,8 @@ import javax.inject.Singleton
 class ConfigRepository @Inject constructor(
     private val apiService: GithubApiService,
     private val serverDao: ServerDao,
-    private val preferences: AppPreferences
+    private val preferences: AppPreferences,
+    private val subscriptionRepository: SubscriptionRepository
 ) {
     companion object {
         private val BLOCKED_COUNTRIES = setOf("Ukraine")
@@ -31,10 +31,15 @@ class ConfigRepository @Inject constructor(
     val servers: Flow<List<ServerProfile>> = serverDao.getAllServers()
 
     suspend fun fetchAndSaveServers(): Result<Int> = runCatching {
-        // Each source is a fallback chain (identical mirrors) — take the first that works.
-        // Chains are fetched in parallel; their results are merged.
+        // Only enabled sources (built-in + custom) are fetched. Each source is a fallback chain
+        // (identical mirrors) — take the first that works. Chains are fetched in parallel & merged.
+        val chains = subscriptionRepository.getEnabledChains()
+        // No enabled sources → do NOT prune the existing pool (don't brick the app when the user
+        // toggles everything off). Just report 0; the current servers stay usable.
+        if (chains.isEmpty()) return@runCatching 0
+
         val texts: List<String?> = coroutineScope {
-            SubscriptionUrls.ALL_CHAINS.map { chain ->
+            chains.map { chain ->
                 async { fetchFirstWorking(chain) }
             }.map { it.await() }
         }

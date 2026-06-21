@@ -39,12 +39,21 @@ fun AppNavGraph(navController: NavHostController) {
             SettingsScreen(
                 onNavigateToSplitTunnel = {
                     navController.navigate(Screen.SplitTunnel.route)
+                },
+                onNavigateToSubscriptions = {
+                    navController.navigate(Screen.Subscriptions.route)
                 }
             )
         }
 
         composable(Screen.SplitTunnel.route) {
             SplitTunnelScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.Subscriptions.route) {
+            SubscriptionsScreen(
                 onBack = { navController.popBackStack() }
             )
         }

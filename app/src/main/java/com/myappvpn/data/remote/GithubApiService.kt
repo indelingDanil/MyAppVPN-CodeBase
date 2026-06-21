@@ -1,5 +1,6 @@
 package com.myappvpn.data.remote
 
+import com.myappvpn.data.model.SubscriptionSource
 import retrofit2.http.GET
 import retrofit2.http.Url
 
@@ -37,6 +38,28 @@ object SubscriptionUrls {
         "https://codeberg.org/igareck/vpn-configs-for-russia/raw/branch/main/BLACK_VLESS_RUS.txt",
     )
 
-    /** All fallback chains, fetched and merged by ConfigRepository. */
-    val ALL_CHAINS = listOf(UNIVERSAL_CHAIN, IGARECK_BLACK_CHAIN)
+    /** Stable ids for the built-in sources (used as DataStore keys for enable/disable state). */
+    const val ID_UNIVERSAL = "builtin:universal"
+    const val ID_IGARECK = "builtin:igareck"
+
+    /**
+     * Built-in subscription sources. These ship with the app; users can disable them but not
+     * delete them. Custom user sources are added on top by SubscriptionRepository.
+     */
+    val BUILTIN_SOURCES: List<SubscriptionSource> = listOf(
+        SubscriptionSource(
+            id = ID_UNIVERSAL,
+            name = "Universal (zieng2/wl)",
+            urls = UNIVERSAL_CHAIN,
+            enabled = true,
+            isBuiltin = true,
+        ),
+        SubscriptionSource(
+            id = ID_IGARECK,
+            name = "igareck BLACK",
+            urls = IGARECK_BLACK_CHAIN,
+            enabled = true,
+            isBuiltin = true,
+        ),
+    )
 }
