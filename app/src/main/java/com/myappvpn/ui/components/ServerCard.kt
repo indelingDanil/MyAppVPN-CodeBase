@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.VerifiedUser
@@ -29,7 +30,8 @@ fun ServerCard(
     server: ServerProfile,
     isSelected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRemove: (() -> Unit)? = null,
 ) {
     val borderColor = if (isSelected) AetherCyan else AetherBorder
 
@@ -88,6 +90,18 @@ fun ServerCard(
                     tint = AetherCyan,
                     modifier = Modifier.size(20.dp)
                 )
+            }
+
+            // Remove-from-pool action (only in the 24h working-pool section)
+            if (onRemove != null) {
+                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Удалить из списка",
+                        tint = AetherTextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

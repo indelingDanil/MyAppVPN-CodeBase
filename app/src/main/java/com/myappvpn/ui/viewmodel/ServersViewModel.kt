@@ -119,6 +119,11 @@ class ServersViewModel @Inject constructor(
         }
     }
 
+    /** Manually drop a server from the "Рабочие за 24ч" pool (clears its verified stamp). */
+    fun removeFromWorking(server: ServerProfile) {
+        viewModelScope.launch { configRepository.markFailed(server.id) }
+    }
+
     /** Pin a specific server → switches the app into manual mode. */
     fun selectServer(server: ServerProfile) {
         viewModelScope.launch {

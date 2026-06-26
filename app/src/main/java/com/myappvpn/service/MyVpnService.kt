@@ -54,7 +54,7 @@ class MyVpnService : VpnService() {
         const val CHANNEL_ID = "vpn_service"
         // Sticky balancer: only re-check the active route's Telegram reachability this often.
         private const val BALANCER_PROBE_INTERVAL_MS = 5 * 60_000L
-        // "Too slow / dead" = couldn't load Telegram within this budget (one probe).
+        // "Too slow / dead" = couldn't FULLY load Telegram within this budget (one probe).
         private const val TELEGRAM_PROBE_TIMEOUT_MS = 18_000
 
         private val _vpnState = MutableStateFlow(VpnState.DISCONNECTED)
@@ -65,6 +65,11 @@ class MyVpnService : VpnService() {
 
         private val _connectedServer = MutableStateFlow<ServerProfile?>(null)
         val connectedServer: StateFlow<ServerProfile?> = _connectedServer.asStateFlow()
+
+        // Local SOCKS port of the live tunnel (0 = not connected). Lets the app route its OWN
+        // requests (e.g. subscription refresh) THROUGH the tunnel — the app is excluded from its
+        // TUN, so without this its traffic goes over the restricted operator network directly.
+        @Volatile var activeSocksPort: Int = 0
     }
 
     @Inject lateinit var preferences: AppPreferences
@@ -91,6 +96,7 @@ class MyVpnService : VpnService() {
     private var watchdogJob: Job? = null
     private var splitTunnelObserverJob: Job? = null
     private var backgroundProbeJob: Job? = null
+    private var poolReverifyJob: Job? = null
 
     // Per-session SOCKS5 auth credentials — prevents other apps from using our proxy
     // (CVE: unauthenticated local SOCKS proxy deanonymization, see habr.com/ru/articles/1020080)
@@ -125,6 +131,7 @@ class MyVpnService : VpnService() {
 
     private suspend fun connect(xrayConfig: String, socksPort: Int, serverName: String, hotspotSharing: Boolean = false, balancer: Boolean = false) {
         currentSocksPort = socksPort
+        activeSocksPort = socksPort   // expose for in-tunnel subscription refresh
         currentServerName = serverName
         hotspotSharingEnabled = hotspotSharing
         balancerMode = balancer
@@ -171,8 +178,9 @@ class MyVpnService : VpnService() {
             if (balancerMode) {
                 pinnedTag = null
                 // balancerPoolIds already set from EXTRA_POOL_IDS (authoritative proxy-N mapping).
-                awaitTelegramReachable(timeoutMs = 45_000L)
-                pinBestAlive()
+                // Walk the pool and pin the first FAST-responding server (tested directly via the
+                // tunnel) — picks a fast route, not just any alive one.
+                warmUpPinFast()
             }
 
             _vpnState.value = VpnState.CONNECTED
@@ -192,6 +200,9 @@ class MyVpnService : VpnService() {
 
             // 6. Watchdog — sticky-pin health + seamless re-pin on real failure
             startWatchdog()
+
+            // 7. Background re-verify of the 24h working pool — drop entries that went dead
+            startWorkingPoolReverify()
 
         } catch (e: Exception) {
             Log.e(TAG, "Connect failed: ${e.message}")
@@ -367,6 +378,9 @@ class MyVpnService : VpnService() {
                     if (balancerMode) {
                         Log.w(TAG, "XRay died (balancer) — restarting same config")
                         if (!restartXray()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
+                        pinnedTag = null              // restart drops the override
+                        warmUpPinFast()               // re-pin onto a fast alive server (avoid cold-start)
+                        lastTgProbeAt = System.currentTimeMillis()
                         failStreak = 0
                         continue
                     }
@@ -420,13 +434,27 @@ class MyVpnService : VpnService() {
                         if (selects != null && selects != pinnedTag && pinBalancer(selects)) {
                             pinnedTag = selects
                             connectedServerForTag(selects)?.let { _connectedServer.value = it }
-                            tagToServerId(selects)?.let { configRepository.markVerified(it) }
-                            Log.i(TAG, "Balancer re-pinned to $selects (seamless, no restart)")
-                            failStreak = 0
+                            Log.i(TAG, "Balancer re-pinned to $selects — confirming…")
+                            // CONFIRM the new pin actually reaches Telegram before trusting it.
+                            // Only a confirmed route enters the 24h "working" pool.
+                            delay(2_000L)
+                            val confirmed = withContext(Dispatchers.IO) { isTelegramReachableViaSocks(currentSocksPort) }
+                            val sid = tagToServerId(selects)
+                            if (confirmed) {
+                                sid?.let { configRepository.markVerified(it) }
+                                Log.i(TAG, "Balancer re-pin to $selects confirmed working")
+                                failStreak = 0
+                            } else {
+                                sid?.let { configRepository.markFailed(it) }
+                                Log.w(TAG, "Balancer re-pin to $selects still unreachable — will retry/rebuild")
+                                // leave failStreak growing → escalates to rebuild below on next cycles
+                            }
                         } else if (failStreak >= 3) {
-                            // No alternative alive pick for ~minutes → whole pool likely bad → re-fetch.
+                            // No alternative alive pick for ~minutes → whole pool likely bad → re-fetch,
+                            // then warm-up-pin onto a confirmed-alive server (avoid cold-start blind routing).
                             Log.w(TAG, "Balancer: no alive pick — full rebuild (re-fetch)")
                             if (!rebuildBalancer()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
+                            warmUpPinFast()
                             failStreak = 0
                         }
                         lastTgProbeAt = System.currentTimeMillis()
@@ -482,6 +510,38 @@ class MyVpnService : VpnService() {
                             switchToNextServer()
                             return@launch
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 24h working-pool re-verify ───────────────────────────────────────────────
+
+    /**
+     * Periodically re-tests servers in the "Рабочt за 24ч" pool (verified within 24h) that aren't
+     * the currently-pinned one, and clears the stamp of any that went dead — so the manual-fallback
+     * list stays trustworthy. Uses the single-server micro-test (real reachability) on a spare port.
+     */
+    private fun startWorkingPoolReverify() {
+        poolReverifyJob?.cancel()
+        poolReverifyJob = serviceScope.launch {
+            while (isActive && _vpnState.value == VpnState.CONNECTED) {
+                delay(10 * 60_000L)   // every ~10 min
+                if (_vpnState.value != VpnState.CONNECTED) break
+                val cutoff = System.currentTimeMillis() - 24 * 60 * 60_000L
+                val pinnedId = tagToServerId(pinnedTag)
+                val pool = configRepository.servers.first()
+                    .filter { it.verifiedAt > cutoff && it.id != pinnedId }
+                    .sortedBy { it.verifiedAt }   // oldest stamp first (most likely stale)
+                    .take(5)
+                for (s in pool) {
+                    if (!isActive || _vpnState.value != VpnState.CONNECTED) break
+                    delay(20_000L)   // slow pace — don't drain battery/data
+                    val ok = withContext(Dispatchers.IO) { xrayMicroTest.test(s, testPort = 10904).success }
+                    if (!ok) {
+                        configRepository.markFailed(s.id)
+                        Log.i(TAG, "Pool re-verify: ${s.name} no longer working — removed from 24h pool")
                     }
                 }
             }
@@ -598,30 +658,35 @@ class MyVpnService : VpnService() {
     }
 
     /**
-     * Reliable "is this route usable" probe for balancer mode: hit the Telegram API endpoint
-     * (the thing this VPN exists to unblock) THROUGH the tunnel. ANY HTTP response means the proxy
-     * actually reached Telegram's servers — even a 404 from a bare GET proves reachability. Only a
-     * timeout / connection error within the ~18s budget counts as failure. That generous budget is
-     * also the definition of "too slow": a route that can't load Telegram in ~18s is treated as
-     * dead. This replaces the unreliable cloudflare speed probe that false-flagged working routes.
+     * Full Telegram-API probe through the tunnel: GET https://api.telegram.org/ and READ THE WHOLE
+     * RESPONSE BODY (not just the status line) within [timeoutMs]. Returns elapsed ms on success, or
+     * -1 on timeout/error. Reading the body to completion is what catches a "mega slow" proxy: it
+     * may return headers instantly but then crawl — such a route won't finish the read in budget (or
+     * will, but slowly → caller can reject by elapsed time).
      */
-    private fun isTelegramReachableViaSocks(port: Int): Boolean {
+    private fun probeTelegramElapsedMs(port: Int, timeoutMs: Int = TELEGRAM_PROBE_TIMEOUT_MS): Int {
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
         return try {
+            val start = System.currentTimeMillis()
             val conn = java.net.URL("https://api.telegram.org/")
                 .openConnection(proxy) as java.net.HttpURLConnection
-            conn.connectTimeout = TELEGRAM_PROBE_TIMEOUT_MS
-            conn.readTimeout = TELEGRAM_PROBE_TIMEOUT_MS
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
             conn.requestMethod = "GET"
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("User-Agent", "Mozilla/5.0")
             val code = conn.responseCode
+            // Drain the body fully within the budget (404 body is in errorStream).
+            (runCatching { conn.inputStream }.getOrNull() ?: conn.errorStream)?.use { it.readBytes() }
             conn.disconnect()
-            code > 0   // any HTTP status = the tunnel reached Telegram
+            if (code > 0) (System.currentTimeMillis() - start).toInt() else -1
         } catch (_: Exception) {
-            false
+            -1
         }
     }
+
+    /** Reachable = a full Telegram response arrived within the budget. */
+    private fun isTelegramReachableViaSocks(port: Int): Boolean = probeTelegramElapsedMs(port) >= 0
 
     /**
      * Quick speed probe: downloads 30-70 KB through the tunnel (randomized to avoid DPI fingerprinting).
@@ -744,6 +809,38 @@ class MyVpnService : VpnService() {
             return true
         }
         return false
+    }
+
+    /** Record the active pin: update UI server + stamp it into the 24h working pool. */
+    private suspend fun recordPin(tag: String) {
+        pinnedTag = tag
+        connectedServerForTag(tag)?.let { _connectedServer.value = it }
+        tagToServerId(tag)?.let { configRepository.markVerified(it) }
+    }
+
+    /**
+     * Warm-up / cold-start pin — fully automatic, no live-route disruption. Tests the top pool
+     * candidates with SIDE micro-tests (separate temporary xray instances, real reachability +
+     * latency), then pins the FASTEST one in a single `bo` call. Because testing happens off to the
+     * side, the user's traffic isn't dragged through slow/dead candidates during warm-up. Falls back
+     * to the balancer's own best-alive pick if no candidate passes.
+     */
+    private suspend fun warmUpPinFast() {
+        val byId = configRepository.servers.first().associateBy { it.id }
+        val candidates = balancerPoolIds.take(12).mapNotNull { byId[it] }
+        if (candidates.isEmpty()) { pinBestAlive(); return }
+
+        val results = withContext(Dispatchers.IO) { xrayMicroTest.testBatch(candidates, targetCount = 4) }
+        val best = results.filter { it.success }.minByOrNull { it.latencyMs }
+        if (best != null) {
+            val idx = balancerPoolIds.indexOf(best.serverId)
+            if (idx >= 0 && pinBalancer("proxy-$idx")) {
+                recordPin("proxy-$idx")
+                Log.i(TAG, "Warm-up: pinned FASTEST proxy-$idx (${best.latencyMs}ms, server=${best.serverId})")
+                return
+            }
+        }
+        pinBestAlive()   // nothing passed the side-test → let the balancer choose
     }
 
     // ── Balancer recovery ───────────────────────────────────────────────────────
@@ -900,6 +997,8 @@ class MyVpnService : VpnService() {
         watchdogJob?.cancel(); watchdogJob = null
         splitTunnelObserverJob?.cancel(); splitTunnelObserverJob = null
         backgroundProbeJob?.cancel(); backgroundProbeJob = null
+        poolReverifyJob?.cancel(); poolReverifyJob = null
+        activeSocksPort = 0   // stop routing app requests through a dead tunnel
         trafficMonitor.stop()
         tun2SocksManager.stop()
         xrayManager.stop()

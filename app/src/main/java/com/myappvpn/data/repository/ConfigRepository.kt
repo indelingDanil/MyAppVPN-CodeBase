@@ -5,15 +5,22 @@ import com.myappvpn.data.db.ServerDao
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.data.remote.GithubApiService
+import com.myappvpn.service.MyVpnService
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -92,8 +99,8 @@ class ConfigRepository @Inject constructor(
         val winner = CompletableDeferred<String?>()
         val jobs = chain.map { url ->
             launch {
-                val text = withTimeoutOrNull(10_000) {
-                    runCatching { apiService.fetchRawFile(url) }.getOrNull()
+                val text = withTimeoutOrNull(12_000) {
+                    runCatching { fetchRaw(url) }.getOrNull()
                 }
                 if (text != null && text.contains("vless://")) winner.complete(text)
             }
@@ -102,6 +109,33 @@ class ConfigRepository @Inject constructor(
         val result = winner.await()
         jobs.forEach { it.cancel() }                       // stop the losers
         result
+    }
+
+    /**
+     * Fetch a raw subscription file. When the VPN is up, route the request THROUGH the tunnel
+     * (SOCKS 127.0.0.1:port) so blocked mirrors (github/gitlab/codeberg) become reachable via the
+     * working proxy — the app is excluded from its own TUN, so a direct fetch would otherwise go
+     * over the restricted operator network and only reach a couple of experimental mirrors.
+     */
+    private suspend fun fetchRaw(url: String): String {
+        val port = MyVpnService.activeSocksPort
+        return if (port > 0) fetchViaSocks(url, port) else apiService.fetchRawFile(url)
+    }
+
+    private suspend fun fetchViaSocks(url: String, port: Int): String = withContext(Dispatchers.IO) {
+        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
+        val conn = URL(url).openConnection(proxy) as HttpURLConnection
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 10_000
+        conn.requestMethod = "GET"
+        conn.instanceFollowRedirects = true
+        try {
+            val code = conn.responseCode
+            if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() }
+            else throw IOException("HTTP $code for $url")
+        } finally {
+            conn.disconnect()
+        }
     }
 
     /**

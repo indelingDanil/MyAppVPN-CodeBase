@@ -238,7 +238,8 @@ fun ServersScreen(
                                 onClick = {
                                     viewModel.selectServer(server)
                                     onServerSelected()
-                                }
+                                },
+                                onRemove = { viewModel.removeFromWorking(server) }
                             )
                         }
                         item(key = "__all_header__") {
