@@ -174,6 +174,11 @@ class ConfigRepository @Inject constructor(
         serverDao.markVerified(serverId, System.currentTimeMillis())
     }
 
+    /** Clears a server's verified-working stamp so it leaves the 24h working pool. */
+    suspend fun markFailed(serverId: String) {
+        serverDao.markFailed(serverId)
+    }
+
     suspend fun incrementConsecutiveFailure(serverId: String) {
         serverDao.incrementConsecutiveFailure(serverId)
     }

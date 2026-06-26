@@ -413,6 +413,8 @@ class MyVpnService : VpnService() {
                     } else {
                         failStreak++
                         Log.w(TAG, "Balancer: pinned route unreachable ~${TELEGRAM_PROBE_TIMEOUT_MS / 1000}s #$failStreak (xrayErrors=${xrayManager.errorRate})")
+                        // The pinned route actually failed → drop it from the 24h working pool.
+                        tagToServerId(pinnedTag)?.let { configRepository.markFailed(it) }
                         // Seamless re-pin: balancer's `Selects` excludes the just-died server.
                         val (_, selects) = balancerInfo()
                         if (selects != null && selects != pinnedTag && pinBalancer(selects)) {
@@ -790,6 +792,7 @@ class MyVpnService : VpnService() {
             val failedServer = configRepository.getSelectedServer()
             if (failedServer != null) {
                 configRepository.recordFailure(failedServer.id)
+                configRepository.markFailed(failedServer.id)   // drop from 24h working pool
                 if (BuildConfig.DEBUG) Log.w(TAG, "Recorded failure for ${failedServer.name}")
             }
 

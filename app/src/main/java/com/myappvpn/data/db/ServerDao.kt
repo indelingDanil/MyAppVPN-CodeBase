@@ -63,6 +63,11 @@ interface ServerDao {
     @Query("UPDATE servers SET validationState = 'VERIFIED', verifiedAt = :time, lastValidatedAt = :time, consecutiveFailures = 0 WHERE id = :id")
     suspend fun markVerified(id: String, time: Long)
 
+    // Clears the "verified working" stamp so the server drops out of the 24h working pool —
+    // used when a previously-working route actually fails.
+    @Query("UPDATE servers SET verifiedAt = 0, validationState = CASE WHEN validationState = 'VERIFIED' THEN 'STALE' ELSE validationState END WHERE id = :id")
+    suspend fun markFailed(id: String)
+
     @Query("UPDATE servers SET consecutiveFailures = consecutiveFailures + 1, validationState = CASE WHEN consecutiveFailures >= 2 THEN 'STALE' ELSE validationState END WHERE id = :id")
     suspend fun incrementConsecutiveFailure(id: String)
 
