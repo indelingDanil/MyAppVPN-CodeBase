@@ -121,6 +121,19 @@ object XrayConfigBuilder {
             })
         })
 
+        // Local control API (RoutingService = balancer override `bo`/info `bi`,
+        // ObservatoryService = per-outbound alive/delay). Bound to loopback only, on socksPort+2.
+        // Lets the app know which proxy is alive/active and pin a chosen one (sticky) without
+        // restarting Xray — IF this build honors it (verified by an on-device spike).
+        val apiPort = socksPort + 2
+        root.put("api", JSONObject().apply {
+            put("tag", "api")
+            put("services", JSONArray().apply {
+                put("RoutingService")
+                put("ObservatoryService")
+            })
+        })
+
         root.put("inbounds", JSONArray().apply {
             put(JSONObject().apply {
                 put("tag", "socks")
@@ -139,6 +152,14 @@ object XrayConfigBuilder {
                 put("listen", listenAddr)
                 put("protocol", "http")
                 put("settings", JSONObject().apply { put("allowTransparent", false) })
+            })
+            // API inbound (dokodemo-door) — loopback only; carries `xray api` gRPC calls.
+            put(JSONObject().apply {
+                put("tag", "api")
+                put("port", apiPort)
+                put("listen", "127.0.0.1")
+                put("protocol", "dokodemo-door")
+                put("settings", JSONObject().apply { put("address", "127.0.0.1") })
             })
         })
 
@@ -183,6 +204,12 @@ object XrayConfigBuilder {
                 })
             })
             put("rules", JSONArray().apply {
+                // API calls (loopback dokodemo-door) → api handler. MUST be first.
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("inboundTag", JSONArray().apply { put("api") })
+                    put("outboundTag", "api")
+                })
                 put(JSONObject().apply {
                     put("type", "field")
                     put("outboundTag", "direct")

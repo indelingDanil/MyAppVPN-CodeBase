@@ -47,8 +47,15 @@ class MyVpnService : VpnService() {
         const val EXTRA_SERVER_NAME = "server_name"
         const val EXTRA_HOTSPOT_SHARING = "hotspot_sharing"
         const val EXTRA_BALANCER_MODE = "balancer_mode"
+        // Ordered server ids matching proxy-0..N in the balancer config (index = N). Lets the
+        // service map the active/pinned `proxy-N` (from `xray api bi/bo`) back to a real server.
+        const val EXTRA_POOL_IDS = "pool_ids"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "vpn_service"
+        // Sticky balancer: only re-check the active route's Telegram reachability this often.
+        private const val BALANCER_PROBE_INTERVAL_MS = 5 * 60_000L
+        // "Too slow / dead" = couldn't load Telegram within this budget (one probe).
+        private const val TELEGRAM_PROBE_TIMEOUT_MS = 18_000
 
         private val _vpnState = MutableStateFlow(VpnState.DISCONNECTED)
         val vpnState: StateFlow<VpnState> = _vpnState.asStateFlow()
@@ -76,11 +83,11 @@ class MyVpnService : VpnService() {
     // Balancer (auto) mode: Xray observatory picks/switches the active server in-core.
     private var balancerMode = false
     private var lastXrayConfig: String = ""   // authed config of the current session (for restart)
-    // Minimal anti-throttle guard: pool server ids (lowest-latency first ≈ leastPing's pick),
-    // a throttled-exclusion set, and a consecutive-slow streak counter.
+    // Balancer pool: ordered server ids where index == proxy-N in the Xray config (set from
+    // EXTRA_POOL_IDS). Lets us map the active/pinned proxy back to a real server.
     private var balancerPoolIds: List<String> = emptyList()
-    private val throttledIds = mutableSetOf<String>()
-    private var throttleStreak = 0
+    // Current balancer override (e.g. "proxy-33") that we pinned via `xray api bo`, or null.
+    private var pinnedTag: String? = null
     private var watchdogJob: Job? = null
     private var splitTunnelObserverJob: Job? = null
     private var backgroundProbeJob: Job? = null
@@ -105,6 +112,8 @@ class MyVpnService : VpnService() {
                 val serverName = intent.getStringExtra(EXTRA_SERVER_NAME) ?: "Unknown"
                 val hotspotSharing = intent.getBooleanExtra(EXTRA_HOTSPOT_SHARING, false)
                 val balancer = intent.getBooleanExtra(EXTRA_BALANCER_MODE, false)
+                // Authoritative proxy-N → server id mapping (index = N), as built into the config.
+                balancerPoolIds = intent.getStringArrayListExtra(EXTRA_POOL_IDS) ?: emptyList()
                 serviceScope.launch { connect(xrayConfig, socksPort, serverName, hotspotSharing, balancer) }
             }
             ACTION_DISCONNECT -> serviceScope.launch { disconnect() }
@@ -157,18 +166,20 @@ class MyVpnService : VpnService() {
             trafficMonitor.start()
 
             // Balancer: stay in CONNECTING (UI shows "searching") until the observatory finds
-            // a server that actually reaches Telegram, so CONNECTED is honest. Bounded wait.
+            // a server that actually reaches Telegram, so CONNECTED is honest. Then PIN that pick
+            // (xray api bo) so the route stays put instead of drifting on ping jitter.
             if (balancerMode) {
-                throttledIds.clear(); throttleStreak = 0
-                val excluded = preferences.excludedCountries.first()
-                balancerPoolIds = configRepository.getServersExcludingCountries(excluded).take(50).map { it.id }
-                awaitTelegramReachable(timeoutMs = 30_000L)
+                pinnedTag = null
+                // balancerPoolIds already set from EXTRA_POOL_IDS (authoritative proxy-N mapping).
+                awaitTelegramReachable(timeoutMs = 45_000L)
+                pinBestAlive()
             }
 
             _vpnState.value = VpnState.CONNECTED
             _connectedServer.value = if (balancerMode) {
-                ServerProfile(id = "__balancer__", name = serverName, flag = "⚖️",
-                    country = "Auto", address = "", port = 0, vlessUri = "")
+                connectedServerForTag(pinnedTag)
+                    ?: ServerProfile(id = "__balancer__", name = serverName, flag = "⚖️",
+                        country = "Auto", address = "", port = 0, vlessUri = "")
             } else {
                 configRepository.getSelectedServer()
             }
@@ -179,7 +190,7 @@ class MyVpnService : VpnService() {
             // 5. Observe split-tunnel changes → rebuild TUN seamlessly
             startSplitTunnelObserver()
 
-            // 6. Watchdog — auto-failover if server dies
+            // 6. Watchdog — sticky-pin health + seamless re-pin on real failure
             startWatchdog()
 
         } catch (e: Exception) {
@@ -344,6 +355,7 @@ class MyVpnService : VpnService() {
             delay(30_000L + (Math.random() * 10_000L).toLong()) // jittered grace period
             var successRecorded = false
             var failStreak = 0
+            var lastTgProbeAt = 0L   // balancer: timestamp of last Telegram reachability probe
             while (isActive) {
                 // Randomized intervals to avoid DPI fingerprinting fixed-cadence health checks
                 val jitter = (Math.random() * 15_000L).toLong()
@@ -373,64 +385,74 @@ class MyVpnService : VpnService() {
                     continue
                 }
 
-                // High XRay error rate = VLESS tunnel broken → count as fail without HTTP probe
+                // High XRay error rate = VLESS tunnel broken → treat as failure without HTTP probe
                 val xrayErrorsHigh = xrayManager.errorRate > 10
-                val internetOk = when {
-                    xrayErrorsHigh -> {
-                        Log.w(TAG, "XRay errorRate=${xrayManager.errorRate} — treating as internet fail")
-                        false
-                    }
-                    // Balancer mode: success means the active route actually reaches Telegram (HTTP 200).
-                    balancerMode -> isTelegramReachableViaSocks(currentSocksPort)
-                    else -> isInternetReachableViaSocks(currentSocksPort)
-                }
 
-                if (!internetOk) {
-                    failStreak++
-                    Log.w(TAG, "Health check failed #$failStreak (xrayErrors=${xrayManager.errorRate})")
-                    if (balancerMode) {
-                        // Xray's observatory + leastPing already reroute OFF a genuinely dead
-                        // server in-core, WITHOUT dropping the SOCKS session. So a single failing
-                        // probe means nothing — never restart Xray for it. Only rebuild when the
-                        // probe fails for a long sustained stretch (~minutes), which signals the
-                        // WHOLE pool is dead (operator blocked everything), not one slow server.
-                        if (failStreak >= 8) {
-                            Log.w(TAG, "Balancer: whole pool unreachable for ~minutes — rebuilding")
+                if (balancerMode) {
+                    // ── STICKY balancer health (pin orchestrator) ──
+                    // Re-evaluate only every ~5 min. The route is PINNED (xray api bo), so it never
+                    // drifts on ping jitter. The only signal is real Telegram reachability: pinned
+                    // route loads Telegram within ~18s → stay. On failure we ask the balancer for a
+                    // new best-alive pick and move the override to it — seamless, NO Xray restart.
+                    val now = System.currentTimeMillis()
+                    if (!xrayErrorsHigh && now - lastTgProbeAt < BALANCER_PROBE_INTERVAL_MS) continue
+                    lastTgProbeAt = now
+
+                    var ok = !xrayErrorsHigh &&
+                        withContext(Dispatchers.IO) { isTelegramReachableViaSocks(currentSocksPort) }
+                    if (!ok && !xrayErrorsHigh) {
+                        // One immediate confirm re-probe so a single transient blip doesn't churn.
+                        ok = withContext(Dispatchers.IO) { isTelegramReachableViaSocks(currentSocksPort) }
+                    }
+
+                    if (ok) {
+                        failStreak = 0   // pinned route works → stay (sticky)
+                        // Refresh the pinned server's 24h "verified working" stamp.
+                        tagToServerId(pinnedTag)?.let { configRepository.markVerified(it) }
+                        if (pinnedTag == null) pinBestAlive()   // lost pin → re-establish
+                    } else {
+                        failStreak++
+                        Log.w(TAG, "Balancer: pinned route unreachable ~${TELEGRAM_PROBE_TIMEOUT_MS / 1000}s #$failStreak (xrayErrors=${xrayManager.errorRate})")
+                        // Seamless re-pin: balancer's `Selects` excludes the just-died server.
+                        val (_, selects) = balancerInfo()
+                        if (selects != null && selects != pinnedTag && pinBalancer(selects)) {
+                            pinnedTag = selects
+                            connectedServerForTag(selects)?.let { _connectedServer.value = it }
+                            tagToServerId(selects)?.let { configRepository.markVerified(it) }
+                            Log.i(TAG, "Balancer re-pinned to $selects (seamless, no restart)")
+                            failStreak = 0
+                        } else if (failStreak >= 3) {
+                            // No alternative alive pick for ~minutes → whole pool likely bad → re-fetch.
+                            Log.w(TAG, "Balancer: no alive pick — full rebuild (re-fetch)")
                             if (!rebuildBalancer()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
                             failStreak = 0
                         }
-                    } else if (failStreak >= 2) {
-                        Log.w(TAG, "2 consecutive failures — switching server")
-                        configRepository.getSelectedServer()?.let {
-                            configRepository.incrementConsecutiveFailure(it.id)
-                            configRepository.recordFailure(it.id)
-                        }
-                        switchToNextServer()
-                        break
+                        lastTgProbeAt = System.currentTimeMillis()
                     }
-                } else if (balancerMode) {
-                    failStreak = 0   // Telegram-reachable; now a minimal anti-throttle check.
-                    // On a throttled route even DoH/download stalls → measureQuickSpeedMbps ≈ 0/low.
-                    // Lenient threshold + 3-in-a-row streak so we never churn on a transient glitch.
-                    val speed = withContext(Dispatchers.IO) { measureQuickSpeedMbps(currentSocksPort) }
-                    // speed == 0 means the cloudflare probe couldn't even run (DoH/connect failed
-                    // through the tunnel) — NOT proof the route is throttled. Real traffic still
-                    // flows on such routes (Telegram probe just passed). Only treat a *measurable*
-                    // crawl (>0 but <40 KB/s) as throttling, so we never kill a working route on a
-                    // failed measurement.
-                    if (speed in 0.0001f..0.04f) {
-                        throttleStreak++
-                        Log.w(TAG, "Balancer route slow #$throttleStreak (${"%.0f".format(speed * 1024)} KB/s)")
-                        if (throttleStreak >= 3) {
-                            // leastPing routes through the lowest-latency pool server — exclude it.
-                            balancerPoolIds.firstOrNull()?.let { throttledIds.add(it) }
-                            if (throttledIds.size >= 20) throttledIds.clear()  // don't shrink pool forever
-                            Log.w(TAG, "Excluding throttled server, rebuilding balancer pool")
-                            rebuildBalancerPool()
-                            throttleStreak = 0
-                        }
-                    } else throttleStreak = 0
                 } else {
+                    // ── Single-server mode: probe every tick ──
+                    val internetOk = if (xrayErrorsHigh) {
+                        Log.w(TAG, "XRay errorRate=${xrayManager.errorRate} — treating as internet fail")
+                        false
+                    } else {
+                        isInternetReachableViaSocks(currentSocksPort)
+                    }
+
+                    if (!internetOk) {
+                        failStreak++
+                        Log.w(TAG, "Health check failed #$failStreak (xrayErrors=${xrayManager.errorRate})")
+                        if (failStreak >= 2) {
+                            Log.w(TAG, "2 consecutive failures — switching server")
+                            configRepository.getSelectedServer()?.let {
+                                configRepository.incrementConsecutiveFailure(it.id)
+                                configRepository.recordFailure(it.id)
+                            }
+                            switchToNextServer()
+                            break
+                        }
+                        continue
+                    }
+
                     failStreak = 0
                     configRepository.getSelectedServer()?.let { server ->
                         // Mark as verified + reset consecutive failures on first success
@@ -560,13 +582,8 @@ class MyVpnService : VpnService() {
     }
 
     /**
-     * Strict Telegram reachability check through the tunnel: requires HTTP 200 from t.me.
-     * Used in balancer mode — a route is only "good" if it actually unblocks Telegram,
-     * which TCP ping / generic connectivity cannot guarantee.
-     */
-    /**
      * Poll Telegram reachability until success or timeout (balancer warm-up).
-     * Returns true as soon as t.me responds 200 through the tunnel.
+     * Returns true as soon as Telegram responds through the tunnel.
      */
     private suspend fun awaitTelegramReachable(timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -578,22 +595,27 @@ class MyVpnService : VpnService() {
         return false
     }
 
+    /**
+     * Reliable "is this route usable" probe for balancer mode: hit the Telegram API endpoint
+     * (the thing this VPN exists to unblock) THROUGH the tunnel. ANY HTTP response means the proxy
+     * actually reached Telegram's servers — even a 404 from a bare GET proves reachability. Only a
+     * timeout / connection error within the ~18s budget counts as failure. That generous budget is
+     * also the definition of "too slow": a route that can't load Telegram in ~18s is treated as
+     * dead. This replaces the unreliable cloudflare speed probe that false-flagged working routes.
+     */
     private fun isTelegramReachableViaSocks(port: Int): Boolean {
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
         return try {
-            val conn = java.net.URL("https://t.me/")
+            val conn = java.net.URL("https://api.telegram.org/")
                 .openConnection(proxy) as java.net.HttpURLConnection
-            conn.connectTimeout = 8_000
-            conn.readTimeout = 8_000
+            conn.connectTimeout = TELEGRAM_PROBE_TIMEOUT_MS
+            conn.readTimeout = TELEGRAM_PROBE_TIMEOUT_MS
             conn.requestMethod = "GET"
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("User-Agent", "Mozilla/5.0")
             val code = conn.responseCode
             conn.disconnect()
-            // Any 2xx/3xx = the route reached Telegram. A redirect (301/302) still proves
-            // reachability, so don't treat it as a failure — strict ==200 caused false negatives
-            // that tore down working-but-slow routes (the exact "kills a live proxy" bug).
-            code in 200..399
+            code > 0   // any HTTP status = the tunnel reached Telegram
         } catch (_: Exception) {
             false
         }
@@ -655,6 +677,73 @@ class MyVpnService : VpnService() {
         0f
     }
 
+    // ── Balancer control API (xray api bo/bi) ───────────────────────────────────
+    // Confirmed working on the bundled Xray 26.2.6:
+    //   bo --server=127.0.0.1:<apiPort> -b balancer <proxy-N>   → seamless override (no restart)
+    //   bi --server=127.0.0.1:<apiPort> balancer                → text with "Selecting Override" + "Selects"
+
+    private fun apiServerArg() = "--server=127.0.0.1:${currentSocksPort + 2}"
+
+    /**
+     * Reads `xray api bi`. Returns (overrideTag, selectsTag): the current override target and the
+     * balancer's own best-alive pick (leastPing "Selects"). Either may be null.
+     */
+    private suspend fun balancerInfo(): Pair<String?, String?> {
+        val out = xrayManager.xrayApi("bi", apiServerArg(), "balancer") ?: return null to null
+        var section = ""
+        var override: String? = null
+        var selects: String? = null
+        for (line in out.lines()) {
+            val t = line.trim()
+            when {
+                t.startsWith("- Selecting Override") -> section = "override"
+                t.startsWith("- Selects") -> section = "selects"
+                else -> Regex("proxy-\\d+").find(t)?.value?.let { tag ->
+                    when (section) {
+                        "override" -> if (override == null) override = tag
+                        "selects" -> if (selects == null) selects = tag
+                    }
+                }
+            }
+        }
+        return override to selects
+    }
+
+    /** Pin the balancer to a proxy tag via `bo` (seamless, no restart). Empty output = success. */
+    private suspend fun pinBalancer(tag: String): Boolean {
+        val res = xrayManager.xrayApi("bo", apiServerArg(), "-b", "balancer", tag) ?: return false
+        return !(res.contains("error", true) || res.contains("not defined") || res.contains("usage:"))
+    }
+
+    /** Map a proxy-N tag → real server id via the ordered pool (index == N). */
+    private fun tagToServerId(tag: String?): String? {
+        val idx = tag?.removePrefix("proxy-")?.toIntOrNull() ?: return null
+        return balancerPoolIds.getOrNull(idx)
+    }
+
+    /** Connected-server UI model for a pinned tag (real flag/country), or null. */
+    private suspend fun connectedServerForTag(tag: String?): ServerProfile? {
+        val id = tagToServerId(tag) ?: return null
+        return configRepository.servers.first().firstOrNull { it.id == id }
+    }
+
+    /**
+     * Pin the balancer's best-alive pick (its leastPing "Selects") so the route stays put instead
+     * of drifting between similar-ping servers. Marks that server verified (feeds the 24h pool).
+     * No-op (returns false) if the API/observatory has no pick yet.
+     */
+    private suspend fun pinBestAlive(): Boolean {
+        val (_, selects) = balancerInfo()
+        val target = selects ?: return false
+        if (pinBalancer(target)) {
+            pinnedTag = target
+            tagToServerId(target)?.let { configRepository.markVerified(it) }
+            Log.i(TAG, "Balancer pinned to $target (server=${tagToServerId(target)})")
+            return true
+        }
+        return false
+    }
+
     // ── Balancer recovery ───────────────────────────────────────────────────────
 
     /** Restart Xray with the current (balancer) config — used when the process dies. */
@@ -671,13 +760,16 @@ class MyVpnService : VpnService() {
     private suspend fun rebuildBalancer(): Boolean = try {
         runCatching { configRepository.fetchAndSaveServers() }   // best-effort refresh
         val excluded = preferences.excludedCountries.first()
-        val candidates = configRepository.getServersExcludingCountries(excluded)
-        val configs = candidates.take(50).mapNotNull { VlessUriParser.parse(it.vlessUri) }
-        if (configs.isEmpty()) {
+        val candidates = configRepository.getServersExcludingCountries(excluded).take(50)
+        // Keep server↔config pairs so proxy-N still maps to a real server after the rebuild.
+        val pairs = candidates.mapNotNull { sp -> VlessUriParser.parse(sp.vlessUri)?.let { sp to it } }
+        if (pairs.isEmpty()) {
             false
         } else {
+            balancerPoolIds = pairs.map { it.first.id }   // refresh proxy-N mapping
+            pinnedTag = null                              // restart drops any override
             val json = injectProxyAuth(
-                XrayConfigBuilder.buildBalancer(configs, currentSocksPort, hotspotSharingEnabled)
+                XrayConfigBuilder.buildBalancer(pairs.map { it.second }, currentSocksPort, hotspotSharingEnabled)
             )
             lastXrayConfig = json
             xrayManager.stop()
@@ -685,31 +777,6 @@ class MyVpnService : VpnService() {
         }
     } catch (e: Exception) {
         Log.e(TAG, "rebuildBalancer failed: ${e.message}")
-        false
-    }
-
-    /**
-     * Rebuild the balancer pool from the existing DB (no re-fetch), excluding servers we
-     * detected as throttled. leastPing then picks a different server. Restarts Xray (brief).
-     */
-    private suspend fun rebuildBalancerPool(): Boolean = try {
-        val excluded = preferences.excludedCountries.first()
-        val candidates = configRepository.getServersExcludingCountries(excluded)
-            .filter { it.id !in throttledIds }
-        balancerPoolIds = candidates.take(50).map { it.id }
-        val configs = candidates.take(50).mapNotNull { VlessUriParser.parse(it.vlessUri) }
-        if (configs.isEmpty()) {
-            false
-        } else {
-            val json = injectProxyAuth(
-                XrayConfigBuilder.buildBalancer(configs, currentSocksPort, hotspotSharingEnabled)
-            )
-            lastXrayConfig = json
-            xrayManager.stop()
-            xrayManager.start(json)
-        }
-    } catch (e: Exception) {
-        Log.e(TAG, "rebuildBalancerPool failed: ${e.message}")
         false
     }
 
@@ -819,8 +886,7 @@ class MyVpnService : VpnService() {
         balancerMode = false
         lastXrayConfig = ""
         balancerPoolIds = emptyList()
-        throttledIds.clear()
-        throttleStreak = 0
+        pinnedTag = null
         _vpnState.value = VpnState.DISCONNECTED
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()

@@ -56,19 +56,29 @@ class ConnectVpnUseCase @Inject constructor(
         // service can start immediately instead of blocking the user for 1-2 minutes first.
         val pool = candidates.take(POOL_LIMIT)
 
-        val configs = pool.mapNotNull { VlessUriParser.parse(it.vlessUri) }
-        if (configs.isEmpty()) {
+        // Keep server↔config pairs so the proxy-N index in the balancer config maps back to a
+        // real server id (mapNotNull alone would desync indices when a server fails to parse).
+        val pairs = pool.mapNotNull { sp -> VlessUriParser.parse(sp.vlessUri)?.let { sp to it } }
+        if (pairs.isEmpty()) {
             throw IllegalStateException("No parseable servers in pool")
         }
+        val configs = pairs.map { it.second }
+        val poolIds = ArrayList(pairs.map { it.first.id })   // index == proxy-N
 
         Log.i(TAG, "Connecting (auto/balancer) with ${configs.size} servers")
         val hotspotSharing = preferences.hotspotSharing.first()
         val xrayJson = XrayConfigBuilder.buildBalancer(configs, socksPort = SOCKS_PORT, listenOnAllInterfaces = hotspotSharing)
 
-        startService(xrayJson, "Авто • ${configs.size} серверов", hotspotSharing, balancerMode = true)
+        startService(xrayJson, "Авто • ${configs.size} серверов", hotspotSharing, balancerMode = true, poolIds = poolIds)
     }
 
-    private fun startService(xrayJson: String, serverName: String, hotspotSharing: Boolean, balancerMode: Boolean) {
+    private fun startService(
+        xrayJson: String,
+        serverName: String,
+        hotspotSharing: Boolean,
+        balancerMode: Boolean,
+        poolIds: ArrayList<String>? = null,
+    ) {
         val intent = Intent(context, MyVpnService::class.java).apply {
             action = MyVpnService.ACTION_CONNECT
             putExtra(MyVpnService.EXTRA_XRAY_CONFIG, xrayJson)
@@ -76,6 +86,7 @@ class ConnectVpnUseCase @Inject constructor(
             putExtra(MyVpnService.EXTRA_SERVER_NAME, serverName)
             putExtra(MyVpnService.EXTRA_HOTSPOT_SHARING, hotspotSharing)
             putExtra(MyVpnService.EXTRA_BALANCER_MODE, balancerMode)
+            if (poolIds != null) putStringArrayListExtra(MyVpnService.EXTRA_POOL_IDS, poolIds)
         }
         context.startForegroundService(intent)
     }

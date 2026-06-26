@@ -34,6 +34,7 @@ fun ServersScreen(
     onServerSelected: () -> Unit = {}
 ) {
     val servers by viewModel.servers.collectAsState()
+    val recentlyWorking by viewModel.recentlyWorking.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val isPinging by viewModel.isPinging.collectAsState()
     val pingProgress by viewModel.pingProgress.collectAsState()
@@ -221,6 +222,29 @@ fun ServersScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Fallback pool: proxies confirmed actually working in the last 24h. If Auto
+                    // ever picks badly, tap one of these known-good servers to connect manually.
+                    if (recentlyWorking.isNotEmpty()) {
+                        item(key = "__working_header__") {
+                            SectionLabel("✅ Рабочие за 24ч", AetherCyan)
+                        }
+                        items(
+                            items = recentlyWorking,
+                            key = { "w_${it.id}" }
+                        ) { server ->
+                            ServerCard(
+                                server = server,
+                                isSelected = server.isSelected,
+                                onClick = {
+                                    viewModel.selectServer(server)
+                                    onServerSelected()
+                                }
+                            )
+                        }
+                        item(key = "__all_header__") {
+                            SectionLabel("Все серверы", AetherTextSecondary)
+                        }
+                    }
                     items(
                         items = servers,
                         key = { it.id }
@@ -243,6 +267,17 @@ fun ServersScreen(
             }
         }
     }
+}
+
+@Composable
+private fun SectionLabel(text: String, color: androidx.compose.ui.graphics.Color) {
+    Text(
+        text = text,
+        color = color,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+    )
 }
 
 @Composable

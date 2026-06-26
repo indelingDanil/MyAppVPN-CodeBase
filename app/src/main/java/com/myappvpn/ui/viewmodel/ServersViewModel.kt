@@ -41,6 +41,18 @@ class ServersViewModel @Inject constructor(
             }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /**
+     * Proxies that were confirmed actually working (Telegram-reachable, recorded via markVerified
+     * by the balancer pin orchestrator or a manual connection) within the last 24h. Manual fallback
+     * pool: if Auto ever picks badly, the user can tap one of these known-good servers.
+     */
+    val recentlyWorking: StateFlow<List<ServerProfile>> = configRepository.servers
+        .map { list ->
+            val cutoff = System.currentTimeMillis() - 24 * 60 * 60_000L
+            list.filter { it.verifiedAt > cutoff }.sortedByDescending { it.verifiedAt }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 

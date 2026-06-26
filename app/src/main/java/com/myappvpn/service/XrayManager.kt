@@ -102,6 +102,26 @@ class XrayManager(private val context: Context) {
         Log.i(TAG, "XRay stopped")
     }
 
+    /**
+     * Runs a short-lived `xray api <args>` command and returns combined stdout/stderr (or null on
+     * failure). Used to probe balancer override (`bo`) / info (`bi`) support against the local API
+     * inbound. Cheap and synchronous — the process exits immediately.
+     */
+    suspend fun xrayApi(vararg args: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val xrayBin = BinaryInstaller.getXrayBinaryPath(context)
+            val pb = ProcessBuilder(listOf(xrayBin, "api") + args).redirectErrorStream(true)
+            pb.environment()["xray.location.asset"] = context.filesDir.absolutePath
+            val proc = pb.start()
+            val out = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            out.trim()
+        } catch (e: Exception) {
+            Log.w(TAG, "xray api ${args.joinToString(" ")} failed: ${e.message}")
+            null
+        }
+    }
+
     private fun writeConfig(json: String): File {
         val configFile = File(context.filesDir, CONFIG_FILE)
         configFile.writeText(json)
