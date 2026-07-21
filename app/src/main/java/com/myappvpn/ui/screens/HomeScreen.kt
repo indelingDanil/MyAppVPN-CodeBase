@@ -113,12 +113,14 @@ fun HomeScreen(
                             VpnState.CONNECTED -> "Защищено"
                             VpnState.CONNECTING -> "Поиск рабочего сервера…"
                             VpnState.DISCONNECTING -> "Отключение…"
+                            VpnState.BLOCKED -> "Соединение потеряно — трафик защищён, переподключение…"
                             VpnState.ERROR -> "Ошибка подключения"
                             else -> "Не защищено"
                         },
                         color = when (state) {
                             VpnState.CONNECTED -> AetherConnected
                             VpnState.CONNECTING -> AetherConnecting
+                            VpnState.BLOCKED -> AetherConnecting
                             VpnState.ERROR -> AetherDisconnected
                             else -> AetherTextSecondary
                         },

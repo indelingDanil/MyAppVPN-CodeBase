@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -42,6 +43,9 @@ fun ServersScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val excludedCountries by viewModel.excludedCountries.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    // Hoisted so scroll position survives list updates (watchdog latency/speed writes) and
+    // stays put while the frozen order keeps cards from reshuffling under the finger.
+    val listState = rememberLazyListState()
 
     // After auto-select completes, navigate back to home.
     // Server selection is handled in ViewModel — this only triggers navigation.
@@ -212,6 +216,7 @@ fun ServersScreen(
             }
             else -> {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)

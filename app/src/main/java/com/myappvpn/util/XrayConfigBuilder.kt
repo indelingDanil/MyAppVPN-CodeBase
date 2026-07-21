@@ -24,9 +24,10 @@ object XrayConfigBuilder {
             put("loglevel", "warning")
         })
 
-        // DNS — DoH only (encrypted, port 443, indistinguishable from normal HTTPS)
-        // IP-based URLs avoid bootstrap DNS resolution problem
-        // No plain DNS fallback — prevents unencrypted DNS leak if DoH fails
+        // DNS — DoH resolver (encrypted; IP-based URLs avoid the bootstrap problem).
+        // App DNS on :53 is hijacked to this resolver via the dns-out outbound + the
+        // port-53 routing rule below, so the untrusted exit never sees plaintext DNS
+        // (and can't spoof it). The DoH request itself egresses through the proxy.
         root.put("dns", JSONObject().apply {
             put("servers", JSONArray().apply {
                 put("https://1.1.1.1/dns-query")   // Cloudflare DoH
@@ -48,11 +49,13 @@ object XrayConfigBuilder {
                     put("ip", listenAddr)
                 })
             })
-            // HTTP inbound (optional, for apps that prefer HTTP proxy)
+            // HTTP inbound (optional, for apps that prefer HTTP proxy).
+            // Always loopback-only: hotspot clients use SOCKS (auth'd); we never expose
+            // an HTTP proxy to the LAN even when listenOnAllInterfaces is set.
             put(JSONObject().apply {
                 put("tag", "http")
                 put("port", socksPort + 1)
-                put("listen", listenAddr)
+                put("listen", "127.0.0.1")
                 put("protocol", "http")
                 put("settings", JSONObject().apply {
                     put("allowTransparent", false)
@@ -64,6 +67,11 @@ object XrayConfigBuilder {
         root.put("outbounds", JSONArray().apply {
             // VLESS outbound
             put(buildVlessOutbound(config))
+            // DNS outbound — answers hijacked :53 queries via the DoH resolver (dns{} above)
+            put(JSONObject().apply {
+                put("tag", "dns-out")
+                put("protocol", "dns")
+            })
             // Direct outbound (for bypassed traffic)
             put(JSONObject().apply {
                 put("tag", "direct")
@@ -84,6 +92,14 @@ object XrayConfigBuilder {
         root.put("routing", JSONObject().apply {
             put("domainStrategy", "IPIfNonMatch")
             put("rules", JSONArray().apply {
+                // Hijack ALL DNS (:53, udp+tcp) to the DoH resolver — the untrusted exit
+                // must never see or be able to spoof plaintext DNS. MUST precede catch-alls.
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("port", 53)
+                    put("network", "tcp,udp")
+                    put("outboundTag", "dns-out")
+                })
                 // Block private IPs from going through proxy
                 put(JSONObject().apply {
                     put("type", "field")
@@ -149,7 +165,7 @@ object XrayConfigBuilder {
             put(JSONObject().apply {
                 put("tag", "http")
                 put("port", socksPort + 1)
-                put("listen", listenAddr)
+                put("listen", "127.0.0.1")   // loopback-only; never expose HTTP proxy to LAN
                 put("protocol", "http")
                 put("settings", JSONObject().apply { put("allowTransparent", false) })
             })
@@ -168,6 +184,11 @@ object XrayConfigBuilder {
             configs.forEachIndexed { index, cfg ->
                 put(buildVlessOutbound(cfg, "proxy-$index"))
             }
+            // DNS outbound — answers hijacked :53 queries via the DoH resolver (dns{} above)
+            put(JSONObject().apply {
+                put("tag", "dns-out")
+                put("protocol", "dns")
+            })
             put(JSONObject().apply {
                 put("tag", "direct")
                 put("protocol", "freedom")
@@ -209,6 +230,13 @@ object XrayConfigBuilder {
                     put("type", "field")
                     put("inboundTag", JSONArray().apply { put("api") })
                     put("outboundTag", "api")
+                })
+                // Hijack ALL DNS (:53, udp+tcp) → DoH resolver. Before private/balancer catch-alls.
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("port", 53)
+                    put("network", "tcp,udp")
+                    put("outboundTag", "dns-out")
                 })
                 put(JSONObject().apply {
                     put("type", "field")

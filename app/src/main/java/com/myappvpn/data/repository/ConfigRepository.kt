@@ -149,6 +149,8 @@ class ConfigRepository @Inject constructor(
 
     suspend fun getSelectedServer(): ServerProfile? = serverDao.getSelectedServer()
 
+    suspend fun getServerById(id: String): ServerProfile? = serverDao.getServerById(id)
+
     suspend fun selectServer(serverId: String) {
         serverDao.clearSelection()
         serverDao.selectServer(serverId)

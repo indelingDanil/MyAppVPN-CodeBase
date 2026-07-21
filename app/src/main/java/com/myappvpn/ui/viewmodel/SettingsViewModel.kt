@@ -45,8 +45,26 @@ class SettingsViewModel @Inject constructor(
     val socksPort: StateFlow<Int> = preferences.socksPort
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), 10808)
 
+    val killSwitchEnabled: StateFlow<Boolean> = preferences.killSwitchEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), true)
+
     private val _installedApps = MutableStateFlow<List<AppInfo>>(emptyList())
     val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
+
+    // Split-tunnel app search
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    val filteredApps: StateFlow<List<AppInfo>> =
+        combine(_installedApps, _searchQuery) { apps, q ->
+            if (q.isBlank()) apps
+            else apps.filter {
+                it.appName.contains(q, ignoreCase = true) ||
+                    it.packageName.contains(q, ignoreCase = true)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+
+    fun setSearchQuery(query: String) { _searchQuery.value = query }
 
     fun loadInstalledApps() {
         viewModelScope.launch {
@@ -90,6 +108,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setHotspotSharing(value: Boolean) = viewModelScope.launch {
         preferences.setHotspotSharing(value)
+    }
+
+    fun setKillSwitchEnabled(value: Boolean) = viewModelScope.launch {
+        preferences.setKillSwitchEnabled(value)
     }
 
     fun setAutoConnect(value: Boolean) = viewModelScope.launch {

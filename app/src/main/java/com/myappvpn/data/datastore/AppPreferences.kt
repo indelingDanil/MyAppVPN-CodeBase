@@ -30,6 +30,7 @@ class AppPreferences @Inject constructor(
         val KEY_SHOW_STATS = booleanPreferencesKey("show_stats")
         val KEY_SOCKS_PORT = intPreferencesKey("socks_port")
         val KEY_HOTSPOT_SHARING = booleanPreferencesKey("hotspot_sharing")
+        val KEY_KILL_SWITCH = booleanPreferencesKey("kill_switch_enabled")
         val KEY_AUTO_MODE = booleanPreferencesKey("auto_mode")
         val KEY_EXCLUDED_COUNTRIES = stringSetPreferencesKey("excluded_countries")
         // Custom subscriptions: JSON array of {name,url,enabled}. Built-in sources that the user
@@ -115,6 +116,20 @@ class AppPreferences @Inject constructor(
 
     suspend fun setHotspotSharing(v: Boolean) {
         dataStore.edit { it[KEY_HOTSPOT_SHARING] = v }
+    }
+
+    /**
+     * Kill-switch: when the tunnel drops unexpectedly, keep the TUN up and BLOCK traffic
+     * (instead of tearing it down and letting traffic leak over the operator network) while
+     * the service recovers. Default ON — users connect to untrusted public exits, a real-IP
+     * leak on failure is exactly what we must prevent.
+     */
+    val killSwitchEnabled: Flow<Boolean> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_KILL_SWITCH] ?: true }
+
+    suspend fun setKillSwitchEnabled(v: Boolean) {
+        dataStore.edit { it[KEY_KILL_SWITCH] = v }
     }
 
     /** Raw JSON of user-added custom subscriptions (decoded by SubscriptionRepository). */

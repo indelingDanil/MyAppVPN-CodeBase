@@ -34,7 +34,8 @@ fun ConnectButton(
     size: Dp = 180.dp
 ) {
     val isConnected = vpnState == VpnState.CONNECTED
-    val isConnecting = vpnState == VpnState.CONNECTING || vpnState == VpnState.DISCONNECTING
+    val isConnecting = vpnState == VpnState.CONNECTING || vpnState == VpnState.DISCONNECTING ||
+        vpnState == VpnState.BLOCKED
 
     // Pulse animation for connecting state
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -80,6 +81,7 @@ fun ConnectButton(
         targetValue = when (vpnState) {
             VpnState.CONNECTED -> AetherConnected
             VpnState.CONNECTING -> AetherConnecting
+            VpnState.BLOCKED -> AetherConnecting
             VpnState.ERROR -> AetherDisconnected
             else -> AetherCyan
         },
@@ -93,6 +95,7 @@ fun ConnectButton(
         VpnState.CONNECTED -> "CONNECTED"
         VpnState.CONNECTING -> "CONNECTING"
         VpnState.DISCONNECTING -> "STOPPING"
+        VpnState.BLOCKED -> "RECONNECTING"
         VpnState.ERROR -> "ERROR"
         else -> "CONNECT"
     }

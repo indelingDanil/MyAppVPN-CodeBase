@@ -46,8 +46,9 @@ class XrayManager(private val context: Context) {
 
             process = pb.start()
 
-            // Read xray logs in background; count VLESS error lines
-            // Only forward errors to logcat in release — full output leaks connection details
+            // Read xray logs in background; count VLESS error lines.
+            // Never forward raw xray output to logcat in release — the lines contain the
+            // exit server address/port and would leak connection details via adb/bugreport.
             _recentErrorCount.set(0)
             process?.inputStream?.bufferedReader()?.let { reader ->
                 Thread {
@@ -55,11 +56,9 @@ class XrayManager(private val context: Context) {
                         reader.forEachLine { line ->
                             val lower = line.lowercase()
                             val isError = ERROR_KEYWORDS.any { lower.contains(it) }
-                            if (isError) {
-                                _recentErrorCount.incrementAndGet()
-                                Log.w(TAG, line)
-                            } else if (com.myappvpn.BuildConfig.DEBUG) {
-                                Log.d(TAG, line)
+                            if (isError) _recentErrorCount.incrementAndGet()
+                            if (com.myappvpn.BuildConfig.DEBUG) {
+                                if (isError) Log.w(TAG, line) else Log.d(TAG, line)
                             }
                         }
                     } catch (e: Exception) { /* process ended */ }

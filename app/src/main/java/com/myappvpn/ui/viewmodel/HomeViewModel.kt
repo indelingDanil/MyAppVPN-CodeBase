@@ -95,7 +95,7 @@ class HomeViewModel @Inject constructor(
     fun onConnectClick() {
         viewModelScope.launch {
             when (vpnState.value) {
-                VpnState.CONNECTED, VpnState.CONNECTING -> {
+                VpnState.CONNECTED, VpnState.CONNECTING, VpnState.BLOCKED -> {
                     connectVpnUseCase.disconnect()
                 }
                 VpnState.DISCONNECTED, VpnState.ERROR -> {

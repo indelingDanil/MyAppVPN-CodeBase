@@ -27,7 +27,12 @@ object AppModule {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+            // Never log subscription URLs in release — custom subscriptions may carry tokens.
+            level = if (com.myappvpn.BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BASIC
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         })
         .build()
 

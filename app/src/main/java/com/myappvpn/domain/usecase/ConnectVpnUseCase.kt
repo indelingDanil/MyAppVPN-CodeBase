@@ -26,7 +26,7 @@ class ConnectVpnUseCase @Inject constructor(
 
     /** Manual mode: connect to a single chosen server. */
     suspend operator fun invoke(server: ServerProfile) {
-        Log.i(TAG, "Connecting (manual) to ${server.name} (${server.validationState})")
+        if (com.myappvpn.BuildConfig.DEBUG) Log.i(TAG, "Connecting (manual) to ${server.name} (${server.validationState})")
 
         val vlessConfig = VlessUriParser.parse(server.vlessUri)
             ?: throw IllegalArgumentException("Cannot parse VLESS URI for ${server.name}")
@@ -65,7 +65,7 @@ class ConnectVpnUseCase @Inject constructor(
         val configs = pairs.map { it.second }
         val poolIds = ArrayList(pairs.map { it.first.id })   // index == proxy-N
 
-        Log.i(TAG, "Connecting (auto/balancer) with ${configs.size} servers")
+        if (com.myappvpn.BuildConfig.DEBUG) Log.i(TAG, "Connecting (auto/balancer) with ${configs.size} servers")
         val hotspotSharing = preferences.hotspotSharing.first()
         val xrayJson = XrayConfigBuilder.buildBalancer(configs, socksPort = SOCKS_PORT, listenOnAllInterfaces = hotspotSharing)
 
@@ -89,6 +89,18 @@ class ConnectVpnUseCase @Inject constructor(
             if (poolIds != null) putStringArrayListExtra(MyVpnService.EXTRA_POOL_IDS, poolIds)
         }
         context.startForegroundService(intent)
+    }
+
+    /**
+     * Hot-switch the active server while the tunnel is up (no disconnect→connect dance).
+     * The running service swaps the Xray outbound and keeps the TUN. No-op if not running.
+     */
+    fun switchServer(serverId: String) {
+        val intent = Intent(context, MyVpnService::class.java).apply {
+            action = MyVpnService.ACTION_SWITCH_SERVER
+            putExtra(MyVpnService.EXTRA_SERVER_ID, serverId)
+        }
+        context.startService(intent)
     }
 
     fun disconnect() {

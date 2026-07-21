@@ -31,6 +31,7 @@ fun SettingsScreen(
     val autoConnect by viewModel.autoConnect.collectAsState()
     val hotspotSharing by viewModel.hotspotSharing.collectAsState()
     val splitTunnelEnabled by viewModel.splitTunnelEnabled.collectAsState()
+    val killSwitchEnabled by viewModel.killSwitchEnabled.collectAsState()
 
     Column(
         modifier = Modifier
@@ -77,6 +78,26 @@ fun SettingsScreen(
             if (hotspotSharing) {
                 Text(
                     text = "⚠ Прокси открыт на всех интерфейсах. Используйте только с мобильным интернетом. / Proxy open on all interfaces. Use only with mobile data.",
+                    color = AetherTextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 12.dp)
+                )
+            }
+        }
+
+        // Security section
+        SettingsSection(title = "Security") {
+            SettingsSwitchItem(
+                icon = Icons.Default.Lock,
+                title = "Kill Switch",
+                subtitle = "Блокировать трафик при обрыве туннеля (не пускать напрямую) / Block traffic if the tunnel drops — never leak your real IP",
+                checked = killSwitchEnabled,
+                onCheckedChange = { viewModel.setKillSwitchEnabled(it) }
+            )
+            if (!killSwitchEnabled) {
+                Text(
+                    text = "⚠ Выключено: при обрыве трафик может пойти напрямую в обход VPN. / Off: on failure traffic may bypass the VPN.",
                     color = AetherTextSecondary,
                     fontSize = 11.sp,
                     lineHeight = 15.sp,

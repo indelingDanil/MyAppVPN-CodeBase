@@ -42,6 +42,9 @@ class MyVpnService : VpnService() {
         const val TAG = "MyVpnService"
         const val ACTION_CONNECT = "com.myappvpn.CONNECT"
         const val ACTION_DISCONNECT = "com.myappvpn.DISCONNECT"
+        // Hot-switch to a specific server while the tunnel is up (swaps Xray outbound, keeps TUN).
+        const val ACTION_SWITCH_SERVER = "com.myappvpn.SWITCH_SERVER"
+        const val EXTRA_SERVER_ID = "server_id"
         const val EXTRA_XRAY_CONFIG = "xray_config"
         const val EXTRA_SOCKS_PORT = "socks_port"
         const val EXTRA_SERVER_NAME = "server_name"
@@ -97,6 +100,9 @@ class MyVpnService : VpnService() {
     private var splitTunnelObserverJob: Job? = null
     private var backgroundProbeJob: Job? = null
     private var poolReverifyJob: Job? = null
+    // Kill-switch: keep TUN up + block traffic on unexpected failure, then auto-recover.
+    private var killSwitchEnabled = true
+    private var recoveryJob: Job? = null
 
     // Per-session SOCKS5 auth credentials — prevents other apps from using our proxy
     // (CVE: unauthenticated local SOCKS proxy deanonymization, see habr.com/ru/articles/1020080)
@@ -122,6 +128,10 @@ class MyVpnService : VpnService() {
                 balancerPoolIds = intent.getStringArrayListExtra(EXTRA_POOL_IDS) ?: emptyList()
                 serviceScope.launch { connect(xrayConfig, socksPort, serverName, hotspotSharing, balancer) }
             }
+            ACTION_SWITCH_SERVER -> {
+                val serverId = intent.getStringExtra(EXTRA_SERVER_ID) ?: return START_STICKY
+                serviceScope.launch { switchToServer(serverId) }
+            }
             ACTION_DISCONNECT -> serviceScope.launch { disconnect() }
         }
         return START_STICKY
@@ -135,6 +145,7 @@ class MyVpnService : VpnService() {
         currentServerName = serverName
         hotspotSharingEnabled = hotspotSharing
         balancerMode = balancer
+        killSwitchEnabled = preferences.killSwitchEnabled.first()
         try {
             _vpnState.value = VpnState.CONNECTING
             startForeground(NOTIFICATION_ID, buildNotification(serverName, VpnState.CONNECTING))
@@ -377,7 +388,7 @@ class MyVpnService : VpnService() {
                 if (!xrayManager.isRunning) {
                     if (balancerMode) {
                         Log.w(TAG, "XRay died (balancer) — restarting same config")
-                        if (!restartXray()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
+                        if (!restartXray()) { enterBlackhole("balancer xray restart failed"); break }
                         pinnedTag = null              // restart drops the override
                         warmUpPinFast()               // re-pin onto a fast alive server (avoid cold-start)
                         lastTgProbeAt = System.currentTimeMillis()
@@ -879,6 +890,119 @@ class MyVpnService : VpnService() {
         false
     }
 
+    // ── Hot-switch (user picks a server while connected) ─────────────────────────
+
+    /**
+     * Switch the active server to [serverId] WITHOUT tearing down the tunnel: only the Xray
+     * outbound is swapped (stop→start) while TUN + tun2socks stay up on the same SOCKS port.
+     * Lets the Servers screen change server on tap during an active session (no disconnect dance).
+     */
+    private suspend fun switchToServer(serverId: String) {
+        // Only meaningful for an established (or blocked/recovering) session.
+        if (_vpnState.value == VpnState.DISCONNECTED || _vpnState.value == VpnState.DISCONNECTING) return
+        if (tunFd == null) return
+        try {
+            val server = configRepository.getServerById(serverId) ?: return
+            val vlessConfig = VlessUriParser.parse(server.vlessUri) ?: run {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Hot-switch: cannot parse ${server.name}")
+                return
+            }
+            recoveryJob?.cancel(); recoveryJob = null
+            watchdogJob?.cancel(); watchdogJob = null
+            balancerMode = false
+            pinnedTag = null
+            balancerPoolIds = emptyList()
+            _vpnState.value = VpnState.CONNECTING
+            updateNotification(server.name, VpnState.CONNECTING)
+
+            val cfg = injectProxyAuth(XrayConfigBuilder.build(vlessConfig, currentSocksPort, hotspotSharingEnabled))
+            xrayManager.stop()
+            if (!xrayManager.start(cfg)) {
+                enterBlackhole("hot-switch xray start failed")
+                return
+            }
+            lastXrayConfig = cfg
+            currentServerName = server.name
+            configRepository.selectServer(serverId)
+            activeSocksPort = currentSocksPort
+            _connectedServer.value = server
+            _vpnState.value = VpnState.CONNECTED
+            updateNotification(server.name, VpnState.CONNECTED)
+            if (hotspotSharingEnabled) _hotspotProxyInfo.value = HotspotHelper.getHotspotIp()?.let { "$it:10808" }
+            if (BuildConfig.DEBUG) Log.i(TAG, "Hot-switched to ${server.name}")
+            startWatchdog()
+        } catch (e: Exception) {
+            Log.e(TAG, "switchToServer failed: ${e.message}")
+            enterBlackhole("hot-switch error")
+        }
+    }
+
+    // ── Kill-switch ──────────────────────────────────────────────────────────────
+
+    /**
+     * Kill-switch: on unexpected tunnel loss keep the TUN interface UP and stop only Xray, so
+     * app traffic hits the TUN, finds no working SOCKS behind it, and is DROPPED instead of
+     * leaking over the operator network. Then auto-recover. If the kill-switch is disabled or
+     * there is no TUN to hold, fall back to the old behavior (tear down → ERROR).
+     */
+    private fun enterBlackhole(reason: String) {
+        if (!killSwitchEnabled || tunFd == null) {
+            _vpnState.value = VpnState.ERROR
+            cleanupProcesses()
+            return
+        }
+        watchdogJob?.cancel(); watchdogJob = null
+        backgroundProbeJob?.cancel(); backgroundProbeJob = null
+        poolReverifyJob?.cancel(); poolReverifyJob = null
+        xrayManager.stop()          // no working outbound → tun2socks can't reach SOCKS → traffic blocked
+        activeSocksPort = 0
+        _connectedServer.value = null
+        _hotspotProxyInfo.value = null
+        _vpnState.value = VpnState.BLOCKED
+        updateNotification(currentServerName, VpnState.BLOCKED)
+        Log.w(TAG, "Kill-switch active — traffic blocked ($reason)")
+        scheduleRecovery()
+    }
+
+    /** While BLOCKED, keep retrying (with backoff) to bring a server back up under the live TUN. */
+    private fun scheduleRecovery() {
+        recoveryJob?.cancel()
+        recoveryJob = serviceScope.launch {
+            var backoff = 5_000L
+            while (isActive && _vpnState.value == VpnState.BLOCKED) {
+                delay(backoff)
+                backoff = (backoff * 2).coerceAtMost(60_000L)
+                if (tunFd == null) break
+                if (!isUnderlyingNetworkAvailable()) continue
+                val ok = if (balancerMode) rebuildBalancer() else recoverSingle()
+                if (ok) {
+                    activeSocksPort = currentSocksPort
+                    _connectedServer.value =
+                        if (balancerMode) connectedServerForTag(pinnedTag) else configRepository.getSelectedServer()
+                    _vpnState.value = VpnState.CONNECTED
+                    updateNotification(currentServerName, VpnState.CONNECTED)
+                    if (balancerMode) warmUpPinFast()
+                    startWatchdog()
+                    Log.i(TAG, "Kill-switch recovered — tunnel restored")
+                    break
+                }
+            }
+        }
+    }
+
+    /** Bring up the best available server under the existing TUN (single/manual recovery). */
+    private suspend fun recoverSingle(): Boolean {
+        val server = configRepository.selectBestServer() ?: return false
+        val vless = VlessUriParser.parse(server.vlessUri) ?: return false
+        val cfg = injectProxyAuth(XrayConfigBuilder.build(vless, currentSocksPort, hotspotSharingEnabled))
+        xrayManager.stop()
+        if (!xrayManager.start(cfg)) return false
+        lastXrayConfig = cfg
+        currentServerName = server.name
+        configRepository.selectServer(server.id)
+        return true
+    }
+
     // ── Server failover ────────────────────────────────────────────────────────
 
     private suspend fun switchToNextServer() {
@@ -904,9 +1028,8 @@ class MyVpnService : VpnService() {
                     excludeIds = triedIds,
                     excludePorts = failedPorts,
                 ) ?: run {
-                    Log.e(TAG, "No reachable servers left — giving up")
-                    _vpnState.value = VpnState.ERROR
-                    cleanupProcesses()
+                    Log.w(TAG, "No reachable servers left — kill-switch blocking, will retry")
+                    enterBlackhole("no reachable servers")
                     return
                 }
 
@@ -970,8 +1093,7 @@ class MyVpnService : VpnService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "switchToNextServer failed: ${e.message}")
-            _vpnState.value = VpnState.ERROR
-            cleanupProcesses()
+            enterBlackhole("failover error")
         }
     }
 
@@ -998,6 +1120,7 @@ class MyVpnService : VpnService() {
         splitTunnelObserverJob?.cancel(); splitTunnelObserverJob = null
         backgroundProbeJob?.cancel(); backgroundProbeJob = null
         poolReverifyJob?.cancel(); poolReverifyJob = null
+        recoveryJob?.cancel(); recoveryJob = null
         activeSocksPort = 0   // stop routing app requests through a dead tunnel
         trafficMonitor.stop()
         tun2SocksManager.stop()
@@ -1041,6 +1164,7 @@ class MyVpnService : VpnService() {
             VpnState.CONNECTING -> "Establishing..."
             VpnState.CONNECTED -> "Active"
             VpnState.DISCONNECTING -> "Closing..."
+            VpnState.BLOCKED -> "Reconnecting — traffic blocked"
             else -> "Idle"
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -1062,5 +1186,7 @@ class MyVpnService : VpnService() {
 }
 
 enum class VpnState {
-    DISCONNECTED, CONNECTING, CONNECTED, DISCONNECTING, ERROR
+    DISCONNECTED, CONNECTING, CONNECTED, DISCONNECTING, ERROR,
+    // Kill-switch active: tunnel lost, all traffic BLOCKED (not leaked) while recovering.
+    BLOCKED
 }
