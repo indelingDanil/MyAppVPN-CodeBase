@@ -4,7 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -12,26 +12,43 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.myappvpn.BuildConfig
+import com.myappvpn.R
+import com.myappvpn.service.VpnState
 import com.myappvpn.ui.components.GlassCard
 import com.myappvpn.ui.theme.*
+import com.myappvpn.ui.viewmodel.DnsViewModel
 import com.myappvpn.ui.viewmodel.SettingsViewModel
 
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onNavigateToSplitTunnel: () -> Unit,
-    onNavigateToSubscriptions: () -> Unit
+    onNavigateToSubscriptions: () -> Unit,
+    onNavigateToDns: () -> Unit,
+    dnsViewModel: DnsViewModel = hiltViewModel(),
+    /** Optional: when wired in the NavGraph, the "Раздача" section links to the setup guide. */
+    onNavigateToHotspotSetup: (() -> Unit)? = null
 ) {
-    val autoConnect by viewModel.autoConnect.collectAsState()
-    val hotspotSharing by viewModel.hotspotSharing.collectAsState()
-    val splitTunnelEnabled by viewModel.splitTunnelEnabled.collectAsState()
-    val killSwitchEnabled by viewModel.killSwitchEnabled.collectAsState()
+    val dnsSummary by dnsViewModel.summary.collectAsStateWithLifecycle()
+    // null = still loading from DataStore → rows show a neutral placeholder instead of a Switch.
+    val autoConnect by viewModel.autoConnect.collectAsStateWithLifecycle()
+    val hotspotSharing by viewModel.hotspotSharing.collectAsStateWithLifecycle()
+    val splitTunnelEnabled by viewModel.splitTunnelEnabled.collectAsStateWithLifecycle()
+    val killSwitchEnabled by viewModel.killSwitchEnabled.collectAsStateWithLifecycle()
+    val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
+
+    // Connection-time settings only take effect on the next connect while a session is active.
+    val sessionActive = vpnState != VpnState.DISCONNECTED && vpnState != VpnState.ERROR
 
     Column(
         modifier = Modifier
@@ -42,137 +59,137 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Settings",
+            text = stringResource(R.string.settings_title),
             style = MaterialTheme.typography.titleLarge,
             color = AetherTextPrimary,
             fontWeight = FontWeight.Bold
         )
 
-        // Subscription section
-        SettingsSection(title = "Subscription") {
+        // Connection
+        SettingsSection(title = stringResource(R.string.settings_section_connection)) {
             SettingsNavigateItem(
                 icon = Icons.Default.CloudDownload,
-                title = "Подписки / Subscriptions",
-                subtitle = "Добавить свои источники, включить/выключить",
+                title = stringResource(R.string.settings_subscriptions_title),
+                subtitle = stringResource(R.string.settings_subscriptions_subtitle),
                 onClick = onNavigateToSubscriptions
             )
-        }
-
-        // Connection section
-        SettingsSection(title = "Connection") {
+            SettingsDivider()
             SettingsSwitchItem(
                 icon = Icons.Default.Bolt,
-                title = "Auto-Connect on Boot",
-                subtitle = "Reconnect VPN automatically when device starts",
+                title = stringResource(R.string.settings_autoconnect_title),
+                subtitle = stringResource(R.string.settings_autoconnect_subtitle),
                 checked = autoConnect,
                 onCheckedChange = { viewModel.setAutoConnect(it) }
             )
-            Divider(color = AetherDivider, thickness = 1.dp)
-            SettingsSwitchItem(
-                icon = Icons.Default.Wifi,
-                title = "Hotspot Sharing",
-                subtitle = "Раздавать VPN через хотспот / Share VPN via hotspot — enable, then set proxy on the other device",
-                checked = hotspotSharing,
-                onCheckedChange = { viewModel.setHotspotSharing(it) }
-            )
-            if (hotspotSharing) {
-                Text(
-                    text = "⚠ Прокси открыт на всех интерфейсах. Используйте только с мобильным интернетом. / Proxy open on all interfaces. Use only with mobile data.",
-                    color = AetherTextSecondary,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 12.dp)
-                )
-            }
-        }
-
-        // Security section
-        SettingsSection(title = "Security") {
+            SettingsDivider()
             SettingsSwitchItem(
                 icon = Icons.Default.Lock,
-                title = "Kill Switch",
-                subtitle = "Блокировать трафик при обрыве туннеля (не пускать напрямую) / Block traffic if the tunnel drops — never leak your real IP",
+                title = stringResource(R.string.settings_killswitch_title),
+                subtitle = if (sessionActive) {
+                    stringResource(R.string.settings_killswitch_subtitle) + "\n" +
+                        stringResource(R.string.settings_applies_next_connect)
+                } else {
+                    stringResource(R.string.settings_killswitch_subtitle)
+                },
                 checked = killSwitchEnabled,
                 onCheckedChange = { viewModel.setKillSwitchEnabled(it) }
             )
-            if (!killSwitchEnabled) {
-                Text(
-                    text = "⚠ Выключено: при обрыве трафик может пойти напрямую в обход VPN. / Off: on failure traffic may bypass the VPN.",
-                    color = AetherTextSecondary,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 12.dp)
-                )
+            if (killSwitchEnabled == false) {
+                SettingsHint(stringResource(R.string.settings_killswitch_off_warning))
             }
         }
 
-        // Split Tunneling section
-        SettingsSection(title = "Split Tunneling") {
+        // Apps & network
+        SettingsSection(title = stringResource(R.string.settings_section_apps_network)) {
             SettingsSwitchItem(
                 icon = Icons.Default.CallSplit,
-                title = "Enable Split Tunneling",
-                subtitle = "Choose which apps bypass the VPN",
+                title = stringResource(R.string.settings_split_title),
+                subtitle = stringResource(R.string.settings_split_subtitle),
                 checked = splitTunnelEnabled,
                 onCheckedChange = { viewModel.setSplitTunnelEnabled(it) }
             )
-            if (splitTunnelEnabled) {
-                Divider(color = AetherDivider, thickness = 1.dp)
+            if (splitTunnelEnabled == true) {
+                SettingsDivider()
                 SettingsNavigateItem(
                     icon = Icons.Default.Apps,
-                    title = "Manage Excluded Apps",
-                    subtitle = "Select apps that will not use VPN",
+                    title = stringResource(R.string.settings_split_manage_title),
+                    subtitle = stringResource(R.string.settings_split_manage_subtitle),
                     onClick = onNavigateToSplitTunnel
                 )
             }
-        }
-
-        // DNS section
-        SettingsSection(title = "DNS") {
-            SettingsInfoItem(
+            SettingsDivider()
+            SettingsNavigateItem(
                 icon = Icons.Default.Dns,
-                title = "Primary DNS",
-                value = "1.1.1.1 (DoH)"
-            )
-            Divider(color = AetherDivider, thickness = 1.dp)
-            SettingsInfoItem(
-                icon = Icons.Default.Dns,
-                title = "Secondary DNS",
-                value = "8.8.8.8 (DoH)"
+                title = stringResource(R.string.settings_dns_title),
+                subtitle = dnsSummary?.let { dnsSummaryText(it) }.orEmpty(),
+                onClick = onNavigateToDns
             )
         }
 
-        // Advanced section
-        SettingsSection(title = "Advanced") {
-            SettingsInfoItem(
-                icon = Icons.Default.NetworkCheck,
-                title = "SOCKS5 Port",
-                value = ":10808"
+        // Hotspot sharing
+        SettingsSection(title = stringResource(R.string.settings_section_hotspot)) {
+            SettingsSwitchItem(
+                icon = Icons.Default.Wifi,
+                title = stringResource(R.string.settings_hotspot_title),
+                subtitle = stringResource(R.string.settings_applies_next_connect),
+                checked = hotspotSharing,
+                onCheckedChange = { viewModel.setHotspotSharing(it) }
             )
+            if (hotspotSharing == true) {
+                SettingsHint(stringResource(R.string.settings_hotspot_hint))
+                if (onNavigateToHotspotSetup != null) {
+                    SettingsDivider()
+                    SettingsNavigateItem(
+                        icon = Icons.Default.Help,
+                        title = stringResource(R.string.settings_hotspot_guide_title),
+                        subtitle = stringResource(R.string.settings_hotspot_guide_subtitle),
+                        onClick = onNavigateToHotspotSetup
+                    )
+                }
+            }
         }
 
-        // About section
-        SettingsSection(title = "About") {
+        // About
+        SettingsSection(title = stringResource(R.string.settings_section_about)) {
             SettingsInfoItem(
                 icon = Icons.Default.Info,
-                title = "Version",
-                value = com.myappvpn.BuildConfig.VERSION_NAME
+                title = stringResource(R.string.settings_about_version),
+                value = BuildConfig.VERSION_NAME
             )
-            Divider(color = AetherDivider, thickness = 1.dp)
+            SettingsDivider()
             SettingsInfoItem(
                 icon = Icons.Default.Source,
-                title = "Config Sources",
-                value = "zieng2/wl + igareck"
+                title = stringResource(R.string.settings_about_sources),
+                value = stringResource(R.string.settings_about_sources_value)
             )
-            Divider(color = AetherDivider, thickness = 1.dp)
+            SettingsDivider()
             SettingsInfoItem(
                 icon = Icons.Default.Security,
-                title = "Protocol",
-                value = "VLESS + XRay Core"
+                title = stringResource(R.string.settings_about_protocol),
+                value = stringResource(R.string.settings_about_protocol_value)
             )
         }
+
+        // Links / donations / disclaimer live in the dedicated "Проект" bottom-nav tab.
 
         Spacer(modifier = Modifier.height(16.dp))
     }
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(color = AetherDivider, thickness = 1.dp)
+}
+
+@Composable
+private fun SettingsHint(text: String) {
+    Text(
+        text = text,
+        color = AetherTextSecondary,
+        fontSize = 11.sp,
+        lineHeight = 15.sp,
+        modifier = Modifier.padding(start = 48.dp, end = 16.dp, bottom = 12.dp)
+    )
 }
 
 @Composable
@@ -198,17 +215,29 @@ fun SettingsSection(
     }
 }
 
+/**
+ * Whole row toggles (not only the small Switch); the Switch itself is display-only.
+ * [checked] == null means "not loaded yet": the row is inert and shows an empty slot of the
+ * Switch's size, so nothing visibly flips when the stored value arrives.
+ */
 @Composable
 fun SettingsSwitchItem(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    checked: Boolean,
+    checked: Boolean?,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val rowModifier = if (checked != null) {
+        Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+    } else {
+        Modifier
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .then(rowModifier)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -218,16 +247,21 @@ fun SettingsSwitchItem(
             Text(title, color = AetherTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(subtitle, color = AetherTextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
         }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = AetherBackground,
-                checkedTrackColor = AetherCyan,
-                uncheckedThumbColor = AetherTextTertiary,
-                uncheckedTrackColor = AetherSurfaceVariant
+        if (checked != null) {
+            Switch(
+                checked = checked,
+                onCheckedChange = null,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = AetherBackground,
+                    checkedTrackColor = AetherCyan,
+                    uncheckedThumbColor = AetherTextTertiary,
+                    uncheckedTrackColor = AetherSurfaceVariant
+                )
             )
-        )
+        } else {
+            // Same footprint as the M3 Switch (52x32dp) to avoid a layout jump on load.
+            Spacer(Modifier.size(width = 52.dp, height = 32.dp))
+        }
     }
 }
 
@@ -241,8 +275,8 @@ fun SettingsNavigateItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp))
-            .clickable(onClick = onClick)
+            .heightIn(min = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -250,7 +284,14 @@ fun SettingsNavigateItem(
         Icon(icon, contentDescription = null, tint = AetherPurple, modifier = Modifier.size(20.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = AetherTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = AetherTextSecondary, fontSize = 11.sp)
+            Text(
+                subtitle,
+                color = AetherTextSecondary,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,   // else inherits bodyLarge's 24sp → gappy 2-line subtitles
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AetherTextTertiary)
     }
@@ -271,7 +312,13 @@ fun SettingsInfoItem(
     ) {
         Icon(icon, contentDescription = null, tint = AetherTextSecondary, modifier = Modifier.size(20.dp))
         Text(title, color = AetherTextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Text(value, color = AetherTextSecondary, fontSize = 12.sp)
+        Text(
+            value,
+            color = AetherTextSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
     }
 }
-

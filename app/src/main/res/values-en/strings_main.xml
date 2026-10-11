@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Main flow (Home / Servers / Stats / bottom nav). English translation. -->
+<resources>
+    <!-- Bottom navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_servers">Servers</string>
+    <string name="nav_stats">Statistics</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Connect button -->
+    <string name="main_connect_action_connect">CONNECT</string>
+    <string name="main_connect_action_disconnect">DISCONNECT</string>
+    <string name="main_connect_progress_connecting">CONNECTING</string>
+    <string name="main_connect_progress_disconnecting">STOPPING</string>
+    <string name="main_connect_progress_recovering">RECOVERING</string>
+    <string name="main_connect_action_retry">RETRY</string>
+    <string name="main_connect_hint_cancel">tap to cancel</string>
+    <string name="main_connect_cd">VPN</string>
+    <string name="main_connect_click_connect">Connect VPN</string>
+    <string name="main_connect_click_disconnect">Disconnect VPN</string>
+    <string name="main_state_connected">Connected</string>
+    <string name="main_state_connecting">Connecting</string>
+    <string name="main_state_disconnecting">Disconnecting</string>
+    <string name="main_state_blocked">Traffic blocked, recovering</string>
+    <string name="main_state_error">Connection error</string>
+    <string name="main_state_disconnected">Disconnected</string>
+
+    <!-- Speed / session indicators -->
+    <string name="main_speed_up">Upload</string>
+    <string name="main_speed_down">Download</string>
+    <string name="main_session_duration">Duration</string>
+    <string name="main_session_received">Received</string>
+    <string name="main_session_sent">Sent</string>
+
+    <!-- Home -->
+    <string name="home_status_connected">Protected</string>
+    <string name="home_status_connecting">Looking for a working server…</string>
+    <string name="home_status_disconnecting">Disconnecting…</string>
+    <string name="home_status_blocked">Connection lost — traffic is protected, reconnecting…</string>
+    <string name="home_status_error">Connection error</string>
+    <string name="home_status_disconnected">Not protected</string>
+    <string name="home_hotspot_title">Sharing via hotspot</string>
+    <string name="home_hotspot_subtitle">HTTP %1$s:%2$d · tap for instructions</string>
+    <string name="home_mode_auto">Auto</string>
+    <string name="home_mode_manual">Manual</string>
+    <string name="home_switching">Switching…</string>
+    <string name="home_auto_active">%1$s · auto-selected</string>
+    <string name="home_auto_hint">Picks the best server automatically</string>
+    <string name="home_pinned_latency">%1$s · %2$d ms</string>
+    <string name="home_change">Change</string>
+    <string name="home_no_server">No server selected — tap to choose</string>
+    <string name="home_choose_server">Choose server</string>
+    <string name="home_server_down">Server is not responding</string>
+    <string name="home_switch_to_auto">Switch to Auto</string>
+    <string name="home_err_pick_server">Choose a server or turn on Auto mode.</string>
+    <string name="home_err_vpn_permission">VPN permission is required</string>
+    <string name="home_err_connect_failed">Could not connect: %1$s</string>
+
+    <!-- Servers -->
+    <string name="servers_title">Servers</string>
+    <plurals name="servers_count">
+        <item quantity="one">%d server</item>
+        <item quantity="other">%d servers</item>
+    </plurals>
+    <string name="servers_count_filtered">Showing %1$d of %2$d</string>
+    <string name="servers_ping">Ping</string>
+    <string name="servers_refresh">Refresh</string>
+    <string name="servers_filter_no_ru">No Russian servers</string>
+    <string name="servers_search_hint">Search by country or name…</string>
+    <string name="servers_clear_search">Clear search</string>
+    <string name="servers_ping_progress">Checking latency…</string>
+    <string name="servers_loading">Loading servers…</string>
+    <string name="servers_section_working">Working in the last 24 h</string>
+    <string name="servers_section_all">All servers</string>
+    <string name="servers_auto_title">Auto mode</string>
+    <string name="servers_auto_subtitle">The best server is picked automatically</string>
+    <string name="servers_selected">Selected</string>
+    <string name="servers_active">active</string>
+    <string name="servers_empty_search">Nothing found</string>
+    <string name="servers_empty">No servers</string>
+    <string name="servers_remove_from_pool">Remove from working</string>
+    <string name="servers_removed_from_pool">Server removed from working</string>
+    <string name="servers_undo">Undo</string>
+    <string name="servers_latency_ms">%1$d ms</string>
+    <string name="servers_latency_cd">Latency %1$d ms</string>
+    <string name="servers_latency_timeout">Unreachable</string>
+    <string name="servers_latency_unknown">Not tested</string>
+    <string name="servers_validation_verified">Verified working</string>
+    <string name="servers_validation_handshake">Handshake passed</string>
+    <string name="servers_validation_stale">Check is outdated</string>
+    <string name="servers_err_load">Could not load servers: %1$s</string>
+
+    <!-- Stats -->
+    <string name="stats_title">Statistics</string>
+    <string name="stats_vpn_active">VPN active</string>
+    <string name="stats_vpn_connecting">Connecting…</string>
+    <string name="stats_vpn_blocked">Traffic blocked, recovering…</string>
+    <string name="stats_vpn_disconnecting">Disconnecting…</string>
+    <string name="stats_vpn_error">Connection error</string>
+    <string name="stats_vpn_inactive">VPN inactive</string>
+    <string name="stats_upload_speed">Upload speed</string>
+    <string name="stats_download_speed">Download speed</string>
+    <string name="stats_uploaded">Uploaded</string>
+    <string name="stats_downloaded">Downloaded</string>
+    <string name="stats_session_duration">Session duration</string>
+    <string name="stats_hint_disconnected">Connect to the VPN to see live statistics</string>
+</resources>

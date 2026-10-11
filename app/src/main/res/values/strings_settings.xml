@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings, split tunneling, subscriptions, DNS and hotspot-sharing screens (Russian = default). -->
+<resources>
+
+    <!-- Settings -->
+    <string name="settings_title">Настройки</string>
+    <string name="settings_section_connection">Подключение</string>
+    <string name="settings_section_apps_network">Приложения и сеть</string>
+    <string name="settings_section_hotspot">Раздача</string>
+    <string name="settings_section_about">О приложении</string>
+    <string name="settings_applies_next_connect">Применится при следующем подключении</string>
+    <string name="settings_subscriptions_title">Подписки</string>
+    <string name="settings_subscriptions_subtitle">Свои источники серверов, включение и выключение</string>
+    <string name="settings_autoconnect_title">Подключаться при загрузке</string>
+    <string name="settings_autoconnect_subtitle">Нужно один раз дать разрешение на VPN</string>
+    <string name="settings_killswitch_title">Kill switch</string>
+    <string name="settings_killswitch_subtitle">Блокировать трафик при обрыве туннеля — реальный IP не утечёт</string>
+    <string name="settings_killswitch_off_warning">⚠ Выключено: при обрыве трафик может пойти напрямую в обход VPN.</string>
+    <string name="settings_split_title">Раздельное туннелирование</string>
+    <string name="settings_split_subtitle">Выбрать приложения, которые работают без VPN</string>
+    <string name="settings_split_manage_title">Выбор приложений</string>
+    <string name="settings_split_manage_subtitle">Какие приложения идут мимо VPN или только через него</string>
+    <string name="settings_dns_title">DNS-серверы</string>
+    <string name="settings_hotspot_title">Раздача через точку доступа</string>
+    <string name="settings_hotspot_hint">Прокси доступен только в сети вашей точки доступа: HTTP без пароля, SOCKS5 с логином и паролем. Инструкция — на главном экране после подключения.</string>
+    <string name="settings_hotspot_guide_title">Как подключить другое устройство</string>
+    <string name="settings_hotspot_guide_subtitle">Пошаговая инструкция для Android, iPhone, ПК и Telegram</string>
+    <string name="settings_about_version">Версия</string>
+    <string name="settings_about_sources">Источники серверов</string>
+    <string name="settings_about_sources_value">zieng2/wl, igareck + свои</string>
+    <string name="settings_about_protocol">Протокол</string>
+    <string name="settings_about_protocol_value" translatable="false">VLESS + Xray</string>
+
+    <!-- Split tunneling -->
+    <string name="split_title">Раздельное туннелирование</string>
+    <string name="split_subtitle_off">Выключено</string>
+    <plurals name="split_apps_via_vpn">
+        <item quantity="one">%d приложение через VPN</item>
+        <item quantity="few">%d приложения через VPN</item>
+        <item quantity="many">%d приложений через VPN</item>
+        <item quantity="other">%d приложения через VPN</item>
+    </plurals>
+    <plurals name="split_apps_bypass_vpn">
+        <item quantity="one">%d приложение без VPN</item>
+        <item quantity="few">%d приложения без VPN</item>
+        <item quantity="many">%d приложений без VPN</item>
+        <item quantity="other">%d приложения без VPN</item>
+    </plurals>
+    <string name="split_cd_back">Назад</string>
+    <string name="split_enable">Включить раздельное туннелирование</string>
+    <string name="split_mode_exclude">Исключить выбранные</string>
+    <string name="split_mode_include">Только выбранные через VPN</string>
+    <string name="split_mode_include_hint">Через VPN идут только выбранные приложения, остальные — напрямую</string>
+    <string name="split_mode_exclude_hint">Выбранные приложения работают напрямую, без VPN</string>
+    <string name="split_include_empty_warning">Не выбрано ни одного приложения — VPN работает для всех</string>
+    <string name="split_search_placeholder">Поиск приложений</string>
+    <string name="split_cd_clear_search">Очистить поиск</string>
+    <string name="split_select_all">Выбрать все</string>
+    <string name="split_clear_all">Снять все</string>
+    <string name="split_invert">Инвертировать</string>
+    <string name="split_bulk_applies_to">Применяется к найденным: %1$d</string>
+    <string name="split_no_apps">Приложения не найдены</string>
+    <string name="split_no_search_results">Ничего не найдено</string>
+    <string name="split_badge_via_vpn">ЧЕРЕЗ VPN</string>
+    <string name="split_badge_bypass">БЕЗ VPN</string>
+
+    <!-- Subscriptions -->
+    <string name="subs_title">Подписки</string>
+    <string name="subs_enabled_count">Включено: %1$d из %2$d</string>
+    <string name="subs_cd_back">Назад</string>
+    <string name="subs_intro">Добавьте свои подписки (ссылка на список VLESS, https://). Выключенные источники не участвуют в поиске рабочих серверов.</string>
+    <string name="subs_url_placeholder" translatable="false">https://example.com/sub.txt</string>
+    <string name="subs_add_button">Добавить подписку</string>
+    <string name="subs_refreshing">Обновляю серверы…</string>
+    <string name="subs_refresh_failed">Не удалось обновить серверы. Проверьте подключение к интернету.</string>
+    <string name="subs_empty">Источников пока нет. Добавьте ссылку на подписку выше.</string>
+    <string name="subs_none_enabled">Все источники выключены — список серверов не будет обновляться.</string>
+    <string name="subs_builtin_source">Встроенный источник</string>
+    <string name="subs_cd_delete">Удалить подписку %1$s</string>
+    <string name="subs_delete_title">Удалить подписку?</string>
+    <string name="subs_delete_confirm">Удалить</string>
+    <string name="subs_cancel">Отмена</string>
+    <string name="subs_disable_last_title">Выключить последний источник?</string>
+    <string name="subs_last_source_warning">Без источников список серверов опустеет.</string>
+    <string name="subs_disable_confirm">Выключить</string>
+
+    <!-- DNS -->
+    <string name="dns_title">DNS-серверы</string>
+    <string name="dns_cd_back">Назад</string>
+    <string name="dns_summary_default">По умолчанию (Cloudflare, Google DoH)</string>
+    <string name="dns_intro">Свои DNS-серверы. Запросы идут через VPN-туннель. Изменения применяются сразу при активном подключении.</string>
+    <string name="dns_order_hint">Порядок важен: серверы опрашиваются сверху вниз. Всего — до %1$d, включённых одновременно — не более %2$d.</string>
+    <string name="dns_input_placeholder" translatable="false">1.1.1.1, tcp://9.9.9.9:53, https://…/dns-query</string>
+    <string name="dns_added_disabled">Добавлен выключенным: одновременно можно включить не более %1$d</string>
+    <string name="dns_add_button">Добавить сервер</string>
+    <string name="dns_presets_label">Добавить:</string>
+    <string name="dns_preset_already_added">уже добавлен</string>
+    <string name="dns_list_empty">Список пуст — используются серверы по умолчанию (Cloudflare, Google DoH).</string>
+    <string name="dns_all_disabled">Все серверы выключены — используются серверы по умолчанию (Cloudflare, Google DoH).</string>
+    <string name="dns_ipv6_title">IPv6-ответы (AAAA)</string>
+    <string name="dns_ipv6_on">Возвращать IPv4- и IPv6-адреса</string>
+    <string name="dns_ipv6_off">Только IPv4 (рекомендуется)</string>
+    <string name="dns_reset_button">Сбросить по умолчанию</string>
+    <string name="dns_limitations">Не действует на приложения-исключения, «Частный DNS» Android в строгом режиме и встроенный DNS браузеров.</string>
+    <string name="dns_delete_title">Удалить сервер?</string>
+    <string name="dns_delete_confirm">Удалить</string>
+    <string name="dns_cancel">Отмена</string>
+    <string name="dns_reset_title">Сбросить DNS?</string>
+    <string name="dns_reset_message">Список будет очищен, будут использоваться серверы по умолчанию (Cloudflare, Google DoH). IPv6-ответы выключатся.</string>
+    <string name="dns_reset_confirm">Сбросить</string>
+    <string name="dns_cd_move_up">Поднять %1$s выше</string>
+    <string name="dns_cd_move_down">Опустить %1$s ниже</string>
+    <string name="dns_cd_delete">Удалить %1$s</string>
+
+    <!-- Hotspot sharing guide -->
+    <string name="hotspot_title">Раздача VPN</string>
+    <string name="hotspot_cd_back">Назад</string>
+    <string name="hotspot_back">Назад</string>
+    <string name="hotspot_host_hint_unknown">IP из блока выше</string>
+    <string name="hotspot_status_connect_first">Сначала подключите VPN</string>
+    <string name="hotspot_status_on_but_disabled">Раздача работает, но выключена в настройках — прекратится после переподключения</string>
+    <string name="hotspot_status_working">Раздача работает</string>
+    <string name="hotspot_status_enable_in_settings">Включите «Раздача через точку доступа» в настройках и переподключитесь</string>
+    <string name="hotspot_status_no_hotspot">Точка доступа не обнаружена. Включите точку доступа и переподключите VPN</string>
+    <string name="hotspot_params_title">Параметры прокси</string>
+    <string name="hotspot_http_proxy">HTTP-прокси</string>
+    <string name="hotspot_socks5">SOCKS5</string>
+    <string name="hotspot_auth_note">HTTP-прокси — без пароля. Логин и пароль нужны только для SOCKS5.</string>
+    <string name="hotspot_login">Логин</string>
+    <string name="hotspot_password">Пароль</string>
+    <string name="hotspot_new_password_pending">Новый пароль применится после переподключения VPN.</string>
+    <string name="hotspot_change_password">Сменить пароль</string>
+    <string name="hotspot_password_change_note">Смена пароля применится после переподключения VPN.</string>
+    <string name="hotspot_copied">Скопировано: %1$s</string>
+    <string name="hotspot_cd_copy">Копировать: %1$s</string>
+    <string name="hotspot_cd_show_password">Показать пароль</string>
+    <string name="hotspot_cd_hide_password">Скрыть пароль</string>
+    <string name="hotspot_before_title">Перед началом</string>
+    <string name="hotspot_before_step1">Включите «Раздача через точку доступа» в настройках</string>
+    <string name="hotspot_before_step2">Включите точку доступа на этом телефоне</string>
+    <string name="hotspot_before_step3">Подключите VPN (после включения точки доступа)</string>
+    <string name="hotspot_before_step4">Подключите другое устройство к вашей точке доступа</string>
+    <string name="hotspot_step_save">Нажмите «Сохранить»</string>
+    <string name="hotspot_android_title">Android</string>
+    <string name="hotspot_android_step1">Настройки → Wi-Fi</string>
+    <string name="hotspot_android_step2">Нажмите и удерживайте сеть вашей точки доступа → «Изменить» (или значок ⚙)</string>
+    <string name="hotspot_android_step3">Откройте «Дополнительно»</string>
+    <string name="hotspot_android_step4">Прокси → «Вручную»</string>
+    <string name="hotspot_android_step5">Хост: %1$s, порт: %2$d</string>
+    <string name="hotspot_ios_title">iPhone / iPad</string>
+    <string name="hotspot_ios_step1">Настройки → Wi-Fi</string>
+    <string name="hotspot_ios_step2">Нажмите (i) рядом с сетью вашей точки доступа</string>
+    <string name="hotspot_ios_step3">Внизу: «Настройка прокси» → «Вручную»</string>
+    <string name="hotspot_ios_step4">Сервер: %1$s, порт: %2$d</string>
+    <string name="hotspot_ios_step5">Аутентификация — выключена</string>
+    <string name="hotspot_desktop_title">Windows / macOS</string>
+    <string name="hotspot_desktop_windows">Windows: Параметры → Сеть и Интернет → Прокси → «Использовать прокси-сервер» → адрес %1$s, порт %2$d → Сохранить</string>
+    <string name="hotspot_desktop_macos">macOS: Системные настройки → Wi-Fi → Подробнее… → Прокси → «Веб-прокси (HTTP)» и «Защищённый веб-прокси (HTTPS)» → %1$s : %2$d → ОК</string>
+    <string name="hotspot_telegram_title">Telegram (SOCKS5)</string>
+    <string name="hotspot_telegram_step1">Настройки → Данные и память → Прокси → Добавить прокси</string>
+    <string name="hotspot_telegram_step2">Тип: SOCKS5</string>
+    <string name="hotspot_telegram_step3">Сервер: %1$s, порт: %2$d</string>
+    <string name="hotspot_telegram_step4">Логин: %1$s, пароль: из блока выше</string>
+    <string name="hotspot_telegram_step5">Сохраните и включите прокси</string>
+    <string name="hotspot_notes_title">Важно</string>
+    <string name="hotspot_note_access">Прокси доступен только устройствам, подключённым к вашей точке доступа. Защита — пароль от точки доступа.</string>
+    <string name="hotspot_note_not_all_traffic">Не весь трафик приложений идёт через системный прокси (некоторые игры и приложения его игнорируют).</string>
+    <string name="hotspot_note_ip_changed">Если IP точки доступа сменился (точку доступа выключали), переподключите VPN и обновите настройки на другом устройстве.</string>
+    <string name="hotspot_verify_title">Проверка</string>
+    <string name="hotspot_verify_text">Откройте браузер на другом устройстве и проверьте IP на 2ip.ru или whoer.net — он должен совпадать с IP VPN-сервера.</string>
+    <string name="hotspot_disable_title">Как отключить</string>
+    <string name="hotspot_disable_text">На другом устройстве повторите шаги выше и в поле «Прокси» выберите «Нет» (iOS — «Выкл.»).</string>
+</resources>

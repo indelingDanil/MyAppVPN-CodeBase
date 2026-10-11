@@ -10,7 +10,9 @@ class FetchServersUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(): Result<Int> {
         val result = configRepository.fetchAndSaveServers()
-        if (result.isSuccess) {
+        // Only stamp a refresh that actually delivered servers (0 = no enabled sources / empty
+        // lists) — otherwise the "last updated" time would lie and delay the next refresh.
+        if (result.getOrDefault(0) > 0) {
             preferences.setLastRefreshTime(System.currentTimeMillis())
         }
         return result

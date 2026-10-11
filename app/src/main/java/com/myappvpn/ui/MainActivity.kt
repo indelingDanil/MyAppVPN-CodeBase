@@ -59,7 +59,8 @@ fun MainContent() {
         Screen.Home.route,
         Screen.Servers.route,
         Screen.Stats.route,
-        Screen.Settings.route
+        Screen.Settings.route,
+        Screen.Project.route
     )
     val showBottomBar = currentRoute in bottomNavRoutes
 
@@ -79,6 +80,16 @@ fun MainContent() {
             AetherBottomNavBar(
                 currentRoute = currentRoute,
                 onNavigate = { screen ->
+                    if (screen == Screen.Home) {
+                        // Home is the stack root. Navigating to it with saveState/restoreState
+                        // RESTORED the saved Home stack — which contained Servers (opened from the
+                        // mode card) — so tapping Home bounced straight back to Servers.
+                        // Just pop back to the root instead.
+                        if (!navController.popBackStack(Screen.Home.route, inclusive = false)) {
+                            navController.navigate(Screen.Home.route) { launchSingleTop = true }
+                        }
+                        return@AetherBottomNavBar
+                    }
                     navController.navigate(screen.route) {
                         // Pop up to the home screen to avoid building up a large back stack
                         popUpTo(Screen.Home.route) {

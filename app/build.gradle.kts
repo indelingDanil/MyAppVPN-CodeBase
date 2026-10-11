@@ -9,13 +9,15 @@ plugins {
 android {
     namespace = "com.myappvpn"
     compileSdk = 34
+    // NDK r28+ links native libs with 16 KB page alignment by default
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.myappvpn"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "2.0.2-beta"
+        versionCode = 10
+        versionName = "2.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -90,6 +92,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
 
     // Compose BOM

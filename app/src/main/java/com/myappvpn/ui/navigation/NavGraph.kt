@@ -15,10 +15,10 @@ fun AppNavGraph(navController: NavHostController) {
         composable(Screen.Home.route) {
             HomeScreen(
                 onNavigateToServers = {
-                    navController.navigate(Screen.Servers.route)
+                    navController.navigate(Screen.Servers.route) { launchSingleTop = true }
                 },
                 onNavigateToHotspotSetup = {
-                    navController.navigate(Screen.HotspotSetup.route)
+                    navController.navigate(Screen.HotspotSetup.route) { launchSingleTop = true }
                 }
             )
         }
@@ -31,6 +31,10 @@ fun AppNavGraph(navController: NavHostController) {
             )
         }
 
+        composable(Screen.Project.route) {
+            ProjectScreen()
+        }
+
         composable(Screen.Stats.route) {
             StatsScreen()
         }
@@ -38,11 +42,23 @@ fun AppNavGraph(navController: NavHostController) {
         composable(Screen.Settings.route) {
             SettingsScreen(
                 onNavigateToSplitTunnel = {
-                    navController.navigate(Screen.SplitTunnel.route)
+                    navController.navigate(Screen.SplitTunnel.route) { launchSingleTop = true }
                 },
                 onNavigateToSubscriptions = {
-                    navController.navigate(Screen.Subscriptions.route)
+                    navController.navigate(Screen.Subscriptions.route) { launchSingleTop = true }
+                },
+                onNavigateToDns = {
+                    navController.navigate(Screen.Dns.route) { launchSingleTop = true }
+                },
+                onNavigateToHotspotSetup = {
+                    navController.navigate(Screen.HotspotSetup.route) { launchSingleTop = true }
                 }
+            )
+        }
+
+        composable(Screen.Dns.route) {
+            DnsScreen(
+                onBack = { navController.popBackStack() }
             )
         }
 

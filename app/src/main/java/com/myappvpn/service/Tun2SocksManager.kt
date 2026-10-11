@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.myappvpn.util.BinaryInstaller
 import com.myappvpn.util.NativeHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -15,22 +16,32 @@ class Tun2SocksManager(private val context: Context) {
         private const val STARTUP_WAIT_MS = 500L
     }
 
-    private var pid: Int = -1
+    @Volatile private var pid: Int = -1
 
-    val isRunning: Boolean get() = pid > 0 && NativeHelper.isProcessAlive(pid)
+    /**
+     * isProcessAlive reaps an exited child, so once it reports dead the pid is forgotten —
+     * otherwise a later stop() could signal an unrelated process that reused the pid.
+     */
+    val isRunning: Boolean
+        get() {
+            val p = pid
+            if (p <= 0) return false
+            if (NativeHelper.isProcessAlive(p)) return true
+            if (pid == p) pid = -1
+            return false
+        }
 
     /**
      * Start tun2socks via native fork()+exec() so the TUN fd is inherited correctly.
      * Java's ProcessBuilder closes all non-stdio fds before exec; native fork() does not.
+     * tun2socks reads the TUN via fd:// — the TUN addresses (172.19.0.1/30, fdfe:dcba:9876::1/126,
+     * set in MyVpnService.buildTun) aren't passed to it. [socksPort] is the session's random port.
      */
     suspend fun start(
         tunFd: Int,
-        socksPort: Int = 10808,
+        socksPort: Int,
         proxyUser: String? = null,
         proxyPass: String? = null,
-        tunAddr: String = "10.0.0.2",
-        tunGw: String = "10.0.0.1",
-        dnsPrimary: String = "1.1.1.1"
     ): Boolean = withContext(Dispatchers.IO) {
         stop()
 
@@ -53,6 +64,9 @@ class Tun2SocksManager(private val context: Context) {
                 pid = -1
             }
             alive
+        } catch (e: CancellationException) {
+            stop()   // don't leave an orphan tun2socks holding the TUN fd
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start tun2socks: ${e.message}")
             false

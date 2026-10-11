@@ -23,13 +23,30 @@ class RefreshServersWorker @AssistedInject constructor(
             Result.success()
         } else {
             val err = result.exceptionOrNull()
-            Log.w(TAG, "Refresh failed (attempt $runAttemptCount): ${err?.message}")
-            Result.retry()
+            Log.w(TAG, "Refresh failed (attempt $runAttemptCount): ${redact(err?.message)}")
+            // Cap backoff retries: after MAX_ATTEMPTS give up until the next periodic run.
+            if (runAttemptCount >= MAX_ATTEMPTS) Result.failure() else Result.retry()
         }
     }
 
     companion object {
         const val TAG = "RefreshServersWorker"
         const val WORK_NAME = "refresh_servers_hourly"
+        private const val MAX_ATTEMPTS = 3
+
+        private val URL_REGEX = Regex("""(?i)\b([a-z][a-z0-9+.-]*)://[^\s/?#]+[^\s]*""")
+
+        /**
+         * Strip URLs down to scheme://host (no userinfo / path / query) — custom subscription
+         * URLs may carry tokens and must never reach logcat.
+         */
+        internal fun redact(message: String?): String {
+            if (message.isNullOrEmpty()) return "unknown error"
+            return URL_REGEX.replace(message) { m ->
+                val host = runCatching { java.net.URI(m.value).host }.getOrNull()
+                if (host.isNullOrEmpty()) "${m.groupValues[1]}://<redacted>"
+                else "${m.groupValues[1]}://$host/…"
+            }
+        }
     }
 }

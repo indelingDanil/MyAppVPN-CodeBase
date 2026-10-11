@@ -18,7 +18,7 @@ private val AetherDarkColorScheme = darkColorScheme(
     secondary = AetherPurple,
     onSecondary = AetherTextPrimary,
     secondaryContainer = AetherPurpleGlow,
-    onSecondaryContainer = AetherPurple,
+    onSecondaryContainer = AetherPurpleLight,
 
     tertiary = AetherConnected,
     onTertiary = AetherTextOnPrimary,

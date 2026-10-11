@@ -4,29 +4,29 @@ import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.data.db.ServerDao
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
-import com.myappvpn.data.remote.GithubApiService
+import com.myappvpn.data.remote.SubscriptionFetcher
 import com.myappvpn.service.MyVpnService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.InetSocketAddress
-import java.net.Proxy
-import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class ConfigRepository @Inject constructor(
-    private val apiService: GithubApiService,
+    private val fetcher: SubscriptionFetcher,
     private val serverDao: ServerDao,
     private val preferences: AppPreferences,
     private val subscriptionRepository: SubscriptionRepository
@@ -35,9 +35,17 @@ class ConfigRepository @Inject constructor(
         private val BLOCKED_COUNTRIES = setOf("Ukraine")
     }
 
+    /** Serializes refreshes (worker / pull-to-refresh / in-tunnel refresh) — one at a time. */
+    private val refreshMutex = Mutex()
+
     val servers: Flow<List<ServerProfile>> = serverDao.getAllServers()
 
-    suspend fun fetchAndSaveServers(): Result<Int> = runCatching {
+    /** The pinned (manual-mode) server. Single source of truth for the pin: Room `isSelected`. */
+    val pinnedServer: Flow<ServerProfile?> = serverDao.observeSelectedServer().distinctUntilChanged()
+
+    suspend fun fetchAndSaveServers(): Result<Int> = refreshMutex.withLock { fetchAndSaveServersLocked() }
+
+    private suspend fun fetchAndSaveServersLocked(): Result<Int> = runCatching {
         // Only enabled sources (built-in + custom) are fetched. Each source is a fallback chain
         // (identical mirrors) — take the first that works. Chains are fetched in parallel & merged.
         val chains = subscriptionRepository.getEnabledChains()
@@ -54,40 +62,27 @@ class ConfigRepository @Inject constructor(
         // instead of silently reporting "0 servers updated" and waiting a full hour.
         if (texts.all { it == null }) throw IOException("All subscription sources unreachable")
 
-        val newProfiles = texts.filterNotNull()
-            .flatMap { text ->
-                VlessUriParser.parseSubscription(text)
-                    .map { (config, uri) -> VlessUriParser.toServerProfile(config, uri) }
-            }
-            .filter { it.country !in BLOCKED_COUNTRIES }
-        // De-duplicate by ID (same server may appear in multiple sources/mirrors)
-        val deduplicated = newProfiles.distinctBy { it.id }
+        // CPU-heavy parse + profile building off the caller's (often Main) thread.
+        val deduplicated = withContext(Dispatchers.Default) {
+            val newProfiles = texts.filterNotNull()
+                .flatMap { text ->
+                    VlessUriParser.parseSubscription(text)
+                        .map { (config, uri) -> VlessUriParser.toServerProfile(config, uri) }
+                }
+                .filter { it.country !in BLOCKED_COUNTRIES }
+            // De-duplicate by ID (same server may appear in multiple sources/mirrors)
+            newProfiles.distinctBy { it.id }
+        }
         if (deduplicated.isNotEmpty()) {
-            // Preserve learned data (ping latency, score counters, current selection)
-            // for servers that already exist in the DB. New servers start with defaults.
-            val existing = serverDao.getAllServers().first().associateBy { it.id }
-            val merged = deduplicated.map { fresh ->
-                val old = existing[fresh.id]
-                if (old != null) fresh.copy(
-                    latencyMs            = old.latencyMs,
-                    successCount         = old.successCount,
-                    failCount            = old.failCount,
-                    isSelected           = old.isSelected,
-                    speedMbps            = old.speedMbps,
-                    validationState      = old.validationState,
-                    lastValidatedAt      = old.lastValidatedAt,
-                    medianLatencyMs      = old.medianLatencyMs,
-                    pingCount            = old.pingCount,
-                    consecutiveFailures  = old.consecutiveFailures,
-                    handshakeOk          = old.handshakeOk,
-                    verifiedAt           = old.verifiedAt,
-                ) else fresh
-            }
-            serverDao.insertAll(merged)                    // upsert (REPLACE strategy)
-            serverDao.deleteNotIn(merged.map { it.id })   // remove stale servers
+            // One transaction: existing rows get ONLY their static columns updated (learned
+            // stats / pin / validation are never rewritten, so concurrent markVerified /
+            // markFailed / updateLatency / selectServer writes can't be rolled back), new rows
+            // are inserted (carrying stats over from a legacy-id row of the same server), and
+            // rows no longer in any enabled source are deleted in chunks.
+            serverDao.applyRefresh(deduplicated)
         }
         deduplicated.size
-    }
+    }.onFailure { if (it is CancellationException) throw it }   // never swallow cancellation
 
     /**
      * RACE all mirrors of a chain in parallel (≤10s each); return the FIRST that responds with
@@ -100,9 +95,18 @@ class ConfigRepository @Inject constructor(
         val jobs = chain.map { url ->
             launch {
                 val text = withTimeoutOrNull(12_000) {
-                    runCatching { fetchRaw(url) }.getOrNull()
+                    runCatching { fetchRaw(url) }
+                        .onFailure { if (it is CancellationException) throw it }
+                        .getOrNull()
                 }
-                if (text != null && text.contains("vless://")) winner.complete(text)
+                // Validate AFTER decoding (base64 subscriptions have no literal "vless://"):
+                // accept only if it yields ≥1 server. Parsing is CPU work → Default dispatcher.
+                if (text != null) {
+                    val ok = withContext(Dispatchers.Default) {
+                        VlessUriParser.parseSubscription(text).isNotEmpty()
+                    }
+                    if (ok) winner.complete(text)
+                }
             }
         }
         launch { jobs.joinAll(); winner.complete(null) }   // all failed → null
@@ -118,24 +122,9 @@ class ConfigRepository @Inject constructor(
      * over the restricted operator network and only reach a couple of experimental mirrors.
      */
     private suspend fun fetchRaw(url: String): String {
-        val port = MyVpnService.activeSocksPort
-        return if (port > 0) fetchViaSocks(url, port) else apiService.fetchRawFile(url)
-    }
-
-    private suspend fun fetchViaSocks(url: String, port: Int): String = withContext(Dispatchers.IO) {
-        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-        val conn = URL(url).openConnection(proxy) as HttpURLConnection
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 10_000
-        conn.requestMethod = "GET"
-        conn.instanceFollowRedirects = true
-        try {
-            val code = conn.responseCode
-            if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() }
-            else throw IOException("HTTP $code for $url")
-        } finally {
-            conn.disconnect()
-        }
+        // OkHttp (cancellable, 8 MB cap, SSRF-checked redirects); SOCKS via 127.0.0.1 when the
+        // tunnel is up — the service's global java.net.Authenticator supplies the SOCKS creds.
+        return fetcher.fetch(url, MyVpnService.activeSocksPort)
     }
 
     /**
@@ -151,9 +140,9 @@ class ConfigRepository @Inject constructor(
 
     suspend fun getServerById(id: String): ServerProfile? = serverDao.getServerById(id)
 
+    /** Atomic: one UPDATE statement, so observers never see a half-applied pin. */
     suspend fun selectServer(serverId: String) {
-        serverDao.clearSelection()
-        serverDao.selectServer(serverId)
+        serverDao.selectOnly(serverId)
     }
 
     suspend fun updateLatency(serverId: String, latencyMs: Int) {

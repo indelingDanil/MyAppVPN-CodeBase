@@ -4,13 +4,17 @@ import android.content.Context
 import android.util.Log
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
+import com.myappvpn.service.LocalProxyAuth
 import com.myappvpn.util.BinaryInstaller
 import com.myappvpn.util.XrayConfigBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -19,7 +23,10 @@ import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URL
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import javax.inject.Singleton
 
 data class MicroTestResult(
     val serverId: String,
@@ -28,12 +35,12 @@ data class MicroTestResult(
     val errorReason: String? = null,
 )
 
+@Singleton   // one shared semaphore for ALL callers (batch, background probe, re-verify)
 class XrayMicroTest @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
         private const val TAG = "XrayMicroTest"
-        const val TEST_SOCKS_PORT_BASE = 10900
         const val TEST_TIMEOUT_MS = 8000L
         const val MAX_PARALLEL_TESTS = 4
         const val XRAY_STARTUP_WAIT_MS = 1200L
@@ -45,35 +52,48 @@ class XrayMicroTest @Inject constructor(
     /**
      * Starts a temporary XRay instance, routes a single HTTP HEAD through it.
      * Returns true if the request succeeds (2xx/3xx).
-     * Always cleans up the XRay process.
+     * Always cleans up the XRay process. Each test gets a random free loopback port (no fixed,
+     * guessable port another app could pre-bind) and random SOCKS credentials, registered with
+     * [LocalProxyAuth] so the java.net SOCKS client authenticates for that port only.
      */
-    suspend fun test(server: ServerProfile, testPort: Int): MicroTestResult = withContext(Dispatchers.IO) {
+    suspend fun test(server: ServerProfile): MicroTestResult = withContext(Dispatchers.IO) {
         semaphore.withPermit {
+            val testPort = try {
+                LocalProxyAuth.pickFreeLoopbackPorts(1).first()
+            } catch (e: Exception) {
+                return@withContext MicroTestResult(server.id, false, errorReason = "no_free_port")
+            }
+            val (testUser, testPass) = LocalProxyAuth.randomCredentials()
             var process: Process? = null
-            val configFile = File(context.filesDir, "xray_test_${testPort}.json")
+            val configFile = File(context.filesDir, "xray_test_${testPort}_${UUID.randomUUID()}.json")
             try {
                 val vlessConfig = VlessUriParser.parse(server.vlessUri)
                     ?: return@withContext MicroTestResult(server.id, false, errorReason = "parse_failed")
 
-                val xrayJson = XrayConfigBuilder.build(vlessConfig, socksPort = testPort, listenOnAllInterfaces = false)
+                val xrayJson = XrayConfigBuilder.build(
+                    vlessConfig, socksPort = testPort, includeHttpInbound = false,
+                    socksAccount = testUser to testPass,
+                )
                 configFile.writeText(xrayJson)
+                LocalProxyAuth.registerTestPort(testPort, testUser, testPass)
 
                 val xrayBin = BinaryInstaller.getXrayBinaryPath(context)
                 val pb = ProcessBuilder(xrayBin, "run", "-c", configFile.absolutePath)
                     .redirectErrorStream(true)
                 pb.environment()["xray.location.asset"] = context.filesDir.absolutePath
-                process = pb.start()
+                val proc = pb.start()
+                process = proc
 
                 // Drain stdout in background to prevent buffer deadlock
-                val logThread = Thread {
+                Thread {
                     try {
-                        process?.inputStream?.bufferedReader()?.forEachLine { /* discard */ }
+                        proc.inputStream.bufferedReader().forEachLine { /* discard */ }
                     } catch (_: Exception) {}
                 }.apply { isDaemon = true; start() }
 
                 delay(XRAY_STARTUP_WAIT_MS)
 
-                if (process?.isAlive != true) {
+                if (!proc.isAlive) {
                     return@withContext MicroTestResult(server.id, false, errorReason = "xray_crashed")
                 }
 
@@ -97,22 +117,75 @@ class XrayMicroTest @Inject constructor(
                     Log.w(TAG, "Micro-test failed for ${server.name}: HTTP $code")
                     MicroTestResult(server.id, false, elapsed, "http_$code")
                 }
+            } catch (e: CancellationException) {
+                throw e   // process is destroyed in finally
             } catch (e: Exception) {
                 Log.w(TAG, "Micro-test error for ${server.name}: ${e.message}")
                 MicroTestResult(server.id, false, errorReason = e.message)
             } finally {
                 process?.let {
-                    try { it.destroy(); it.waitFor() } catch (_: Exception) {}
+                    try {
+                        it.destroy()
+                        if (!it.waitFor(2, TimeUnit.SECONDS)) {
+                            it.destroyForcibly()
+                            it.waitFor(1, TimeUnit.SECONDS)
+                        }
+                    } catch (_: Exception) {}
                 }
                 configFile.delete()
+                LocalProxyAuth.unregisterTestPort(testPort)
             }
         }
     }
 
     /**
      * Tests multiple servers in parallel (up to MAX_PARALLEL_TESTS).
-     * Stops launching new tests once [targetCount] servers pass.
+     * Runs in groups of MAX_PARALLEL_TESTS and awaits the WHOLE group before the next one;
+     * stops launching new groups once [targetCount] servers pass.
      */
+    // Losing tests of firstSuccess() finish here in the background: their blocking HTTP call
+    // can't be interrupted, and waiting for them is exactly what made Auto connect take ~30 s.
+    private val backgroundScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+    )
+
+    /**
+     * Tests [servers] (up to [MAX_PARALLEL_TESTS] at a time, in order) and returns the FIRST
+     * success as soon as it arrives — the first to answer is effectively the fastest. Remaining
+     * tests keep running in the background (each cleans up its own Xray) but don't delay us.
+     * Null if none succeeded.
+     */
+    suspend fun firstSuccess(servers: List<ServerProfile>): MicroTestResult? {
+        if (servers.isEmpty()) return null
+        val winner = kotlinx.coroutines.CompletableDeferred<MicroTestResult?>()
+        val remaining = java.util.concurrent.atomic.AtomicInteger(servers.size)
+        val jobs = servers.map { server ->
+            backgroundScope.launch {
+                try {
+                    if (winner.isCompleted) return@launch
+                    val r = test(server)   // test() is itself limited by [semaphore]
+                    if (r.success) winner.complete(r)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "firstSuccess: test error ${e.message}")
+                } finally {
+                    if (remaining.decrementAndGet() == 0) winner.complete(null)
+                }
+            }
+        }
+        return try {
+            winner.await().also {
+                // Tests still queued on the semaphore are pointless now — cancel them. Ones
+                // already running finish their blocking request, then clean up in finally.
+                jobs.forEach { j -> j.cancel() }
+            }
+        } catch (e: CancellationException) {
+            jobs.forEach { it.cancel() }   // queued ones won't start; running ones clean up
+            throw e
+        }
+    }
+
     suspend fun testBatch(
         servers: List<ServerProfile>,
         targetCount: Int = 3
@@ -121,21 +194,17 @@ class XrayMicroTest @Inject constructor(
         val verified = java.util.concurrent.atomic.AtomicInteger(0)
 
         coroutineScope {
-            for ((index, server) in servers.withIndex()) {
+            for (group in servers.chunked(MAX_PARALLEL_TESTS)) {
                 if (verified.get() >= targetCount) break
-
-                val port = TEST_SOCKS_PORT_BASE + (index % MAX_PARALLEL_TESTS)
-                val deferred = async {
-                    if (verified.get() >= targetCount) return@async null
-                    val result = test(server, port)
-                    results.add(result)
-                    if (result.success) verified.incrementAndGet()
-                    result
-                }
-                // Launch in batches of MAX_PARALLEL_TESTS
-                if ((index + 1) % MAX_PARALLEL_TESTS == 0 || index == servers.lastIndex) {
-                    deferred.await()
-                }
+                group.map { server ->
+                    async {
+                        if (verified.get() >= targetCount) return@async null
+                        val result = test(server)
+                        results.add(result)
+                        if (result.success) verified.incrementAndGet()
+                        result
+                    }
+                }.awaitAll()
             }
         }
 

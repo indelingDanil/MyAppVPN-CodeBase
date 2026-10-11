@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import java.security.SecureRandom
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,8 +26,16 @@ class AppPreferences @Inject constructor(
         val KEY_AUTO_CONNECT = booleanPreferencesKey("auto_connect")
         val KEY_SPLIT_TUNNEL_ENABLED = booleanPreferencesKey("split_tunnel_enabled")
         val KEY_EXCLUDED_APPS = stringSetPreferencesKey("excluded_apps")
+        val KEY_SPLIT_TUNNEL_MODE = stringPreferencesKey("split_tunnel_mode")
+        const val SPLIT_MODE_EXCLUDE = "EXCLUDE"
+        const val SPLIT_MODE_INCLUDE = "INCLUDE"
+        // LEGACY — superseded by KEY_DNS_SERVERS (Stage 3b); never read for the tunnel.
         val KEY_DNS_PRIMARY = stringPreferencesKey("dns_primary")
         val KEY_DNS_SECONDARY = stringPreferencesKey("dns_secondary")
+        // Custom DNS servers: JSON array of {id,address,label,enabled} (see DnsRepository).
+        val KEY_DNS_SERVERS = stringPreferencesKey("dns_servers")
+        // Xray dns.queryStrategy: "UseIPv4" (default) or "UseIP".
+        val KEY_DNS_QUERY_STRATEGY = stringPreferencesKey("dns_query_strategy")
         val KEY_SHOW_STATS = booleanPreferencesKey("show_stats")
         val KEY_SOCKS_PORT = intPreferencesKey("socks_port")
         val KEY_HOTSPOT_SHARING = booleanPreferencesKey("hotspot_sharing")
@@ -37,6 +46,22 @@ class AppPreferences @Inject constructor(
         // turned OFF are tracked by id in KEY_DISABLED_BUILTINS (empty = all built-ins enabled).
         val KEY_CUSTOM_SUBS = stringPreferencesKey("custom_subscriptions")
         val KEY_DISABLED_BUILTINS = stringSetPreferencesKey("disabled_builtin_sources")
+        // Stable credentials of the hotspot SOCKS5 proxy (generated once, see ensureHotspotCredentials).
+        val KEY_HOTSPOT_USER = stringPreferencesKey("hotspot_user")
+        val KEY_HOTSPOT_PASS = stringPreferencesKey("hotspot_pass")
+        // No 0/O/1/l/I — the password is typed by hand on another device.
+        private const val HOTSPOT_PASS_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        private const val HOTSPOT_PASS_LENGTH = 10
+        private val secureRandom = SecureRandom()
+
+        private fun newHotspotUser(): String =
+            "share" + (1..4).joinToString("") { secureRandom.nextInt(10).toString() }
+
+        private fun newHotspotPass(): String = buildString(HOTSPOT_PASS_LENGTH) {
+            repeat(HOTSPOT_PASS_LENGTH) {
+                append(HOTSPOT_PASS_ALPHABET[secureRandom.nextInt(HOTSPOT_PASS_ALPHABET.length)])
+            }
+        }
         // Sentinel so an empty user selection is distinguishable from "never set" (→ default).
         private const val EXCLUDED_NONE = "__none__"
         private val DEFAULT_EXCLUDED = setOf("Russia")
@@ -46,6 +71,9 @@ class AppPreferences @Inject constructor(
         .catch { emit(emptyPreferences()) }
         .map { it[KEY_LAST_REFRESH_TIME] ?: 0L }
 
+    // LEGACY — no longer written or read. The pin lives in Room (`servers.isSelected`, see
+    // ConfigRepository.pinnedServer) and the mode in KEY_AUTO_MODE. Kept only so old installs'
+    // stored key doesn't need a migration.
     val selectedServerId: Flow<String> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { it[KEY_SELECTED_SERVER_ID] ?: "" }
@@ -62,6 +90,39 @@ class AppPreferences @Inject constructor(
         .catch { emit(emptyPreferences()) }
         .map { it[KEY_EXCLUDED_APPS] ?: emptySet() }
 
+    /** Raw JSON of the custom DNS server list (decoded by DnsRepository). */
+    val dnsServersJson: Flow<String> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_DNS_SERVERS] ?: "[]" }
+
+    /**
+     * Atomic read-modify-write of the DNS list inside ONE dataStore.edit (no lost updates).
+     * [transform] gets the current JSON and returns the new JSON, or null to leave it unchanged.
+     */
+    suspend fun updateDnsServersJson(transform: (String) -> String?) {
+        dataStore.edit { prefs ->
+            val updated = transform(prefs[KEY_DNS_SERVERS] ?: "[]")
+            if (updated != null) prefs[KEY_DNS_SERVERS] = updated
+        }
+    }
+
+    val dnsQueryStrategy: Flow<String> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_DNS_QUERY_STRATEGY] ?: "UseIPv4" }
+
+    suspend fun setDnsQueryStrategy(value: String) {
+        dataStore.edit { it[KEY_DNS_QUERY_STRATEGY] = value }
+    }
+
+    /** Resets the DNS list and query strategy to defaults in one transaction. */
+    suspend fun resetDnsSettings() {
+        dataStore.edit {
+            it.remove(KEY_DNS_SERVERS)
+            it.remove(KEY_DNS_QUERY_STRATEGY)
+        }
+    }
+
+    // LEGACY (pre-3b) — not used by the tunnel any more; see dnsServersJson.
     val dnsPrimary: Flow<String> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { it[KEY_DNS_PRIMARY] ?: "1.1.1.1" }
@@ -98,6 +159,20 @@ class AppPreferences @Inject constructor(
         dataStore.edit { it[KEY_EXCLUDED_APPS] = apps }
     }
 
+    /**
+     * Split-tunnel mode. "EXCLUDE" (default): apps in [excludedApps] bypass the VPN.
+     * "INCLUDE": ONLY apps in [excludedApps] go through the VPN (the set is reused as
+     * "selected apps" to avoid a migration).
+     */
+    val splitTunnelMode: Flow<String> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { if (it[KEY_SPLIT_TUNNEL_MODE] == SPLIT_MODE_INCLUDE) SPLIT_MODE_INCLUDE else SPLIT_MODE_EXCLUDE }
+
+    suspend fun setSplitTunnelMode(mode: String) {
+        val normalized = if (mode == SPLIT_MODE_INCLUDE) SPLIT_MODE_INCLUDE else SPLIT_MODE_EXCLUDE
+        dataStore.edit { it[KEY_SPLIT_TUNNEL_MODE] = normalized }
+    }
+
     suspend fun setDnsPrimary(dns: String) {
         dataStore.edit { it[KEY_DNS_PRIMARY] = dns }
     }
@@ -116,6 +191,36 @@ class AppPreferences @Inject constructor(
 
     suspend fun setHotspotSharing(v: Boolean) {
         dataStore.edit { it[KEY_HOTSPOT_SHARING] = v }
+    }
+
+    /** SOCKS5 login/password for hotspot sharing; null until first generated. */
+    val hotspotCredentials: Flow<Pair<String, String>?> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { prefs ->
+            val user = prefs[KEY_HOTSPOT_USER]
+            val pass = prefs[KEY_HOTSPOT_PASS]
+            if (user.isNullOrEmpty() || pass.isNullOrEmpty()) null else user to pass
+        }
+
+    /**
+     * Returns the stable hotspot SOCKS5 credentials, generating any missing part once.
+     * Read + generate + write happen inside ONE dataStore.edit, so concurrent callers can't
+     * end up with different values.
+     */
+    suspend fun ensureHotspotCredentials(): Pair<String, String> {
+        val prefs = dataStore.edit { p ->
+            if (p[KEY_HOTSPOT_USER].isNullOrEmpty()) p[KEY_HOTSPOT_USER] = newHotspotUser()
+            if (p[KEY_HOTSPOT_PASS].isNullOrEmpty()) p[KEY_HOTSPOT_PASS] = newHotspotPass()
+        }
+        return prefs[KEY_HOTSPOT_USER]!! to prefs[KEY_HOTSPOT_PASS]!!
+    }
+
+    /** New random password (login kept). Takes effect on the next connect. */
+    suspend fun regenerateHotspotPassword() {
+        dataStore.edit { p ->
+            if (p[KEY_HOTSPOT_USER].isNullOrEmpty()) p[KEY_HOTSPOT_USER] = newHotspotUser()
+            p[KEY_HOTSPOT_PASS] = newHotspotPass()
+        }
     }
 
     /**

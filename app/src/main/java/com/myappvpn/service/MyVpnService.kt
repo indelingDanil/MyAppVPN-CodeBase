@@ -7,44 +7,56 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.VpnService
+import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.myappvpn.BuildConfig
 import com.myappvpn.R
 import com.myappvpn.data.datastore.AppPreferences
+import com.myappvpn.data.model.EffectiveDns
+import com.myappvpn.data.repository.DnsRepository
+import com.myappvpn.util.DnsConfigInjector
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.data.repository.ConfigRepository
+import com.myappvpn.domain.usecase.ConnectVpnUseCase
 import com.myappvpn.ui.MainActivity
 import com.myappvpn.util.HotspotHelper
 import com.myappvpn.util.XrayConfigBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.Authenticator
 import java.net.InetSocketAddress
-import java.net.PasswordAuthentication
 import java.net.Proxy
-import java.net.Socket
-import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class MyVpnService : VpnService() {
 
     companion object {
+        private val BAD_OUTBOUND_RE = Regex("""outbound config with tag (proxy-\d+)""")
         const val TAG = "MyVpnService"
         const val ACTION_CONNECT = "com.myappvpn.CONNECT"
         const val ACTION_DISCONNECT = "com.myappvpn.DISCONNECT"
         // Hot-switch to a specific server while the tunnel is up (swaps Xray outbound, keeps TUN).
         const val ACTION_SWITCH_SERVER = "com.myappvpn.SWITCH_SERVER"
         const val EXTRA_SERVER_ID = "server_id"
+        // Hot-switch back to Auto (balancer) while the tunnel is up. Extras: EXTRA_XRAY_CONFIG
+        // (balancer config WITHOUT auth), EXTRA_SERVER_NAME, EXTRA_POOL_IDS, EXTRA_HOTSPOT_SHARING
+        // (ignored — the session's hotspot setting is kept).
+        const val ACTION_SWITCH_AUTO = "com.myappvpn.SWITCH_AUTO"
         const val EXTRA_XRAY_CONFIG = "xray_config"
         const val EXTRA_SOCKS_PORT = "socks_port"
         const val EXTRA_SERVER_NAME = "server_name"
@@ -63,13 +75,24 @@ class MyVpnService : VpnService() {
         private val _vpnState = MutableStateFlow(VpnState.DISCONNECTED)
         val vpnState: StateFlow<VpnState> = _vpnState.asStateFlow()
 
-        private val _hotspotProxyInfo = MutableStateFlow<String?>(null)
-        val hotspotProxyInfo: StateFlow<String?> = _hotspotProxyInfo.asStateFlow()
+        // Hotspot proxy endpoint of the live session: non-null only while CONNECTED with hotspot
+        // sharing enabled and a hotspot IP present when the current Xray config was built.
+        private val _hotspotInfo = MutableStateFlow<HotspotInfo?>(null)
+        val hotspotInfo: StateFlow<HotspotInfo?> = _hotspotInfo.asStateFlow()
 
         private val _connectedServer = MutableStateFlow<ServerProfile?>(null)
         val connectedServer: StateFlow<ServerProfile?> = _connectedServer.asStateFlow()
 
-        // Local SOCKS port of the live tunnel (0 = not connected). Lets the app route its OWN
+        // AUTO while a balancer session exists, MANUAL while a single-server session exists,
+        // null when DISCONNECTED/ERROR.
+        private val _activeMode = MutableStateFlow<ActiveMode?>(null)
+        val activeMode: StateFlow<ActiveMode?> = _activeMode.asStateFlow()
+
+        // True while a hot-switch (to a server or back to Auto) is being applied.
+        private val _switching = MutableStateFlow(false)
+        val switching: StateFlow<Boolean> = _switching.asStateFlow()
+
+        // Local SOCKS port of the live tunnel (0 = not connected; random per session). Lets the app route its OWN
         // requests (e.g. subscription refresh) THROUGH the tunnel — the app is excluded from its
         // TUN, so without this its traffic goes over the restricted operator network directly.
         @Volatile var activeSocksPort: Int = 0
@@ -79,15 +102,45 @@ class MyVpnService : VpnService() {
     @Inject lateinit var trafficMonitor: TrafficMonitor
     @Inject lateinit var configRepository: ConfigRepository
     @Inject lateinit var xrayMicroTest: com.myappvpn.domain.validation.XrayMicroTest
+    @Inject lateinit var dnsRepository: DnsRepository
+    // Always-on VPN / system restart: reconnect in the stored mode (see startAlwaysOn()).
+    @Inject lateinit var connectVpnUseCase: ConnectVpnUseCase
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // User's custom DNS for this session (null = built-in defaults). Read at connect, updated by
+    // startDnsObserver(); applied to every Xray config in prepareConfig().
+    @Volatile private var currentDns: EffectiveDns? = null
+    private var dnsObserverJob: Job? = null
+
+    // An uncaught exception in any service coroutine must not crash the process (that would drop
+    // the TUN and leak traffic): log it and, if a session is live, engage the kill-switch.
+    private val serviceScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e -> onUncaughtCoroutineError(e) }
+    )
     private lateinit var xrayManager: XrayManager
     private lateinit var tun2SocksManager: Tun2SocksManager
 
     private var tunFd: ParcelFileDescriptor? = null
-    private var currentSocksPort: Int = 10808
+
+    /** Random loopback ports of the current session (picked at connect, kept until teardown). */
+    private data class LocalPorts(val socks: Int, val http: Int, val api: Int)
+    private var ports = LocalPorts(10808, 10809, 10810)
+    private val currentSocksPort: Int get() = ports.socks
     private var currentServerName: String = "Unknown"
     private var hotspotSharingEnabled = false
+    // Stable hotspot SOCKS credentials (from preferences) — set at connect when sharing is on.
+    private var hotspotCreds: Pair<String, String>? = null
+    // Hotspot endpoint baked into the most recent prepared config (null = no hotspot inbounds).
+    @Volatile private var configHotspot: HotspotInfo? = null
+
+    // Default-network tracking (underlying network for the VPN + handover detection).
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var lastDefaultNetwork: Network? = null
+    // Set when the default network changes (Wi-Fi ↔ mobile); the watchdog consumes it and resets
+    // its failure streak so a handover isn't treated as a server failure.
+    @Volatile private var networkSwitched = false
+    // Always-on / system-restart connect that is resolving the stored mode (main thread only).
+    private var alwaysOnJob: Job? = null
+    @Volatile private var lastUncaughtBlackholeAt = 0L
     // Balancer (auto) mode: Xray observatory picks/switches the active server in-core.
     private var balancerMode = false
     private var lastXrayConfig: String = ""   // authed config of the current session (for restart)
@@ -104,10 +157,38 @@ class MyVpnService : VpnService() {
     private var killSwitchEnabled = true
     private var recoveryJob: Job? = null
 
+    // Latest startId seen by onStartCommand. disconnect() stops via stopSelf(lastStartId) (never the
+    // unconditional stopSelf()), so a start request AMS delivered after it isn't killed.
+    // Main thread only.
+    private var lastStartId: Int = 0
+    // In-flight connect / disconnect coroutines (touched on the main thread only).
+    private var connectJob: Job? = null
+    private var disconnectJob: Job? = null
+
+    // Serializes EVERY state-mutating operation (connect body, hot-switches, watchdog actions,
+    // recovery attempts, split-tunnel TUN rebuild, disconnect teardown) so they never race on
+    // xrayManager / tunFd / session fields. NOT reentrant: only top-level entry points take it;
+    // everything they call is lock-free ("*Locked" = caller must hold opMutex).
+    private val opMutex = Mutex()
+
+    /** A user hot-switch request. Latest wins (see [pendingSwitch]). */
+    private sealed class SwitchRequest {
+        data class Server(val serverId: String) : SwitchRequest()
+        data class Auto(val config: String, val name: String, val poolIds: List<String>) : SwitchRequest()
+    }
+
+    // Latest not-yet-applied user switch. Requests that arrive while the initial connect is in
+    // flight wait here until connect() finishes (dropped if it fails); later ones overwrite it.
+    private val pendingSwitch = AtomicReference<SwitchRequest?>(null)
+
+    // Parent of all switch coroutines — disconnect cancels its children so a running/queued switch
+    // releases opMutex promptly and can't resurrect the session behind the teardown.
+    private val switchParent = SupervisorJob(serviceScope.coroutineContext[Job])
+
     // Per-session SOCKS5 auth credentials — prevents other apps from using our proxy
     // (CVE: unauthenticated local SOCKS proxy deanonymization, see habr.com/ru/articles/1020080)
-    private var proxyUser: String = ""
-    private var proxyPass: String = ""
+    @Volatile private var proxyUser: String = ""
+    @Volatile private var proxyPass: String = ""
 
     override fun onCreate() {
         super.onCreate()
@@ -117,66 +198,255 @@ class MyVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
+        // We are started via startForegroundService → startForeground MUST happen promptly for
+        // EVERY start, synchronously, before any early return (else ForegroundServiceDidNotStart-
+        // InTimeException). Later code updates the notification text.
+        enterForegroundNow(if (intent?.action == ACTION_DISCONNECT) VpnState.DISCONNECTING else null)
+
         when (intent?.action) {
             ACTION_CONNECT -> {
-                val xrayConfig = intent.getStringExtra(EXTRA_XRAY_CONFIG) ?: return START_NOT_STICKY
-                val socksPort = intent.getIntExtra(EXTRA_SOCKS_PORT, 10808)
+                val xrayConfig = intent.getStringExtra(EXTRA_XRAY_CONFIG)
+                if (xrayConfig == null) {
+                    Log.w(TAG, "CONNECT without config — ignored")
+                    stopIfIdle(startId)
+                    return START_NOT_STICKY
+                }
+                val st = _vpnState.value
+                if (st == VpnState.CONNECTED || st == VpnState.CONNECTING || connectJob?.isActive == true) {
+                    // A second connect would build a new TUN and leak the old fd / processes.
+                    Log.w(TAG, "CONNECT ignored — session already $st")
+                    return START_NOT_STICKY
+                }
+                // EXTRA_SOCKS_PORT is ignored: local ports are random per session (see connect()).
                 val serverName = intent.getStringExtra(EXTRA_SERVER_NAME) ?: "Unknown"
                 val hotspotSharing = intent.getBooleanExtra(EXTRA_HOTSPOT_SHARING, false)
                 val balancer = intent.getBooleanExtra(EXTRA_BALANCER_MODE, false)
                 // Authoritative proxy-N → server id mapping (index = N), as built into the config.
-                balancerPoolIds = intent.getStringArrayListExtra(EXTRA_POOL_IDS) ?: emptyList()
-                serviceScope.launch { connect(xrayConfig, socksPort, serverName, hotspotSharing, balancer) }
+                val poolIds = intent.getStringArrayListExtra(EXTRA_POOL_IDS) ?: emptyList<String>()
+                // If a disconnect is still tearing down, let it finish first (it would otherwise
+                // kill the processes this connect starts).
+                val pendingDisconnect = disconnectJob
+                connectJob = serviceScope.launch {
+                    pendingDisconnect?.join()
+                    connect(xrayConfig, serverName, hotspotSharing, balancer, poolIds)
+                }
             }
             ACTION_SWITCH_SERVER -> {
-                val serverId = intent.getStringExtra(EXTRA_SERVER_ID) ?: return START_STICKY
-                serviceScope.launch { switchToServer(serverId) }
+                val serverId = intent.getStringExtra(EXTRA_SERVER_ID)
+                if (serverId == null) {
+                    stopIfIdle(startId)
+                    return START_NOT_STICKY
+                }
+                requestSwitch(SwitchRequest.Server(serverId), startId)
             }
-            ACTION_DISCONNECT -> serviceScope.launch { disconnect() }
+            ACTION_SWITCH_AUTO -> {
+                val config = intent.getStringExtra(EXTRA_XRAY_CONFIG)
+                if (config == null) {
+                    Log.w(TAG, "SWITCH_AUTO without config — ignored")
+                    stopIfIdle(startId)
+                    return START_NOT_STICKY
+                }
+                val name = intent.getStringExtra(EXTRA_SERVER_NAME) ?: "Auto"
+                val poolIds = intent.getStringArrayListExtra(EXTRA_POOL_IDS)?.toList() ?: emptyList()
+                // EXTRA_HOTSPOT_SHARING is intentionally ignored: the session's value is kept.
+                requestSwitch(SwitchRequest.Auto(config, name, poolIds), startId)
+            }
+            ACTION_DISCONNECT -> {
+                val inFlightConnect = connectJob
+                disconnectJob = serviceScope.launch { disconnect(inFlightConnect) }
+            }
+            null, VpnService.SERVICE_INTERFACE -> {
+                // Always-on VPN / system (re)start: null intent or android.net.VpnService action.
+                startAlwaysOn(startId)
+            }
+            else -> {
+                Log.w(TAG, "Unknown start intent (${intent?.action}) — ignoring")
+                stopIfIdle(startId)
+                return START_NOT_STICKY
+            }
         }
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    /**
+     * Always-on VPN: connect in the stored mode via [ConnectVpnUseCase] (which sends ACTION_CONNECT
+     * back to us): Auto → balancer; Manual → the pinned server (Auto if none). No-op when a session
+     * already exists. If building the connect fails, the session goes to ERROR. Main thread.
+     */
+    private fun startAlwaysOn(startId: Int) {
+        val st = _vpnState.value
+        val busy = st == VpnState.CONNECTED || st == VpnState.CONNECTING || st == VpnState.BLOCKED ||
+            connectJob?.isActive == true || alwaysOnJob?.isActive == true
+        if (busy) {
+            Log.i(TAG, "Always-on start ignored — session already $st")
+            return
+        }
+        Log.i(TAG, "Always-on / system start — connecting in the stored mode")
+        val pendingDisconnect = disconnectJob
+        alwaysOnJob = serviceScope.launch {
+            pendingDisconnect?.join()
+            try {
+                val auto = preferences.autoMode.first()
+                val pinned = if (auto) null else configRepository.getSelectedServer()
+                if (pinned != null) connectVpnUseCase(pinned) else connectVpnUseCase.connectAuto()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Always-on connect failed: ${e.message}")
+                opMutex.withLock {
+                    // Only if no connect took over meanwhile.
+                    if (_vpnState.value != VpnState.CONNECTED && _vpnState.value != VpnState.CONNECTING) failSession()
+                }
+            }
+        }
+    }
+
+    /** Synchronous startForeground for the current start request. */
+    private fun enterForegroundNow(stateOverride: VpnState?) {
+        val st = stateOverride ?: when (_vpnState.value) {
+            VpnState.CONNECTED, VpnState.BLOCKED -> _vpnState.value   // keep live session text
+            else -> VpnState.CONNECTING                               // "Подключение…"
+        }
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(currentServerName, st))
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed: ${e.message}")
+        }
+    }
+
+    /** For a start request we won't act on: drop foreground + stop, unless a session is live. */
+    private fun stopIfIdle(startId: Int) {
+        val st = _vpnState.value
+        val busy = st == VpnState.CONNECTED || st == VpnState.CONNECTING ||
+            st == VpnState.BLOCKED || st == VpnState.DISCONNECTING ||
+            connectJob?.isActive == true || disconnectJob?.isActive == true ||
+            alwaysOnJob?.isActive == true
+        if (busy) return
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
+    }
+
+    // ── Hot-switch requests (main thread) ───────────────────────────────────────
+
+    /**
+     * Queue a user switch (latest wins) and launch a coroutine that applies it. If the initial
+     * connect is still in flight (e.g. long balancer warm-up), the request waits for it to finish
+     * and is applied right after a successful connect (dropped if connect fails).
+     */
+    private fun requestSwitch(req: SwitchRequest, startId: Int) {
+        val st = _vpnState.value
+        val inFlightConnect = connectJob?.takeIf { it.isActive }
+        val live = st == VpnState.CONNECTED || st == VpnState.BLOCKED || st == VpnState.CONNECTING
+        if (inFlightConnect == null && (!live || disconnectJob?.isActive == true)) {
+            Log.w(TAG, "Switch ignored — no live session ($st)")
+            stopIfIdle(startId)
+            return
+        }
+        pendingSwitch.set(req)   // latest wins
+        if (inFlightConnect != null) Log.i(TAG, "Switch queued until connect completes")
+        serviceScope.launch(switchParent) { applyPendingSwitch(inFlightConnect) }
+    }
+
+    private suspend fun applyPendingSwitch(inFlightConnect: Job?) {
+        inFlightConnect?.join()
+        // A sibling switch coroutine may already have consumed the latest request.
+        if (pendingSwitch.get() == null) return
+        // Preempt background ops BEFORE taking the lock — cancellation makes them release it.
+        watchdogJob?.cancel()
+        recoveryJob?.cancel()
+        opMutex.withLock {
+            val req = pendingSwitch.getAndSet(null)
+            val st = _vpnState.value
+            if (req == null || tunFd == null || (st != VpnState.CONNECTED && st != VpnState.BLOCKED)) {
+                if (req != null) Log.w(TAG, "Switch dropped — no live tunnel ($st)")
+                resumeMonitoringLocked()
+                return
+            }
+            when (req) {
+                is SwitchRequest.Server -> switchToServerLocked(req.serverId)
+                is SwitchRequest.Auto -> switchToAutoLocked(req.config, req.name, req.poolIds)
+            }
+        }
+    }
+
+    /** Restart whichever background monitor matches the current state (after a no-op switch). */
+    private fun resumeMonitoringLocked() {
+        when (_vpnState.value) {
+            VpnState.CONNECTED -> if (watchdogJob?.isActive != true) startWatchdog()
+            VpnState.BLOCKED -> if (recoveryJob?.isActive != true) scheduleRecovery()
+            else -> Unit
+        }
     }
 
     // ── Connect ────────────────────────────────────────────────────────────────
 
-    private suspend fun connect(xrayConfig: String, socksPort: Int, serverName: String, hotspotSharing: Boolean = false, balancer: Boolean = false) {
-        currentSocksPort = socksPort
-        activeSocksPort = socksPort   // expose for in-tunnel subscription refresh
+    private suspend fun connect(
+        xrayConfig: String,
+        serverName: String,
+        hotspotSharing: Boolean = false,
+        balancer: Boolean = false,
+        poolIds: List<String> = emptyList(),
+    ) { opMutex.withLock {
+        // Leftovers of a previous session (e.g. BLOCKED kill-switch TUN, ERROR) — release them
+        // so we never overwrite (leak) a live TUN fd / processes.
+        if (tunFd != null || xrayManager.isRunning) cleanupProcesses()
         currentServerName = serverName
         hotspotSharingEnabled = hotspotSharing
         balancerMode = balancer
-        killSwitchEnabled = preferences.killSwitchEnabled.first()
+        balancerPoolIds = poolIds
+        _activeMode.value = if (balancer) ActiveMode.AUTO else ActiveMode.MANUAL
         try {
+            killSwitchEnabled = preferences.killSwitchEnabled.first()
+            currentDns = try {
+                dnsRepository.effectiveConfig()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Custom DNS load failed, using defaults: ${e.message}")
+                null
+            }
             _vpnState.value = VpnState.CONNECTING
             startForeground(NOTIFICATION_ID, buildNotification(serverName, VpnState.CONNECTING))
 
+            // Random loopback ports for this session (SOCKS/HTTP/API). Fixed well-known ports
+            // could be pre-bound by another app whenever Xray isn't listening.
+            val picked = LocalProxyAuth.pickFreeLoopbackPorts(3)
+            ports = LocalPorts(socks = picked[0], http = picked[1], api = picked[2])
+
+            // Hotspot sharing: stable credentials for the hotspot SOCKS inbound.
+            hotspotCreds = if (!hotspotSharing) null else try {
+                preferences.ensureHotspotCredentials()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Hotspot credentials unavailable — sharing disabled for this session: ${e.message}")
+                null
+            }
+
             // Generate per-session proxy auth to prevent other apps from using our SOCKS5 proxy
             generateProxyAuth()
-            val authedConfig = injectProxyAuth(xrayConfig)
+            val authedConfig = prepareConfig(xrayConfig)
             lastXrayConfig = authedConfig
-            installProxyAuthenticator()
+            LocalProxyAuth.setSession(proxyUser, proxyPass)
 
             // 1. Start XRay
-            if (!xrayManager.start(authedConfig)) {
-                Log.e(TAG, "Failed to start XRay")
-                _vpnState.value = VpnState.ERROR
+            if (!startXray(authedConfig)) {
+                failConnect("Failed to start XRay")
                 return
             }
+            activeSocksPort = currentSocksPort   // expose for in-tunnel subscription refresh
 
             // 2. Establish TUN interface with current split-tunnel settings
             tunFd = buildTun() ?: run {
-                Log.e(TAG, "Failed to establish TUN interface")
-                xrayManager.stop()
-                _vpnState.value = VpnState.ERROR
+                failConnect("Failed to establish TUN interface")
                 return
             }
+            registerNetworkCallback()
 
             // 3. Start tun2socks (native fork+exec for proper fd inheritance)
-            if (!tun2SocksManager.start(tunFd = tunFd!!.fd, socksPort = socksPort, proxyUser = proxyUser, proxyPass = proxyPass)) {
-                Log.e(TAG, "Failed to start tun2socks")
-                xrayManager.stop()
-                tunFd?.close(); tunFd = null
-                _vpnState.value = VpnState.ERROR
+            if (!tun2SocksManager.start(tunFd = tunFd!!.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass)) {
+                failConnect("Failed to start tun2socks")
                 return
             }
 
@@ -196,18 +466,17 @@ class MyVpnService : VpnService() {
 
             _vpnState.value = VpnState.CONNECTED
             _connectedServer.value = if (balancerMode) {
-                connectedServerForTag(pinnedTag)
-                    ?: ServerProfile(id = "__balancer__", name = serverName, flag = "⚖️",
-                        country = "Auto", address = "", port = 0, vlessUri = "")
+                connectedServerForTag(pinnedTag) ?: balancerPlaceholder(serverName)
             } else {
-                configRepository.getSelectedServer()
+                safeDb("selected server") { configRepository.getSelectedServer() }
             }
             updateNotification(serverName, VpnState.CONNECTED)
-            _hotspotProxyInfo.value = if (hotspotSharingEnabled) HotspotHelper.getHotspotIp()?.let { "$it:10808" } else null
+            publishHotspotInfo()
             if (BuildConfig.DEBUG) Log.i(TAG, "VPN connected via $serverName")
 
             // 5. Observe split-tunnel changes → rebuild TUN seamlessly
             startSplitTunnelObserver()
+            startDnsObserver()
 
             // 6. Watchdog — sticky-pin health + seamless re-pin on real failure
             startWatchdog()
@@ -215,10 +484,45 @@ class MyVpnService : VpnService() {
             // 7. Background re-verify of the 24h working pool — drop entries that went dead
             startWorkingPoolReverify()
 
+        } catch (e: CancellationException) {
+            throw e   // cancelled by disconnect()/onDestroy — they own the teardown
         } catch (e: Exception) {
-            Log.e(TAG, "Connect failed: ${e.message}")
-            _vpnState.value = VpnState.ERROR
-            cleanupProcesses()
+            failConnect("Connect failed: ${e.message}")
+        }
+    } }
+
+    /** UI model for the Auto session before/without a resolved pinned server. */
+    private fun balancerPlaceholder(name: String) = ServerProfile(
+        id = "__balancer__", name = name, flag = "⚖️",
+        country = "Auto", address = "", port = 0, vlessUri = "",
+    )
+
+    /**
+     * Initial connect failed: tear everything down, publish ERROR and leave the foreground
+     * state so the service doesn't linger with a stale "connecting" notification.
+     * Caller holds opMutex.
+     */
+    private fun failConnect(reason: String) {
+        Log.e(TAG, reason)
+        pendingSwitch.set(null)   // a switch queued behind a failed connect is dropped
+        failSession()
+    }
+
+    /**
+     * Session is unrecoverable (or kill switch is off): tear down, publish ERROR and leave the
+     * foreground so no stale "active" notification lingers. Caller holds opMutex.
+     */
+    private fun failSession() {
+        cleanupProcesses()
+        activeSocksPort = 0
+        LocalProxyAuth.clearSession()
+        _vpnState.value = VpnState.ERROR
+        Handler(Looper.getMainLooper()).post {
+            // Skip if a new connect already started meanwhile (it owns the foreground now).
+            if (_vpnState.value == VpnState.ERROR && connectJob?.isActive != true) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf(lastStartId)
+            }
         }
     }
 
@@ -226,20 +530,121 @@ class MyVpnService : VpnService() {
 
     /** Generate random credentials for this VPN session. */
     private fun generateProxyAuth() {
-        proxyUser = "u" + UUID.randomUUID().toString().replace("-", "").take(8)
-        proxyPass = UUID.randomUUID().toString().replace("-", "")
+        val (u, p) = LocalProxyAuth.randomCredentials()
+        proxyUser = u
+        proxyPass = p
     }
 
     /**
-     * Inject SOCKS5/HTTP auth into an existing XRay config JSON.
-     * This ensures no unauthenticated app can use our local proxy to discover the exit IP.
+     * THE config chokepoint — every Xray start (connect, hot-switch, auto-switch, recovery,
+     * rebuild, restart, kill-switch blackhole) goes through here. Idempotent. It:
+     *  1. rewrites the local inbounds to the session's random loopback ports and forces them to
+     *     listen on 127.0.0.1 only ([rewriteLocalPorts]);
+     *  2. adds the hotspot inbounds (bound to the CURRENT hotspot IP only) when sharing is on;
+     *  3. injects the per-session SOCKS/HTTP auth into the loopback inbounds (never hotspot-*);
+     *  4. inserts the loopback/TUN-subnet (and hotspot→private) block rules;
+     *  5. applies the user's custom DNS ([withDns] = false for the blackhole config, which has no
+     *     proxy outbound for the resolver rule to point at).
+     * Also records the hotspot endpoint baked into this config in [configHotspot].
      */
-    private fun injectProxyAuth(configJson: String): String {
+    private fun prepareConfig(configJson: String, withDns: Boolean = true): String {
         val root = JSONObject(configJson)
-        val inbounds = root.getJSONArray("inbounds")
+
+        // Hotspot endpoint for this config: re-resolved every time so a restart never tries to
+        // bind an IP that disappeared (hotspot turned off) — and picks it up once it appears.
+        val creds = hotspotCreds
+        val hotspotIp = if (hotspotSharingEnabled && creds != null) HotspotHelper.getHotspotIp(this) else null
+        val hotspot = if (hotspotIp != null && creds != null) {
+            HotspotInfo(hotspotIp, HotspotInfo.HTTP_PORT, HotspotInfo.SOCKS_PORT, creds.first, creds.second)
+        } else null
+
+        rewriteLocalPorts(root, ports, hotspot)
+        injectProxyAuth(root)
+        XrayConfigBuilder.applyLocalBlockRules(
+            root,
+            if (hotspot != null) listOf(HotspotInfo.TAG_HTTP, HotspotInfo.TAG_SOCKS) else emptyList(),
+        )
+        configHotspot = hotspot
+
+        val authed = root.toString(2)
+        if (!withDns) return authed
+        val dns = currentDns ?: return authed
+        return try {
+            DnsConfigInjector.inject(authed, dns)
+        } catch (e: Exception) {
+            Log.e(TAG, "DNS inject failed, keeping default DNS: ${e.message}")
+            authed
+        }
+    }
+
+    /**
+     * Local inbounds → session ports, loopback-only. Old hotspot-* inbounds are dropped and, if
+     * [hotspot] is non-null, re-added bound to the hotspot IP (never 0.0.0.0):
+     * hotspot-http (no auth — Android's Wi-Fi proxy can't authenticate; the hotspot password is
+     * the gate) and hotspot-socks (stable user/password, UDP).
+     */
+    private fun rewriteLocalPorts(root: JSONObject, p: LocalPorts, hotspot: HotspotInfo?) {
+        val old = root.optJSONArray("inbounds") ?: JSONArray()
+        val out = JSONArray()
+        for (i in 0 until old.length()) {
+            val inbound = old.optJSONObject(i) ?: continue
+            val tag = inbound.optString("tag")
+            if (tag.startsWith("hotspot-")) continue
+            val settings = inbound.optJSONObject("settings") ?: JSONObject().also { inbound.put("settings", it) }
+            when (tag) {
+                "socks" -> {
+                    inbound.put("port", p.socks)
+                    settings.put("ip", "127.0.0.1")
+                }
+                "http" -> inbound.put("port", p.http)
+                "api" -> {
+                    inbound.put("port", p.api)
+                    settings.put("address", "127.0.0.1")
+                }
+            }
+            inbound.put("listen", "127.0.0.1")   // main inbounds are ALWAYS loopback-only
+            out.put(inbound)
+        }
+        if (hotspot != null) {
+            out.put(JSONObject().apply {
+                put("tag", HotspotInfo.TAG_HTTP)
+                put("port", hotspot.httpPort)
+                put("listen", hotspot.ip)
+                put("protocol", "http")
+                put("settings", JSONObject().apply { put("allowTransparent", false) })
+            })
+            out.put(JSONObject().apply {
+                put("tag", HotspotInfo.TAG_SOCKS)
+                put("port", hotspot.socksPort)
+                put("listen", hotspot.ip)
+                put("protocol", "socks")
+                put("settings", JSONObject().apply {
+                    put("auth", "password")
+                    put("accounts", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("user", hotspot.user)
+                            put("pass", hotspot.pass)
+                        })
+                    })
+                    put("udp", true)
+                    put("ip", hotspot.ip)
+                })
+            })
+        }
+        root.put("inbounds", out)
+    }
+
+    /**
+     * Inject the per-session SOCKS5/HTTP auth into the LOOPBACK inbounds so no unauthenticated
+     * local app can use our proxy to discover the exit IP. hotspot-* inbounds keep their own
+     * (stable / no) auth.
+     */
+    private fun injectProxyAuth(root: JSONObject) {
+        val inbounds = root.optJSONArray("inbounds") ?: return
         for (i in 0 until inbounds.length()) {
-            val inbound = inbounds.getJSONObject(i)
-            val settings = inbound.getJSONObject("settings")
+            val inbound = inbounds.optJSONObject(i) ?: continue
+            if (inbound.optString("tag").startsWith("hotspot-")) continue
+            val settings = inbound.optJSONObject("settings") ?: JSONObject().also { inbound.put("settings", it) }
             val accounts = JSONArray().apply {
                 put(JSONObject().apply {
                     put("user", proxyUser)
@@ -256,19 +661,43 @@ class MyVpnService : VpnService() {
                 }
             }
         }
-        return root.toString(2)
+    }
+
+    /** Publish the hotspot endpoint of the running config (call on every → CONNECTED). */
+    private fun publishHotspotInfo() {
+        _hotspotInfo.value = if (_vpnState.value == VpnState.CONNECTED) configHotspot else null
     }
 
     /**
-     * Set a global Java Authenticator so our own health-check HTTP requests
-     * (which go through the SOCKS5 proxy) can authenticate automatically.
+     * Custom DNS changed while connected → re-inject into the live config and restart Xray
+     * (no API for hot DNS reload). TUN and tun2socks stay as they are.
      */
-    private fun installProxyAuthenticator() {
-        Authenticator.setDefault(object : Authenticator() {
-            override fun getPasswordAuthentication(): PasswordAuthentication {
-                return PasswordAuthentication(proxyUser, proxyPass.toCharArray())
-            }
-        })
+    @OptIn(FlowPreview::class)
+    private fun startDnsObserver() {
+        dnsObserverJob?.cancel()
+        dnsObserverJob = serviceScope.launch {
+            dnsRepository.effective
+                .drop(1)          // initial value was applied at connect
+                .debounce(800)    // several quick edits on the DNS screen → one restart
+                .collect { dns ->
+                    opMutex.withLock {
+                        currentDns = dns
+                        if (_vpnState.value != VpnState.CONNECTED || lastXrayConfig.isEmpty()) return@withLock
+                        Log.i(TAG, "DNS settings changed — restarting Xray")
+                        // restartXray() re-runs prepareConfig → re-injects the new currentDns.
+                        if (!restartXray()) {
+                            enterBlackhole("xray restart after DNS change failed")
+                            return@withLock
+                        }
+                        publishHotspotInfo()
+                        if (balancerMode) {
+                            pinnedTag = null   // restart drops the balancer override
+                            warmUpPinFast()
+                            connectedServerForTag(pinnedTag)?.let { _connectedServer.value = it }
+                        }
+                    }
+                }
+        }
     }
 
     // ── TUN building ───────────────────────────────────────────────────────────
@@ -280,40 +709,133 @@ class MyVpnService : VpnService() {
      */
     private suspend fun buildTun(): ParcelFileDescriptor? {
         val splitEnabled = preferences.splitTunnelEnabled.first()
-        val excludedApps = preferences.excludedApps.first()
+        val splitMode = preferences.splitTunnelMode.first()
+        // "Selected apps": bypass VPN in EXCLUDE mode, the only apps via VPN in INCLUDE mode.
+        val selectedApps = preferences.excludedApps.first()
 
-        val builder = Builder()
+        fun newBaseBuilder(): Builder = Builder()
             .setSession("MyAppVPN")
-            .addAddress("10.0.0.2", 24)
-            .addAddress("fd00::2", 128)     // IPv6 — prevents leak outside tunnel
+            // Small, rarely-used private subnets: 10.0.0.x/24 collided with common home LANs.
+            .addAddress("172.19.0.1", 30)
+            .addAddress("fdfe:dcba:9876::1", 126)   // IPv6 — prevents leak outside tunnel
             .addRoute("0.0.0.0", 0)
             .addRoute("::", 0)
             .setMtu(1500)
             .addDnsServer("1.1.1.1")       // Cloudflare
             .addDnsServer("8.8.8.8")       // Google
+            // Follow the system default network; the network callback pins the actual one.
+            .setUnderlyingNetworks(null)
+            .apply {
+                // VPN itself isn't metered — metering is inherited from the underlying network.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) setMetered(false)
+            }
 
-        // Always exclude our own package to prevent XRay→TUN routing loop
-        try {
-            builder.addDisallowedApplication(packageName)
-        } catch (e: PackageManager.NameNotFoundException) {
-            Log.w(TAG, "Could not exclude own package: ${e.message}")
-        }
+        var builder = newBaseBuilder()
 
-        // Exclude user-selected apps so they bypass VPN
-        if (splitEnabled && excludedApps.isNotEmpty()) {
-            var excludedCount = 0
-            excludedApps.forEach { pkg ->
+        // NOTE: VpnService.Builder forbids mixing addAllowedApplication and
+        // addDisallowedApplication (UnsupportedOperationException). INCLUDE mode therefore uses
+        // ONLY the allow-list; our own package stays outside the tunnel simply by not being in it
+        // (prevents the XRay→TUN routing loop just like the disallow does in EXCLUDE mode).
+        val includeSelection = selectedApps.filter { it != packageName }
+        var allowedCount = 0
+        if (splitEnabled && splitMode == AppPreferences.SPLIT_MODE_INCLUDE && includeSelection.isNotEmpty()) {
+            includeSelection.forEach { pkg ->
                 try {
-                    builder.addDisallowedApplication(pkg)
-                    excludedCount++
+                    builder.addAllowedApplication(pkg)
+                    allowedCount++
                 } catch (e: PackageManager.NameNotFoundException) {
-                    Log.w(TAG, "Split tunnel: package not found — $pkg")
+                    Log.w(TAG, "Split tunnel (include): package not found — $pkg")
                 }
             }
-            Log.i(TAG, "Split tunnel: excluded $excludedCount apps")
+            if (allowedCount > 0) {
+                Log.i(TAG, "Split tunnel (include): $allowedCount apps routed via VPN")
+            } else {
+                // Every selected package is gone → with no allowed apps the builder would route
+                // EVERYTHING (incl. our own Xray) into the TUN. Rebuild as full VPN instead.
+                Log.w(TAG, "Split tunnel (include): no selected app is installed — falling back to full VPN")
+                builder = newBaseBuilder()
+            }
+        }
+
+        if (allowedCount == 0) {
+            if (splitEnabled && splitMode == AppPreferences.SPLIT_MODE_INCLUDE && includeSelection.isEmpty()) {
+                Log.w(TAG, "Split tunnel (include): selection is empty — full VPN for all apps")
+            }
+
+            // Always exclude our own package to prevent XRay→TUN routing loop
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (e: PackageManager.NameNotFoundException) {
+                Log.w(TAG, "Could not exclude own package: ${e.message}")
+            }
+
+            // EXCLUDE mode: user-selected apps bypass VPN
+            if (splitEnabled && splitMode != AppPreferences.SPLIT_MODE_INCLUDE && selectedApps.isNotEmpty()) {
+                var excludedCount = 0
+                selectedApps.forEach { pkg ->
+                    if (pkg == packageName) return@forEach
+                    try {
+                        builder.addDisallowedApplication(pkg)
+                        excludedCount++
+                    } catch (e: PackageManager.NameNotFoundException) {
+                        Log.w(TAG, "Split tunnel: package not found — $pkg")
+                    }
+                }
+                Log.i(TAG, "Split tunnel: excluded $excludedCount apps")
+            }
         }
 
         return builder.establish()
+    }
+
+    // ── Underlying network tracking ────────────────────────────────────────────
+
+    /**
+     * Track the default (physical) network while a session exists: our own app is excluded from
+     * the TUN, so this callback sees the real Wi-Fi / mobile network. Point the VPN's underlying
+     * network at it (correct metering/caps for apps) and flag handovers for the watchdog.
+     */
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        // The first onAvailable after registering is the CURRENT network, not a handover —
+        // a value left over from the previous session made every connect look like one.
+        lastDefaultNetwork = null
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val prev = lastDefaultNetwork
+                lastDefaultNetwork = network
+                if (prev != null && prev != network) {
+                    Log.i(TAG, "Default network changed — handover")
+                    networkSwitched = true
+                }
+                try { setUnderlyingNetworks(arrayOf(network)) } catch (e: Exception) {
+                    Log.w(TAG, "setUnderlyingNetworks failed: ${e.message}")
+                }
+            }
+
+            override fun onLost(network: Network) {
+                if (lastDefaultNetwork == network) {
+                    try { setUnderlyingNetworks(null) } catch (_: Exception) {}
+                }
+            }
+        }
+        try {
+            cm.registerDefaultNetworkCallback(cb)
+            networkCallback = cb
+        } catch (e: Exception) {
+            Log.w(TAG, "registerDefaultNetworkCallback failed: ${e.message}")
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val cb = networkCallback ?: return
+        networkCallback = null
+        lastDefaultNetwork = null
+        networkSwitched = false
+        try {
+            getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb)
+        } catch (_: Exception) {}
     }
 
     // ── Split tunnel hot-reload ────────────────────────────────────────────────
@@ -322,14 +844,20 @@ class MyVpnService : VpnService() {
      * Watches DataStore for split-tunnel changes while VPN is connected.
      * On change: rebuilds TUN + restarts tun2socks. XRay keeps running — no server reconnect needed.
      */
+    @OptIn(FlowPreview::class)
     private fun startSplitTunnelObserver() {
         splitTunnelObserverJob?.cancel()
         splitTunnelObserverJob = serviceScope.launch {
             combine(
                 preferences.splitTunnelEnabled,
+                preferences.splitTunnelMode,
                 preferences.excludedApps,
-            ) { enabled, apps -> enabled to apps }
+            ) { enabled, mode, apps -> Triple(enabled, mode, apps) }
+                // Each pref flow re-emits on ANY DataStore write — ignore unrelated keys.
+                .distinctUntilChanged()
                 .drop(1) // skip the initial emission (already applied at connect)
+                // Bulk ops / rapid toggles → rebuild the TUN once after things settle.
+                .debounce(600)
                 .collect { reconnectTun() }
         }
     }
@@ -338,8 +866,10 @@ class MyVpnService : VpnService() {
      * Rebuilds TUN and restarts tun2socks with new split-tunnel settings.
      * XRay is NOT touched — the VLESS connection to the server is preserved.
      */
-    private suspend fun reconnectTun() {
-        if (_vpnState.value != VpnState.CONNECTED) return
+    private suspend fun reconnectTun() = opMutex.withLock { reconnectTunLocked() }
+
+    private suspend fun reconnectTunLocked() {
+        if (_vpnState.value != VpnState.CONNECTED || tunFd == null) return
         Log.i(TAG, "Split tunnel settings changed — rebuilding TUN interface")
 
         // Stop tun2socks that holds the old TUN fd
@@ -349,20 +879,22 @@ class MyVpnService : VpnService() {
         val newFd = buildTun()
         if (newFd == null) {
             Log.e(TAG, "Failed to rebuild TUN after split tunnel change")
-            _vpnState.value = VpnState.ERROR
-            cleanupProcesses()
+            enterBlackhole("TUN rebuild failed")
             return
         }
 
         // The old fd is now invalid — close it and keep the new one
         tunFd?.close()
         tunFd = newFd
+        // The fresh interface starts with underlying=null — re-pin the tracked default network.
+        lastDefaultNetwork?.let { net ->
+            try { setUnderlyingNetworks(arrayOf(net)) } catch (_: Exception) {}
+        }
 
         // Restart tun2socks with the fresh fd
         if (!tun2SocksManager.start(tunFd = newFd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass)) {
             Log.e(TAG, "Failed to restart tun2socks after TUN rebuild")
-            _vpnState.value = VpnState.ERROR
-            cleanupProcesses()
+            enterBlackhole("tun2socks restart after TUN rebuild failed")
             return
         }
 
@@ -371,36 +903,102 @@ class MyVpnService : VpnService() {
 
     // ── Watchdog ───────────────────────────────────────────────────────────────
 
+    /**
+     * Health monitor. Probes run WITHOUT the lock; every action that touches xray / tun2socks /
+     * the pin runs under opMutex and re-checks that this watchdog is still current first (a user
+     * switch / disconnect cancels it and may already have changed the session).
+     *
+     * Auto (balancer): sticky pin, seamless re-pin, full rebuild when the pool is dead.
+     * Manual (single server): NO silent failover — the user's pinned server is restarted once with
+     * the same config; if it still fails, the kill-switch blocks traffic and recovery keeps retrying
+     * that same server.
+     */
     private fun startWatchdog() {
         watchdogJob?.cancel()
         watchdogJob = serviceScope.launch {
+            // Still the live watchdog of a CONNECTED session? (checked under the lock before acting)
+            fun stillCurrent() = isActive && _vpnState.value == VpnState.CONNECTED
+
             delay(30_000L + (Math.random() * 10_000L).toLong()) // jittered grace period
             var successRecorded = false
             var failStreak = 0
             var lastTgProbeAt = 0L   // balancer: timestamp of last Telegram reachability probe
+            // Manual mode: one same-config restart per failure episode (reset by a good check).
+            var manualRestartUsed = false
             while (isActive) {
                 // Randomized intervals to avoid DPI fingerprinting fixed-cadence health checks
                 val jitter = (Math.random() * 15_000L).toLong()
                 delay(if (failStreak == 0) 30_000L + jitter else 8_000L + jitter)
                 if (_vpnState.value != VpnState.CONNECTED) break
 
-                // XRay process crash → restart (balancer) or switch (single)
+                // Wi-Fi ↔ mobile handover since the last tick: probes failing around it say
+                // nothing about the server — start a fresh failure episode.
+                if (networkSwitched) {
+                    networkSwitched = false
+                    if (failStreak > 0 || manualRestartUsed) Log.i(TAG, "Network handover — resetting failure streak")
+                    failStreak = 0
+                    manualRestartUsed = false
+                    continue
+                }
+
+                // XRay process crash → restart the same config (both modes; never switch server)
                 if (!xrayManager.isRunning) {
                     if (balancerMode) {
                         Log.w(TAG, "XRay died (balancer) — restarting same config")
-                        if (!restartXray()) { enterBlackhole("balancer xray restart failed"); break }
-                        pinnedTag = null              // restart drops the override
-                        warmUpPinFast()               // re-pin onto a fast alive server (avoid cold-start)
+                        val restarted = opMutex.withLock {
+                            if (!stillCurrent()) return@withLock null
+                            if (!restartXray()) {
+                                enterBlackhole("balancer xray restart failed")
+                                return@withLock false
+                            }
+                            pinnedTag = null              // restart drops the override
+                            warmUpPinFast()               // re-pin onto a fast alive server (avoid cold-start)
+                            connectedServerForTag(pinnedTag)?.let { _connectedServer.value = it }
+                            true
+                        }
+                        if (restarted != true) break
                         lastTgProbeAt = System.currentTimeMillis()
                         failStreak = 0
                         continue
                     }
-                    Log.w(TAG, "XRay process died — switching immediately")
-                    configRepository.getSelectedServer()?.let {
-                        configRepository.incrementConsecutiveFailure(it.id)
+                    Log.w(TAG, "XRay died (manual) — restarting the pinned server's config")
+                    safeDb("xray-died stats") {
+                        configRepository.getSelectedServer()?.let {
+                            configRepository.incrementConsecutiveFailure(it.id)
+                        }
                     }
-                    switchToNextServer()
-                    break
+                    val restarted = opMutex.withLock {
+                        if (!stillCurrent()) return@withLock null
+                        if (manualRestartUsed || !restartXray()) {
+                            enterBlackhole("manual xray died, restart failed")
+                            return@withLock false
+                        }
+                        true
+                    }
+                    if (restarted != true) break
+                    manualRestartUsed = true
+                    failStreak = 0
+                    continue
+                }
+
+                // tun2socks crash → restart it on the existing TUN fd (Xray + TUN stay as-is).
+                if (!tun2SocksManager.isRunning) {
+                    Log.w(TAG, "tun2socks died while CONNECTED — restarting on existing TUN")
+                    val restarted = opMutex.withLock {
+                        if (!stillCurrent()) return@withLock null
+                        if (tun2SocksManager.isRunning) return@withLock true
+                        val fd = tunFd
+                        val ok = fd != null && tun2SocksManager.start(
+                            tunFd = fd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass
+                        )
+                        if (!ok) {
+                            Log.e(TAG, "tun2socks restart failed")
+                            enterBlackhole("tun2socks restart failed")
+                        }
+                        ok
+                    }
+                    if (restarted != true) break
+                    Log.i(TAG, "tun2socks restarted")
                 }
 
                 // If underlying network is gone (Doze / airplane) — skip, not a VPN failure
@@ -429,97 +1027,146 @@ class MyVpnService : VpnService() {
                         // One immediate confirm re-probe so a single transient blip doesn't churn.
                         ok = withContext(Dispatchers.IO) { isTelegramReachableViaSocks(currentSocksPort) }
                     }
+                    if (!stillCurrent()) break
 
                     if (ok) {
                         failStreak = 0   // pinned route works → stay (sticky)
                         // Refresh the pinned server's 24h "verified working" stamp.
-                        tagToServerId(pinnedTag)?.let { configRepository.markVerified(it) }
-                        if (pinnedTag == null) pinBestAlive()   // lost pin → re-establish
+                        tagToServerId(pinnedTag)?.let { safeDb("markVerified") { configRepository.markVerified(it) } }
+                        if (pinnedTag == null) {
+                            // lost pin → re-establish
+                            opMutex.withLock {
+                                if (stillCurrent() && pinnedTag == null && pinBestAlive()) {
+                                    connectedServerForTag(pinnedTag)?.let { _connectedServer.value = it }
+                                }
+                            }
+                        }
                     } else {
                         failStreak++
                         Log.w(TAG, "Balancer: pinned route unreachable ~${TELEGRAM_PROBE_TIMEOUT_MS / 1000}s #$failStreak (xrayErrors=${xrayManager.errorRate})")
                         // The pinned route actually failed → drop it from the 24h working pool.
-                        tagToServerId(pinnedTag)?.let { configRepository.markFailed(it) }
+                        tagToServerId(pinnedTag)?.let { safeDb("markFailed") { configRepository.markFailed(it) } }
                         // Seamless re-pin: balancer's `Selects` excludes the just-died server.
-                        val (_, selects) = balancerInfo()
-                        if (selects != null && selects != pinnedTag && pinBalancer(selects)) {
-                            pinnedTag = selects
-                            connectedServerForTag(selects)?.let { _connectedServer.value = it }
-                            Log.i(TAG, "Balancer re-pinned to $selects — confirming…")
-                            // CONFIRM the new pin actually reaches Telegram before trusting it.
-                            // Only a confirmed route enters the 24h "working" pool.
+                        val repinned: String? = opMutex.withLock {
+                            if (!stillCurrent()) return@withLock null
+                            val (_, selects) = balancerInfo()
+                            if (selects != null && selects != pinnedTag && pinBalancer(selects)) {
+                                pinnedTag = selects
+                                connectedServerForTag(selects)?.let { _connectedServer.value = it }
+                                selects
+                            } else {
+                                null
+                            }
+                        }
+                        if (!stillCurrent()) break
+                        if (repinned != null) {
+                            Log.i(TAG, "Balancer re-pinned to $repinned — confirming…")
+                            // CONFIRM the new pin actually reaches Telegram before trusting it
+                            // (probe runs outside the lock). Only a confirmed route enters the 24h pool.
                             delay(2_000L)
                             val confirmed = withContext(Dispatchers.IO) { isTelegramReachableViaSocks(currentSocksPort) }
-                            val sid = tagToServerId(selects)
+                            val sid = tagToServerId(repinned)
                             if (confirmed) {
-                                sid?.let { configRepository.markVerified(it) }
-                                Log.i(TAG, "Balancer re-pin to $selects confirmed working")
+                                sid?.let { safeDb("markVerified") { configRepository.markVerified(it) } }
+                                Log.i(TAG, "Balancer re-pin to $repinned confirmed working")
                                 failStreak = 0
                             } else {
-                                sid?.let { configRepository.markFailed(it) }
-                                Log.w(TAG, "Balancer re-pin to $selects still unreachable — will retry/rebuild")
+                                sid?.let { safeDb("markFailed") { configRepository.markFailed(it) } }
+                                Log.w(TAG, "Balancer re-pin to $repinned still unreachable — will retry/rebuild")
                                 // leave failStreak growing → escalates to rebuild below on next cycles
                             }
                         } else if (failStreak >= 3) {
                             // No alternative alive pick for ~minutes → whole pool likely bad → re-fetch,
                             // then warm-up-pin onto a confirmed-alive server (avoid cold-start blind routing).
                             Log.w(TAG, "Balancer: no alive pick — full rebuild (re-fetch)")
-                            if (!rebuildBalancer()) { _vpnState.value = VpnState.ERROR; cleanupProcesses(); break }
-                            warmUpPinFast()
+                            val rebuilt = opMutex.withLock {
+                                if (!stillCurrent()) return@withLock null
+                                if (!rebuildBalancer()) {
+                                    // Kill switch: keep the TUN up and block traffic; recovery
+                                    // retries the rebuild. (Was ERROR + TUN teardown = leak.)
+                                    enterBlackhole("balancer rebuild failed")
+                                    return@withLock false
+                                }
+                                warmUpPinFast()
+                                connectedServerForTag(pinnedTag)?.let { _connectedServer.value = it }
+                                true
+                            }
+                            if (rebuilt != true) break
                             failStreak = 0
                         }
                         lastTgProbeAt = System.currentTimeMillis()
                     }
                 } else {
-                    // ── Single-server mode: probe every tick ──
+                    // ── Single-server (manual) mode: probe every tick, never switch server ──
                     val internetOk = if (xrayErrorsHigh) {
                         Log.w(TAG, "XRay errorRate=${xrayManager.errorRate} — treating as internet fail")
                         false
                     } else {
                         isInternetReachableViaSocks(currentSocksPort)
                     }
+                    if (!stillCurrent()) break
 
                     if (!internetOk) {
                         failStreak++
                         Log.w(TAG, "Health check failed #$failStreak (xrayErrors=${xrayManager.errorRate})")
                         if (failStreak >= 2) {
-                            Log.w(TAG, "2 consecutive failures — switching server")
-                            configRepository.getSelectedServer()?.let {
-                                configRepository.incrementConsecutiveFailure(it.id)
-                                configRepository.recordFailure(it.id)
+                            // Stats only — the user's pin is NOT changed.
+                            safeDb("failure stats") {
+                                configRepository.getSelectedServer()?.let {
+                                    configRepository.incrementConsecutiveFailure(it.id)
+                                    configRepository.recordFailure(it.id)
+                                    configRepository.markFailed(it.id)   // drop from 24h working pool
+                                }
                             }
-                            switchToNextServer()
-                            break
+                            if (manualRestartUsed) {
+                                Log.w(TAG, "Manual server still unreachable after restart — kill-switch")
+                                opMutex.withLock {
+                                    if (stillCurrent()) enterBlackhole("manual server unreachable")
+                                }
+                                break
+                            }
+                            Log.w(TAG, "2 consecutive failures — restarting the pinned server once")
+                            val restarted = opMutex.withLock {
+                                if (!stillCurrent()) return@withLock null
+                                if (!restartXray()) {
+                                    enterBlackhole("manual xray restart failed")
+                                    return@withLock false
+                                }
+                                true
+                            }
+                            if (restarted != true) break
+                            manualRestartUsed = true
+                            failStreak = 0
                         }
                         continue
                     }
 
                     failStreak = 0
-                    configRepository.getSelectedServer()?.let { server ->
+                    manualRestartUsed = false
+                    safeDb("selected server") { configRepository.getSelectedServer() }?.let { server ->
                         // Mark as verified + reset consecutive failures on first success
                         if (!successRecorded) {
                             successRecorded = true
-                            configRepository.recordSuccess(server.id)
-                            configRepository.markVerified(server.id)
-                            configRepository.resetConsecutiveFailures(server.id)
+                            safeDb("success stats") {
+                                configRepository.recordSuccess(server.id)
+                                configRepository.markVerified(server.id)
+                                configRepository.resetConsecutiveFailures(server.id)
+                            }
                             Log.d(TAG, "Server verified: ${server.name}")
-                            // Start background probe to build failover reserve
+                            // Start background probe to build the verified reserve (manual list)
                             startBackgroundProbe()
                         }
 
-                        // ── Quick speed check: detect DPI throttling ──
+                        // ── Quick speed check: stats only (manual mode never switches) ──
                         val speed = withContext(Dispatchers.IO) {
                             measureQuickSpeedMbps(currentSocksPort)
                         }
                         if (speed > 0f) {
-                            configRepository.updateSpeed(server.id, speed)
+                            safeDb("updateSpeed") { configRepository.updateSpeed(server.id, speed) }
                             Log.d(TAG, "Speed: ${"%.0f".format(speed * 1024)} KB/s")
                         }
                         if (speed in 0.01f..0.09f) {
-                            Log.w(TAG, "Throttled! ${"%.0f".format(speed * 1024)} KB/s — switching server")
-                            configRepository.incrementConsecutiveFailure(server.id)
-                            switchToNextServer()
-                            return@launch
+                            Log.w(TAG, "Throttled? ${"%.0f".format(speed * 1024)} KB/s — staying on the pinned server")
                         }
                     }
                 }
@@ -542,16 +1189,16 @@ class MyVpnService : VpnService() {
                 if (_vpnState.value != VpnState.CONNECTED) break
                 val cutoff = System.currentTimeMillis() - 24 * 60 * 60_000L
                 val pinnedId = tagToServerId(pinnedTag)
-                val pool = configRepository.servers.first()
+                val pool = (safeDb("servers") { configRepository.servers.first() } ?: emptyList())
                     .filter { it.verifiedAt > cutoff && it.id != pinnedId }
                     .sortedBy { it.verifiedAt }   // oldest stamp first (most likely stale)
                     .take(5)
                 for (s in pool) {
                     if (!isActive || _vpnState.value != VpnState.CONNECTED) break
                     delay(20_000L)   // slow pace — don't drain battery/data
-                    val ok = withContext(Dispatchers.IO) { xrayMicroTest.test(s, testPort = 10904).success }
+                    val ok = withContext(Dispatchers.IO) { xrayMicroTest.test(s).success }
                     if (!ok) {
-                        configRepository.markFailed(s.id)
+                        safeDb("markFailed") { configRepository.markFailed(s.id) }
                         Log.i(TAG, "Pool re-verify: ${s.name} no longer working — removed from 24h pool")
                     }
                 }
@@ -564,17 +1211,17 @@ class MyVpnService : VpnService() {
     /**
      * Runs in background while VPN is connected.
      * Tests HANDSHAKE_OK servers that didn't make it to Stage 3 during initial validation.
-     * Uses port 10903 (separate from main 10808 and micro-test 10900-10902).
+     * Each micro-test uses its own random loopback port + credentials (see XrayMicroTest).
      * Verified servers are saved to DB — available for watchdog failover.
      */
     private fun startBackgroundProbe() {
         backgroundProbeJob?.cancel()
         backgroundProbeJob = serviceScope.launch {
             delay(60_000L) // wait 1 min after connection stabilizes
-            val currentId = configRepository.getSelectedServer()?.id ?: return@launch
+            val currentId = safeDb("selected server") { configRepository.getSelectedServer() }?.id ?: return@launch
 
             // Get HANDSHAKE_OK servers that aren't already VERIFIED
-            val candidates = configRepository.servers.first()
+            val candidates = (safeDb("servers") { configRepository.servers.first() } ?: emptyList())
                 .filter {
                     it.id != currentId &&
                     it.handshakeOk &&
@@ -595,9 +1242,9 @@ class MyVpnService : VpnService() {
                 if (!isActive || _vpnState.value != VpnState.CONNECTED) break
                 // Slow pace: 1 test every 30s to avoid draining battery/data
                 delay(30_000L)
-                val result = xrayMicroTest.test(server, testPort = 10903)
+                val result = xrayMicroTest.test(server)   // own random port + credentials
                 if (result.success) {
-                    configRepository.markVerified(server.id)
+                    safeDb("markVerified") { configRepository.markVerified(server.id) }
                     verified++
                     Log.i(TAG, "Background verified: ${server.name} (${server.country})")
                 }
@@ -605,6 +1252,58 @@ class MyVpnService : VpnService() {
             }
             Log.i(TAG, "Background probe done: $verified new verified servers")
         }
+    }
+
+    /**
+     * Run a DB/repository call from a background loop: a DB error is logged and yields null
+     * instead of killing the watchdog / probe loop. Cancellation is rethrown.
+     */
+    private suspend fun <T> safeDb(what: String, block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "DB call failed ($what): ${e.message}")
+        null
+    }
+
+    /**
+     * Uncaught exception in a service coroutine (CoroutineExceptionHandler of [serviceScope]).
+     * Never crash the process: log, and if a session is live engage the kill-switch (under the
+     * lock, from a fresh coroutine) so traffic stays blocked instead of leaking.
+     */
+    private fun onUncaughtCoroutineError(e: Throwable) {
+        Log.e(TAG, "Uncaught coroutine error: ${e.javaClass.simpleName}: ${e.message}", e)
+        val st = _vpnState.value
+        // CONNECTING is owned by connect()/switch code, which handles its own failures.
+        if (st != VpnState.CONNECTED && st != VpnState.BLOCKED) return
+        // Re-entrancy guard: if the blackhole itself throws deterministically, the handler would
+        // relaunch it forever (one Xray start per round). Engage at most once per 30 s; a repeat
+        // failure within that window tears the session down instead.
+        val now = System.currentTimeMillis()
+        val repeat = now - lastUncaughtBlackholeAt < 30_000L
+        lastUncaughtBlackholeAt = now
+        try {
+            serviceScope.launch {
+                opMutex.withLock {
+                    val cur = _vpnState.value
+                    if (cur != VpnState.CONNECTED && cur != VpnState.BLOCKED) return@withLock
+                    if (repeat) {
+                        Log.e(TAG, "Repeated uncaught errors — stopping the session")
+                        failSession()
+                        return@withLock
+                    }
+                    try {
+                        enterBlackhole("uncaught error: ${e.javaClass.simpleName}")
+                    } catch (ce: CancellationException) {
+                        throw ce
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Blackhole failed after uncaught error: ${e2.message}")
+                        failSession()
+                    }
+                }
+            }
+        } catch (_: Exception) { /* scope already cancelled (onDestroy) */ }
     }
 
     /**
@@ -727,40 +1426,12 @@ class MyVpnService : VpnService() {
         0f
     }
 
-    /**
-     * Downloads ~200 KB through the SOCKS5 proxy and measures throughput.
-     * Returns MB/s, or 0f if the test could not complete (network error, timeout).
-     * Test goes through the VLESS tunnel so it measures real-world usable speed.
-     */
-    private fun measureDownloadSpeedMbps(socksPort: Int): Float = try {
-        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
-        val conn = java.net.URL("https://speed.cloudflare.com/__down?bytes=204800")
-            .openConnection(proxy) as java.net.HttpURLConnection
-        conn.connectTimeout = 10_000
-        conn.readTimeout    = 15_000
-        conn.instanceFollowRedirects = true
-        conn.connect()
-        val start = System.currentTimeMillis()
-        var bytes = 0L
-        val buf = ByteArray(8192)
-        conn.inputStream.use { stream ->
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) bytes += read
-        }
-        conn.disconnect()
-        val elapsed = (System.currentTimeMillis() - start) / 1000.0
-        if (elapsed > 0 && bytes > 10_000) (bytes / elapsed / (1024.0 * 1024.0)).toFloat() else 0f
-    } catch (e: Exception) {
-        Log.d(TAG, "Speed test failed: ${e.message}")
-        0f
-    }
-
     // ── Balancer control API (xray api bo/bi) ───────────────────────────────────
     // Confirmed working on the bundled Xray 26.2.6:
     //   bo --server=127.0.0.1:<apiPort> -b balancer <proxy-N>   → seamless override (no restart)
     //   bi --server=127.0.0.1:<apiPort> balancer                → text with "Selecting Override" + "Selects"
 
-    private fun apiServerArg() = "--server=127.0.0.1:${currentSocksPort + 2}"
+    private fun apiServerArg() = "--server=127.0.0.1:${ports.api}"
 
     /**
      * Reads `xray api bi`. Returns (overrideTag, selectsTag): the current override target and the
@@ -802,7 +1473,7 @@ class MyVpnService : VpnService() {
     /** Connected-server UI model for a pinned tag (real flag/country), or null. */
     private suspend fun connectedServerForTag(tag: String?): ServerProfile? {
         val id = tagToServerId(tag) ?: return null
-        return configRepository.servers.first().firstOrNull { it.id == id }
+        return safeDb("servers") { configRepository.servers.first() }?.firstOrNull { it.id == id }
     }
 
     /**
@@ -815,7 +1486,7 @@ class MyVpnService : VpnService() {
         val target = selects ?: return false
         if (pinBalancer(target)) {
             pinnedTag = target
-            tagToServerId(target)?.let { configRepository.markVerified(it) }
+            tagToServerId(target)?.let { safeDb("markVerified") { configRepository.markVerified(it) } }
             Log.i(TAG, "Balancer pinned to $target (server=${tagToServerId(target)})")
             return true
         }
@@ -826,7 +1497,7 @@ class MyVpnService : VpnService() {
     private suspend fun recordPin(tag: String) {
         pinnedTag = tag
         connectedServerForTag(tag)?.let { _connectedServer.value = it }
-        tagToServerId(tag)?.let { configRepository.markVerified(it) }
+        tagToServerId(tag)?.let { safeDb("markVerified") { configRepository.markVerified(it) } }
     }
 
     /**
@@ -837,12 +1508,12 @@ class MyVpnService : VpnService() {
      * to the balancer's own best-alive pick if no candidate passes.
      */
     private suspend fun warmUpPinFast() {
-        val byId = configRepository.servers.first().associateBy { it.id }
+        val byId = (safeDb("servers") { configRepository.servers.first() } ?: emptyList()).associateBy { it.id }
         val candidates = balancerPoolIds.take(12).mapNotNull { byId[it] }
         if (candidates.isEmpty()) { pinBestAlive(); return }
 
-        val results = withContext(Dispatchers.IO) { xrayMicroTest.testBatch(candidates, targetCount = 4) }
-        val best = results.filter { it.success }.minByOrNull { it.latencyMs }
+        // First server to pass wins (≈ fastest) — don't wait for slow/dead ones to time out.
+        val best = xrayMicroTest.firstSuccess(candidates)
         if (best != null) {
             val idx = balancerPoolIds.indexOf(best.serverId)
             if (idx >= 0 && pinBalancer("proxy-$idx")) {
@@ -856,10 +1527,67 @@ class MyVpnService : VpnService() {
 
     // ── Balancer recovery ───────────────────────────────────────────────────────
 
-    /** Restart Xray with the current (balancer) config — used when the process dies. */
+    /**
+     * Restart Xray with the session's current config — used when the process dies / DNS changes.
+     * Re-runs the chokepoint (current hotspot IP, DNS). start() stops the old process itself, so
+     * the port is released only for the spawn time of the new one.
+     */
+    /**
+     * Start Xray with an already-prepared config. If it fails and the config carried hotspot
+     * inbounds (fixed ports 10808/10809 on the hotspot IP may be taken by another app), turn
+     * sharing off for this session and retry once — the VPN itself must still come up.
+     */
+    private suspend fun startXray(prepared: String): Boolean {
+        var cfg = prepared
+        if (xrayManager.start(cfg)) return true
+        // Balancer: Xray names the outbound it couldn't build ("…outbound config with tag
+        // proxy-10 > …"). One malformed server must not kill the whole pool — drop it and
+        // retry. Selectors are prefix-based ("proxy-"), and the remaining tags keep their
+        // index → server-id mapping, so nothing else needs to change.
+        repeat(5) {
+            val badTag = xrayManager.lastStartError?.let { BAD_OUTBOUND_RE.find(it)?.groupValues?.get(1) }
+                ?: return@repeat
+            val pruned = removeOutbound(cfg, badTag) ?: return@repeat
+            Log.w(TAG, "Xray rejected $badTag — dropping it from the pool and retrying")
+            tagToServerId(badTag)?.let { id -> safeDb("markFailed bad outbound") { configRepository.markFailed(id) } }
+            // Keep restarts on the pruned config (callers store the config before starting).
+            if (lastXrayConfig == cfg) lastXrayConfig = pruned
+            cfg = pruned
+            if (xrayManager.start(cfg)) return true
+        }
+        if (configHotspot == null) return false
+        Log.w(TAG, "Xray failed with hotspot inbounds (port busy?) — sharing disabled for this session")
+        hotspotSharingEnabled = false
+        return xrayManager.start(prepareConfig(cfg))
+    }
+
+    /** Removes outbound [tag] from a config; null if it isn't there or it's the last proxy. */
+    private fun removeOutbound(configJson: String, tag: String): String? = try {
+        val root = JSONObject(configJson)
+        val outs = root.getJSONArray("outbounds")
+        val kept = JSONArray()
+        var removed = false
+        var proxies = 0
+        for (i in 0 until outs.length()) {
+            val o = outs.getJSONObject(i)
+            val t = o.optString("tag")
+            if (t == tag) { removed = true; continue }
+            if (t.startsWith("proxy-")) proxies++
+            kept.put(o)
+        }
+        if (!removed || proxies == 0) null
+        else { root.put("outbounds", kept); root.toString(2) }
+    } catch (e: Exception) {
+        null
+    }
+
     private suspend fun restartXray(): Boolean {
-        xrayManager.stop()
-        return if (lastXrayConfig.isNotEmpty()) xrayManager.start(lastXrayConfig) else false
+        if (lastXrayConfig.isEmpty()) return false
+        lastXrayConfig = prepareConfig(lastXrayConfig)
+        val ok = startXray(lastXrayConfig)
+        // prepareConfig re-resolves the hotspot IP — keep the Home banner in sync with it.
+        if (ok && _vpnState.value == VpnState.CONNECTED) publishHotspotInfo()
+        return ok
     }
 
     /**
@@ -868,7 +1596,13 @@ class MyVpnService : VpnService() {
      * Used when the entire pool appears dead.
      */
     private suspend fun rebuildBalancer(): Boolean = try {
-        runCatching { configRepository.fetchAndSaveServers() }   // best-effort refresh
+        try {
+            configRepository.fetchAndSaveServers()   // best-effort refresh
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "rebuildBalancer: re-fetch failed: ${e.message}")
+        }
         val excluded = preferences.excludedCountries.first()
         val candidates = configRepository.getServersExcludingCountries(excluded).take(50)
         // Keep server↔config pairs so proxy-N still maps to a real server after the rebuild.
@@ -878,93 +1612,224 @@ class MyVpnService : VpnService() {
         } else {
             balancerPoolIds = pairs.map { it.first.id }   // refresh proxy-N mapping
             pinnedTag = null                              // restart drops any override
-            val json = injectProxyAuth(
-                XrayConfigBuilder.buildBalancer(pairs.map { it.second }, currentSocksPort, hotspotSharingEnabled)
+            val json = prepareConfig(
+                XrayConfigBuilder.buildBalancer(pairs.map { it.second }, ports.socks, ports.http, ports.api)
             )
             lastXrayConfig = json
-            xrayManager.stop()
-            xrayManager.start(json)
+            startXray(json)   // stops the old (or blackhole) process first
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         Log.e(TAG, "rebuildBalancer failed: ${e.message}")
         false
     }
 
-    // ── Hot-switch (user picks a server while connected) ─────────────────────────
+    // ── Hot-switch (user picks a server / Auto while connected) ──────────────────
 
     /**
      * Switch the active server to [serverId] WITHOUT tearing down the tunnel: only the Xray
      * outbound is swapped (stop→start) while TUN + tun2socks stay up on the same SOCKS port.
      * Lets the Servers screen change server on tap during an active session (no disconnect dance).
+     * Caller holds opMutex and has verified a live TUN (CONNECTED/BLOCKED).
      */
-    private suspend fun switchToServer(serverId: String) {
-        // Only meaningful for an established (or blocked/recovering) session.
-        if (_vpnState.value == VpnState.DISCONNECTED || _vpnState.value == VpnState.DISCONNECTING) return
-        if (tunFd == null) return
+    private suspend fun switchToServerLocked(serverId: String) {
+        val server = try {
+            configRepository.getServerById(serverId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Hot-switch: lookup failed: ${e.message}")
+            null
+        }
+        val vlessConfig = server?.let { VlessUriParser.parse(it.vlessUri) }
+        if (server == null || vlessConfig == null) {
+            Log.w(TAG, "Hot-switch: server $serverId missing/unparseable — ignored")
+            resumeMonitoringLocked()
+            return
+        }
+        if (!balancerMode && _activeMode.value == ActiveMode.MANUAL &&
+            _vpnState.value == VpnState.CONNECTED && _connectedServer.value?.id == serverId
+        ) {
+            Log.i(TAG, "Hot-switch: already on ${server.name} — no-op")
+            resumeMonitoringLocked()
+            return
+        }
+        recoveryJob?.cancel(); recoveryJob = null
+        watchdogJob?.cancel(); watchdogJob = null
+        backgroundProbeJob?.cancel(); backgroundProbeJob = null
+        _switching.value = true
         try {
-            val server = configRepository.getServerById(serverId) ?: return
-            val vlessConfig = VlessUriParser.parse(server.vlessUri) ?: run {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Hot-switch: cannot parse ${server.name}")
-                return
-            }
-            recoveryJob?.cancel(); recoveryJob = null
-            watchdogJob?.cancel(); watchdogJob = null
             balancerMode = false
             pinnedTag = null
             balancerPoolIds = emptyList()
+            _activeMode.value = ActiveMode.MANUAL
             _vpnState.value = VpnState.CONNECTING
             updateNotification(server.name, VpnState.CONNECTING)
 
-            val cfg = injectProxyAuth(XrayConfigBuilder.build(vlessConfig, currentSocksPort, hotspotSharingEnabled))
-            xrayManager.stop()
-            if (!xrayManager.start(cfg)) {
+            // The user's own pin — written BEFORE the start so a kill-switch recovery after a
+            // failed start retries THIS server (recoverSingle reads the selected server).
+            configRepository.selectServer(serverId)
+            currentServerName = server.name
+            val cfg = prepareConfig(XrayConfigBuilder.build(vlessConfig, ports.socks, httpPort = ports.http))
+            lastXrayConfig = cfg
+            // start() stops the old process itself → the port is free only for the spawn time.
+            if (!startXray(cfg)) {
                 enterBlackhole("hot-switch xray start failed")
                 return
             }
-            lastXrayConfig = cfg
-            currentServerName = server.name
-            configRepository.selectServer(serverId)
+            currentCoroutineContext().ensureActive()   // disconnect may have preempted us
+            if (!ensureTun2SocksLocked()) { enterBlackhole("tun2socks restart failed"); return }
             activeSocksPort = currentSocksPort
             _connectedServer.value = server
             _vpnState.value = VpnState.CONNECTED
             updateNotification(server.name, VpnState.CONNECTED)
-            if (hotspotSharingEnabled) _hotspotProxyInfo.value = HotspotHelper.getHotspotIp()?.let { "$it:10808" }
+            publishHotspotInfo()
             if (BuildConfig.DEBUG) Log.i(TAG, "Hot-switched to ${server.name}")
             startWatchdog()
+            startWorkingPoolReverify()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "switchToServer failed: ${e.message}")
             enterBlackhole("hot-switch error")
+        } finally {
+            _switching.value = false
+        }
+    }
+
+    /**
+     * Go back to Auto (balancer) under the live TUN: swap Xray to the balancer [config] (auth is
+     * injected here), keep TUN + tun2socks, then warm-up-pin a fast server. Does NOT touch the
+     * Room selection. Caller holds opMutex and has verified a live TUN (CONNECTED/BLOCKED).
+     */
+    private suspend fun switchToAutoLocked(config: String, name: String, poolIds: List<String>) {
+        recoveryJob?.cancel(); recoveryJob = null
+        watchdogJob?.cancel(); watchdogJob = null
+        backgroundProbeJob?.cancel(); backgroundProbeJob = null
+        poolReverifyJob?.cancel(); poolReverifyJob = null
+        _switching.value = true
+        try {
+            // Session is Auto from here on — a kill-switch recovery after a failed start rebuilds
+            // the balancer rather than reviving the old manual server.
+            balancerMode = true
+            balancerPoolIds = poolIds
+            pinnedTag = null
+            currentServerName = name
+            _activeMode.value = ActiveMode.AUTO
+            _vpnState.value = VpnState.CONNECTING
+            updateNotification(name, VpnState.CONNECTING)
+
+            // The use case built [config] with placeholder ports — the chokepoint rewrites them.
+            val authed = prepareConfig(config)
+            lastXrayConfig = authed
+            // start() stops the old process itself → the port is free only for the spawn time.
+            if (!startXray(authed)) {
+                enterBlackhole("switch-to-auto xray start failed")
+                return
+            }
+            currentCoroutineContext().ensureActive()   // disconnect may have preempted us
+            if (!ensureTun2SocksLocked()) { enterBlackhole("tun2socks restart failed"); return }
+            activeSocksPort = currentSocksPort
+            _connectedServer.value = balancerPlaceholder(name)
+            _vpnState.value = VpnState.CONNECTED
+            updateNotification(name, VpnState.CONNECTED)
+            publishHotspotInfo()
+            warmUpPinFast()
+            connectedServerForTag(pinnedTag)?.let { _connectedServer.value = it }
+            if (BuildConfig.DEBUG) Log.i(TAG, "Hot-switched to Auto (pinned=$pinnedTag)")
+            startWatchdog()
+            startWorkingPoolReverify()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "switchToAuto failed: ${e.message}")
+            enterBlackhole("switch-to-auto error")
+        } finally {
+            _switching.value = false
         }
     }
 
     // ── Kill-switch ──────────────────────────────────────────────────────────────
 
     /**
-     * Kill-switch: on unexpected tunnel loss keep the TUN interface UP and stop only Xray, so
-     * app traffic hits the TUN, finds no working SOCKS behind it, and is DROPPED instead of
-     * leaking over the operator network. Then auto-recover. If the kill-switch is disabled or
-     * there is no TUN to hold, fall back to the old behavior (tear down → ERROR).
+     * Kill-switch: on unexpected tunnel loss keep the TUN interface UP and swap Xray to a
+     * BLACKHOLE config (same loopback inbounds/ports/auth, single blackhole outbound), so app
+     * traffic hits the TUN → tun2socks → our Xray and is DROPPED instead of leaking over the
+     * operator network — and the session's local ports stay bound by US the whole time (a
+     * released port could be grabbed by another app, which would then receive every tunneled
+     * connection plus our credentials). If even the blackhole Xray can't start, tun2socks is
+     * stopped too: nothing dials the released port, and the unread TUN drops all packets.
+     * Then auto-recover. If the kill-switch is disabled or there is no TUN to hold, fall back to
+     * the old behavior (tear down → ERROR). Caller holds opMutex.
      */
-    private fun enterBlackhole(reason: String) {
+    private suspend fun enterBlackhole(reason: String) {
+        val st = _vpnState.value
+        if (st == VpnState.DISCONNECTING || st == VpnState.DISCONNECTED) {
+            Log.i(TAG, "enterBlackhole($reason) skipped — session is $st")
+            return
+        }
         if (!killSwitchEnabled || tunFd == null) {
-            _vpnState.value = VpnState.ERROR
-            cleanupProcesses()
+            failSession()
             return
         }
         watchdogJob?.cancel(); watchdogJob = null
         backgroundProbeJob?.cancel(); backgroundProbeJob = null
         poolReverifyJob?.cancel(); poolReverifyJob = null
-        xrayManager.stop()          // no working outbound → tun2socks can't reach SOCKS → traffic blocked
         activeSocksPort = 0
         _connectedServer.value = null
-        _hotspotProxyInfo.value = null
+        _hotspotInfo.value = null
         _vpnState.value = VpnState.BLOCKED
+        // NonCancellable: the caller may be the watchdog we just cancelled above — the blackhole
+        // must still come up (else the port would be left unbound).
+        withContext(NonCancellable) { startBlackholeXray() }
         updateNotification(currentServerName, VpnState.BLOCKED)
         Log.w(TAG, "Kill-switch active — traffic blocked ($reason)")
         scheduleRecovery()
     }
 
-    /** While BLOCKED, keep retrying (with backoff) to bring a server back up under the live TUN. */
+    /**
+     * Swap the running Xray for the blackhole config (session ports + auth, hotspot inbounds if
+     * the hotspot is up — so those ports stay ours too). Fallbacks: retry without hotspot
+     * inbounds; if that also fails, stop tun2socks so nothing dials the now-free local port.
+     * Caller holds opMutex.
+     */
+    private suspend fun startBlackholeXray() {
+        val template = XrayConfigBuilder.buildBlackhole(ports.socks, ports.http, ports.api)
+        val savedHotspot = configHotspot
+        var ok = xrayManager.start(prepareConfig(template, withDns = false))
+        if (!ok && configHotspot != null) {
+            Log.w(TAG, "Blackhole Xray failed with hotspot inbounds — retrying without")
+            val sharing = hotspotSharingEnabled
+            hotspotSharingEnabled = false
+            try {
+                ok = xrayManager.start(prepareConfig(template, withDns = false))
+            } finally {
+                hotspotSharingEnabled = sharing
+            }
+        }
+        // configHotspot describes the SESSION config for publishHotspotInfo — restore it.
+        configHotspot = savedHotspot
+        if (!ok) {
+            Log.e(TAG, "Blackhole Xray failed to start — stopping tun2socks (unread TUN drops traffic)")
+            xrayManager.stop()
+            tun2SocksManager.stop()
+        }
+    }
+
+    /** Make sure tun2socks runs on the current TUN (it is stopped if the blackhole Xray failed). */
+    private suspend fun ensureTun2SocksLocked(): Boolean {
+        if (tun2SocksManager.isRunning) return true
+        val fd = tunFd ?: return false
+        Log.i(TAG, "Restarting tun2socks on the existing TUN")
+        return tun2SocksManager.start(tunFd = fd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass)
+    }
+
+    /**
+     * While BLOCKED, keep retrying (with backoff) to bring the session back up under the live TUN:
+     * Auto → rebuild the balancer; Manual → the user's PINNED server only. Each attempt runs
+     * under opMutex; the backoff delay does not hold it.
+     */
     private fun scheduleRecovery() {
         recoveryJob?.cancel()
         recoveryJob = serviceScope.launch {
@@ -974,15 +1839,46 @@ class MyVpnService : VpnService() {
                 backoff = (backoff * 2).coerceAtMost(60_000L)
                 if (tunFd == null) break
                 if (!isUnderlyingNetworkAvailable()) continue
-                val ok = if (balancerMode) rebuildBalancer() else recoverSingle()
-                if (ok) {
+                val recovered: Boolean? = opMutex.withLock {
+                    // Someone else (user switch / disconnect) already changed the session.
+                    if (!isActive || _vpnState.value != VpnState.BLOCKED || tunFd == null) return@withLock null
+                    val ok = try {
+                        if (balancerMode) rebuildBalancer() else recoverSingle()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Recovery attempt failed: ${e.message}")
+                        false
+                    }
+                    if (!ok) {
+                        // The attempt replaced/stopped the blackhole Xray — put it back so the
+                        // session ports stay bound while we wait for the next attempt.
+                        if (!xrayManager.isRunning) withContext(NonCancellable) { startBlackholeXray() }
+                        return@withLock false
+                    }
+                    currentCoroutineContext().ensureActive()
+                    if (!ensureTun2SocksLocked()) {
+                        Log.w(TAG, "Recovery: tun2socks restart failed")
+                        withContext(NonCancellable) { startBlackholeXray() }
+                        return@withLock false
+                    }
                     activeSocksPort = currentSocksPort
                     _connectedServer.value =
-                        if (balancerMode) connectedServerForTag(pinnedTag) else configRepository.getSelectedServer()
+                        if (balancerMode) connectedServerForTag(pinnedTag) ?: balancerPlaceholder(currentServerName)
+                        else safeDb("selected server") { configRepository.getSelectedServer() }
                     _vpnState.value = VpnState.CONNECTED
                     updateNotification(currentServerName, VpnState.CONNECTED)
-                    if (balancerMode) warmUpPinFast()
+                    publishHotspotInfo()
+                    if (balancerMode) {
+                        warmUpPinFast()
+                        connectedServerForTag(pinnedTag)?.let { _connectedServer.value = it }
+                    }
                     startWatchdog()
+                    startWorkingPoolReverify()
+                    true
+                }
+                if (recovered == null) break
+                if (recovered) {
                     Log.i(TAG, "Kill-switch recovered — tunnel restored")
                     break
                 }
@@ -990,155 +1886,109 @@ class MyVpnService : VpnService() {
         }
     }
 
-    /** Bring up the best available server under the existing TUN (single/manual recovery). */
+    /**
+     * Manual recovery: bring the user's PINNED server (Room selection) back up under the existing
+     * TUN. Never picks another server and never writes the selection. Caller holds opMutex.
+     */
     private suspend fun recoverSingle(): Boolean {
-        val server = configRepository.selectBestServer() ?: return false
+        val server = configRepository.getSelectedServer() ?: return false
         val vless = VlessUriParser.parse(server.vlessUri) ?: return false
-        val cfg = injectProxyAuth(XrayConfigBuilder.build(vless, currentSocksPort, hotspotSharingEnabled))
-        xrayManager.stop()
-        if (!xrayManager.start(cfg)) return false
+        val cfg = prepareConfig(XrayConfigBuilder.build(vless, ports.socks, httpPort = ports.http))
+        if (!startXray(cfg)) return false   // start() replaces the blackhole process
         lastXrayConfig = cfg
         currentServerName = server.name
-        configRepository.selectServer(server.id)
         return true
-    }
-
-    // ── Server failover ────────────────────────────────────────────────────────
-
-    private suspend fun switchToNextServer() {
-        try {
-            Log.i(TAG, "Switching to next server…")
-            _vpnState.value = VpnState.CONNECTING
-
-            val failedServer = configRepository.getSelectedServer()
-            if (failedServer != null) {
-                configRepository.recordFailure(failedServer.id)
-                configRepository.markFailed(failedServer.id)   // drop from 24h working pool
-                if (BuildConfig.DEBUG) Log.w(TAG, "Recorded failure for ${failedServer.name}")
-            }
-
-            val triedIds = mutableSetOf<String>()
-            failedServer?.let { triedIds += it.id }
-            val failedPorts = mutableSetOf<Int>()
-            var consecutivePortFails = 0
-            var lastFailedPort: Int? = failedServer?.port
-
-            while (true) {
-                val nextServer = configRepository.selectBestServer(
-                    excludeIds = triedIds,
-                    excludePorts = failedPorts,
-                ) ?: run {
-                    Log.w(TAG, "No reachable servers left — kill-switch blocking, will retry")
-                    enterBlackhole("no reachable servers")
-                    return
-                }
-
-                val vlessConfig = VlessUriParser.parse(nextServer.vlessUri)
-                if (vlessConfig == null) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Cannot parse VLESS URI for ${nextServer.name} — skipping")
-                    triedIds += nextServer.id
-                    continue
-                }
-
-                xrayManager.stop()
-                val failoverConfig = injectProxyAuth(XrayConfigBuilder.build(vlessConfig, currentSocksPort, hotspotSharingEnabled))
-                if (!xrayManager.start(failoverConfig)) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "XRay failed to start with ${nextServer.name} — skipping")
-                    configRepository.recordFailure(nextServer.id)
-                    triedIds += nextServer.id
-                    continue
-                }
-
-                // Give XRay 3s to stabilise, then speed test validates both connectivity and speed
-                delay(3_000L)
-                val speedMbps = withContext(Dispatchers.IO) { measureDownloadSpeedMbps(currentSocksPort) }
-                if (speedMbps > 0f) {
-                    configRepository.updateSpeed(nextServer.id, speedMbps)
-                    if (BuildConfig.DEBUG) Log.d(TAG, "${nextServer.name} speed: ${"%.2f".format(speedMbps)} MB/s")
-                }
-                // 0f = tunnel dead (test failed), 0.01-0.09 = extremely slow — skip
-                if (speedMbps < 0.1f) {
-                    val reason = if (speedMbps == 0f) "unreachable" else "${"%.0f".format(speedMbps * 1024)} KB/s"
-                    if (BuildConfig.DEBUG) Log.w(TAG, "${nextServer.name} failed ($reason) — trying next")
-                    configRepository.recordFailure(nextServer.id)
-                    configRepository.incrementConsecutiveFailure(nextServer.id)
-                    triedIds += nextServer.id
-                    // Track port failures
-                    if (nextServer.port == lastFailedPort) {
-                        consecutivePortFails++
-                        if (consecutivePortFails >= 3) {
-                            failedPorts += nextServer.port
-                            consecutivePortFails = 0
-                        }
-                    } else {
-                        lastFailedPort = nextServer.port
-                        consecutivePortFails = 1
-                    }
-                    continue
-                }
-
-                // Server is confirmed working — mark as verified
-                currentServerName = nextServer.name
-                configRepository.selectServer(nextServer.id)
-                configRepository.recordSuccess(nextServer.id)
-                configRepository.markVerified(nextServer.id)
-                configRepository.resetConsecutiveFailures(nextServer.id)
-                _connectedServer.value = nextServer
-                _vpnState.value = VpnState.CONNECTED
-                updateNotification(nextServer.name, VpnState.CONNECTED)
-                if (hotspotSharingEnabled) _hotspotProxyInfo.value = HotspotHelper.getHotspotIp()?.let { "$it:10808" }
-                if (BuildConfig.DEBUG) Log.i(TAG, "Switched to ${nextServer.name} (${nextServer.address})")
-                startWatchdog()
-                return
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "switchToNextServer failed: ${e.message}")
-            enterBlackhole("failover error")
-        }
     }
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-    private suspend fun disconnect() {
+    /**
+     * [inFlightConnect] = the connect coroutine running when Disconnect was requested — cancelled
+     * and awaited first so it can't bring processes back up behind our teardown.
+     * The final stop uses stopSelf(lastStartId) on the main thread (serialized with
+     * onStartCommand) and is skipped if a newer Connect is already queued, so a quick
+     * Disconnect→Connect doesn't kill the freshly started service.
+     */
+    private suspend fun disconnect(inFlightConnect: Job? = null) {
         _vpnState.value = VpnState.DISCONNECTING
-        cleanupProcesses()
-        Authenticator.setDefault(null)
-        proxyUser = ""
-        proxyPass = ""
-        balancerMode = false
-        lastXrayConfig = ""
-        balancerPoolIds = emptyList()
-        pinnedTag = null
-        _vpnState.value = VpnState.DISCONNECTED
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // Preempt everything that may hold (or queue for) opMutex BEFORE taking it: cancellation
+        // makes a holder release the lock at its next suspension point.
+        pendingSwitch.set(null)
+        // An always-on start still resolving the mode would otherwise send ACTION_CONNECT after
+        // this disconnect and bring the VPN back against the user's wish.
+        alwaysOnJob?.cancel()
+        switchParent.cancelChildren()
+        watchdogJob?.cancel()
+        recoveryJob?.cancel()
+        splitTunnelObserverJob?.cancel()
+        dnsObserverJob?.cancel()
+        inFlightConnect?.cancelAndJoin()
+        opMutex.withLock {
+            cleanupProcesses()
+            LocalProxyAuth.clearSession()
+            proxyUser = ""
+            proxyPass = ""
+            hotspotCreds = null
+            balancerMode = false
+            lastXrayConfig = ""
+            balancerPoolIds = emptyList()
+            pinnedTag = null
+            // Publish DISCONNECTED only after teardown is complete.
+            _vpnState.value = VpnState.DISCONNECTED
+        }
         Log.i(TAG, "VPN disconnected")
+        withContext(Dispatchers.Main) {
+            val newerConnect = connectJob?.let { it !== inFlightConnect && it.isActive } == true
+            if (!newerConnect) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                // No-op if AMS already has a newer start request; that one handles itself.
+                stopSelf(lastStartId)
+            }
+        }
     }
 
     private fun cleanupProcesses() {
         watchdogJob?.cancel(); watchdogJob = null
         splitTunnelObserverJob?.cancel(); splitTunnelObserverJob = null
+        dnsObserverJob?.cancel(); dnsObserverJob = null
         backgroundProbeJob?.cancel(); backgroundProbeJob = null
         poolReverifyJob?.cancel(); poolReverifyJob = null
         recoveryJob?.cancel(); recoveryJob = null
         activeSocksPort = 0   // stop routing app requests through a dead tunnel
+        unregisterNetworkCallback()
         trafficMonitor.stop()
         tun2SocksManager.stop()
         xrayManager.stop()
+        xrayManager.deleteConfigs()   // no session credentials / server secrets left on disk
         tunFd?.close(); tunFd = null
-        _hotspotProxyInfo.value = null
+        configHotspot = null
+        _hotspotInfo.value = null
         _connectedServer.value = null
+        // Session is gone (teardown / ERROR): no mode, no switch in progress.
+        _activeMode.value = null
+        _switching.value = false
     }
 
     override fun onRevoke() {
         super.onRevoke()
-        serviceScope.launch { disconnect() }
+        val inFlightConnect = connectJob
+        disconnectJob = serviceScope.launch { disconnect(inFlightConnect) }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
-        cleanupProcesses()
+        // cleanupProcesses() blocks (tun2socks reap up to ~1s, xray stop up to ~3s) — run it off
+        // the main thread, waiting only a bounded time so onDestroy can't ANR. Usually a no-op
+        // here because disconnect() already tore everything down.
+        val cleanup = Thread({
+            try { cleanupProcesses() } catch (e: Exception) { Log.w(TAG, "onDestroy cleanup: ${e.message}") }
+        }, "vpn-destroy-cleanup")
+        cleanup.start()
+        try { cleanup.join(1_500L) } catch (_: InterruptedException) {}
+        _connectedServer.value = null
+        _activeMode.value = null
+        _switching.value = false
         _vpnState.value = VpnState.DISCONNECTED
     }
 

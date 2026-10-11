@@ -1,13 +1,21 @@
 package com.myappvpn.data.remote
 
 import com.myappvpn.data.model.SubscriptionSource
+import okhttp3.ResponseBody
 import retrofit2.http.GET
+import retrofit2.http.Streaming
 import retrofit2.http.Url
 
+/**
+ * Legacy Retrofit entry point. Subscription fetching now goes through [SubscriptionFetcher]
+ * (8 MB cap, SSRF-safe DNS + redirect validation, real cancellation). Returns a streaming
+ * [ResponseBody] so a caller can never accidentally buffer an unbounded body into a String.
+ */
 interface GithubApiService {
 
+    @Streaming
     @GET
-    suspend fun fetchRawFile(@Url url: String): String
+    suspend fun fetchRawFile(@Url url: String): ResponseBody
 }
 
 /**

@@ -13,5 +13,12 @@ data class VlessConfig(
     val fingerprint: String = "chrome",   // TLS fingerprint
     val wsPath: String = "/",
     val grpcServiceName: String = "",
-    val name: String = ""
+    val name: String = "",
+    // Transport extras (all optional; empty = not set in the URI)
+    val host: String = "",                // `host` — ws/httpupgrade/xhttp Host header, tcp-http host
+    val alpn: List<String> = emptyList(), // `alpn` — comma list, e.g. ["h2", "http/1.1"] (TLS only)
+    val spiderX: String = "",             // `spx` — Reality spiderX
+    val headerType: String = "",          // `headerType` — "http" for tcp HTTP obfuscation, "none"
+    val xhttpMode: String = "",           // `mode` — xhttp: "auto" / "packet-up" / "stream-up" / "stream-one"
+    val xhttpExtra: String = "",          // `extra` — xhttp raw JSON object (applied only if valid JSON)
 )

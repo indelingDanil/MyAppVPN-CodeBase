@@ -7,6 +7,8 @@ import com.myappvpn.util.SubscriptionUrlValidator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
@@ -18,12 +20,22 @@ import javax.inject.Singleton
  * Built-ins can be enabled/disabled but not deleted; custom ones can be added, toggled and deleted.
  *
  * Only ENABLED sources are fetched ([getEnabledChains]); disabled sources' servers are pruned by
- * ConfigRepository's existing `deleteNotIn` step on the next refresh.
+ * ConfigRepository's refresh (ServerDao.applyRefresh deletes rows not in any enabled source).
  */
 @Singleton
 class SubscriptionRepository @Inject constructor(
     private val preferences: AppPreferences
 ) {
+    /**
+     * Serializes every read-modify-write of the subscription prefs (read via `first()`, write via
+     * a setter = two separate DataStore transactions). All writers of these two keys go through
+     * this singleton, so the in-process lock prevents lost updates (e.g. add + toggle racing).
+     * TODO(AppPreferences owner): add atomic `updateCustomSubscriptionsJson(transform)` /
+     *  `updateDisabledBuiltinSources(transform)` doing the RMW inside ONE dataStore.edit (like
+     *  updateDnsServersJson) and switch to them; the mutex can then go.
+     */
+    private val prefsMutex = Mutex()
+
     /** Reason string on failure, or null on success. */
     suspend fun addCustom(rawUrl: String): String? {
         val url = rawUrl.trim()
@@ -31,24 +43,30 @@ class SubscriptionRepository @Inject constructor(
             is SubscriptionUrlValidator.Result.Invalid -> return v.reason
             SubscriptionUrlValidator.Result.Valid -> {}
         }
-        val current = readCustom()
-        if (current.any { it.urls.firstOrNull() == url }) return "Эта подписка уже добавлена"
-        val updated = current + SubscriptionSource(
-            id = url,
-            name = deriveName(url),
-            urls = listOf(url),
-            enabled = true,
-            isBuiltin = false,
-        )
-        writeCustom(updated)
-        return null
+        return prefsMutex.withLock {
+            val current = readCustom()
+            if (current.any { it.urls.firstOrNull() == url }) {
+                "Эта подписка уже добавлена"
+            } else {
+                writeCustom(
+                    current + SubscriptionSource(
+                        id = url,
+                        name = deriveName(url),
+                        urls = listOf(url),
+                        enabled = true,
+                        isBuiltin = false,
+                    )
+                )
+                null
+            }
+        }
     }
 
-    suspend fun removeCustom(id: String) {
+    suspend fun removeCustom(id: String) = prefsMutex.withLock {
         writeCustom(readCustom().filterNot { it.id == id })
     }
 
-    suspend fun setEnabled(id: String, enabled: Boolean) {
+    suspend fun setEnabled(id: String, enabled: Boolean) = prefsMutex.withLock {
         val builtin = SubscriptionUrls.BUILTIN_SOURCES.firstOrNull { it.id == id }
         if (builtin != null) {
             val disabled = preferences.disabledBuiltinSources.first().toMutableSet()

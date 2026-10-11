@@ -35,32 +35,31 @@ class HandshakeProbe @Inject constructor() {
 
         try {
             val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
-            val socket = factory.createSocket() as SSLSocket
+            // use{} closes the socket on EVERY path (timeouts / connect errors included).
+            (factory.createSocket() as SSLSocket).use { socket ->
+                socket.soTimeout = HANDSHAKE_TIMEOUT_MS
 
-            socket.soTimeout = HANDSHAKE_TIMEOUT_MS
+                // Set SNI from the VLESS config (required for Reality to respond correctly)
+                val sni = extractSni(server.vlessUri)
+                if (sni.isNotEmpty()) {
+                    val params = SSLParameters()
+                    params.serverNames = listOf(SNIHostName(sni))
+                    socket.sslParameters = params
+                }
 
-            // Set SNI from the VLESS config (required for Reality to respond correctly)
-            val sni = extractSni(server.vlessUri)
-            if (sni.isNotEmpty()) {
-                val params = SSLParameters()
-                params.serverNames = listOf(SNIHostName(sni))
-                socket.sslParameters = params
-            }
+                socket.connect(InetSocketAddress(server.address, server.port), HANDSHAKE_TIMEOUT_MS)
 
-            socket.connect(InetSocketAddress(server.address, server.port), HANDSHAKE_TIMEOUT_MS)
-
-            try {
-                socket.startHandshake()
-                socket.close()
-                HandshakeResult(server.id, true)
-            } catch (e: javax.net.ssl.SSLHandshakeException) {
-                // For Reality servers, certificate validation will fail — that's OK.
-                // The fact that we got a ServerHello means XRay is running.
-                socket.close()
-                if (server.security == "reality") {
+                try {
+                    socket.startHandshake()
                     HandshakeResult(server.id, true)
-                } else {
-                    HandshakeResult(server.id, false, "tls_error: ${e.message}")
+                } catch (e: javax.net.ssl.SSLHandshakeException) {
+                    // For Reality servers, certificate validation will fail — that's OK.
+                    // The fact that we got a ServerHello means XRay is running.
+                    if (server.security == "reality") {
+                        HandshakeResult(server.id, true)
+                    } else {
+                        HandshakeResult(server.id, false, "tls_error: ${e.message}")
+                    }
                 }
             }
         } catch (e: java.net.SocketTimeoutException) {

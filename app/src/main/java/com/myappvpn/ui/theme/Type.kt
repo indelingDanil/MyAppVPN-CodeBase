@@ -117,3 +117,13 @@ val AetherTypography = Typography(
         color = AetherTextTertiary
     )
 )
+
+/**
+ * Tabular (fixed-width) digits — use for speeds, byte counters, timers and latency
+ * so numbers don't jitter as they change. Merge onto a typography style:
+ * `MaterialTheme.typography.bodyMedium.merge(AetherNumericStyle)` or `style.numeric()`.
+ */
+val AetherNumericStyle = TextStyle(fontFeatureSettings = "tnum")
+
+/** Returns this style with tabular digits enabled. */
+fun TextStyle.numeric(): TextStyle = merge(AetherNumericStyle)

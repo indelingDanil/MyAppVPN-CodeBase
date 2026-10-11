@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English translation of values/strings_settings.xml. -->
+<resources>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_connection">Connection</string>
+    <string name="settings_section_apps_network">Apps &amp; network</string>
+    <string name="settings_section_hotspot">Sharing</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_applies_next_connect">Applies on the next connection</string>
+    <string name="settings_subscriptions_title">Subscriptions</string>
+    <string name="settings_subscriptions_subtitle">Your own server sources, enable or disable them</string>
+    <string name="settings_autoconnect_title">Connect on boot</string>
+    <string name="settings_autoconnect_subtitle">Requires granting the VPN permission once</string>
+    <string name="settings_killswitch_title">Kill switch</string>
+    <string name="settings_killswitch_subtitle">Block traffic if the tunnel drops — your real IP won\'t leak</string>
+    <string name="settings_killswitch_off_warning">⚠ Off: if the tunnel drops, traffic may go directly, bypassing the VPN.</string>
+    <string name="settings_split_title">Split tunneling</string>
+    <string name="settings_split_subtitle">Choose apps that work without the VPN</string>
+    <string name="settings_split_manage_title">Choose apps</string>
+    <string name="settings_split_manage_subtitle">Which apps bypass the VPN or use only the VPN</string>
+    <string name="settings_dns_title">DNS servers</string>
+    <string name="settings_hotspot_title">Share via hotspot</string>
+    <string name="settings_hotspot_hint">The proxy is reachable only on your hotspot network: HTTP without a password, SOCKS5 with a login and password. Instructions are on the Home screen after connecting.</string>
+    <string name="settings_hotspot_guide_title">How to connect another device</string>
+    <string name="settings_hotspot_guide_subtitle">Step-by-step guide for Android, iPhone, PC and Telegram</string>
+    <string name="settings_about_version">Version</string>
+    <string name="settings_about_sources">Server sources</string>
+    <string name="settings_about_sources_value">zieng2/wl, igareck + custom</string>
+    <string name="settings_about_protocol">Protocol</string>
+
+    <!-- Split tunneling -->
+    <string name="split_title">Split tunneling</string>
+    <string name="split_subtitle_off">Off</string>
+    <plurals name="split_apps_via_vpn">
+        <item quantity="one">%d app via VPN</item>
+        <item quantity="other">%d apps via VPN</item>
+    </plurals>
+    <plurals name="split_apps_bypass_vpn">
+        <item quantity="one">%d app bypasses VPN</item>
+        <item quantity="other">%d apps bypass VPN</item>
+    </plurals>
+    <string name="split_cd_back">Back</string>
+    <string name="split_enable">Enable split tunneling</string>
+    <string name="split_mode_exclude">Exclude selected</string>
+    <string name="split_mode_include">Only selected via VPN</string>
+    <string name="split_mode_include_hint">Only the selected apps use the VPN, all others go directly</string>
+    <string name="split_mode_exclude_hint">Selected apps go directly, without the VPN</string>
+    <string name="split_include_empty_warning">No apps selected — the VPN applies to all apps</string>
+    <string name="split_search_placeholder">Search apps</string>
+    <string name="split_cd_clear_search">Clear search</string>
+    <string name="split_select_all">Select all</string>
+    <string name="split_clear_all">Clear all</string>
+    <string name="split_invert">Invert</string>
+    <string name="split_bulk_applies_to">Applies to matches: %1$d</string>
+    <string name="split_no_apps">No apps found</string>
+    <string name="split_no_search_results">Nothing found</string>
+    <string name="split_badge_via_vpn">VIA VPN</string>
+    <string name="split_badge_bypass">NO VPN</string>
+
+    <!-- Subscriptions -->
+    <string name="subs_title">Subscriptions</string>
+    <string name="subs_enabled_count">Enabled: %1$d of %2$d</string>
+    <string name="subs_cd_back">Back</string>
+    <string name="subs_intro">Add your own subscriptions (a link to a VLESS list, https://). Disabled sources are not used when searching for working servers.</string>
+    <string name="subs_add_button">Add subscription</string>
+    <string name="subs_refreshing">Updating servers…</string>
+    <string name="subs_refresh_failed">Couldn\'t update servers. Check your internet connection.</string>
+    <string name="subs_empty">No sources yet. Add a subscription link above.</string>
+    <string name="subs_none_enabled">All sources are disabled — the server list won\'t be updated.</string>
+    <string name="subs_builtin_source">Built-in source</string>
+    <string name="subs_cd_delete">Delete subscription %1$s</string>
+    <string name="subs_delete_title">Delete subscription?</string>
+    <string name="subs_delete_confirm">Delete</string>
+    <string name="subs_cancel">Cancel</string>
+    <string name="subs_disable_last_title">Disable the last source?</string>
+    <string name="subs_last_source_warning">Without sources, the server list will become empty.</string>
+    <string name="subs_disable_confirm">Disable</string>
+
+    <!-- DNS -->
+    <string name="dns_title">DNS servers</string>
+    <string name="dns_cd_back">Back</string>
+    <string name="dns_summary_default">Default (Cloudflare, Google DoH)</string>
+    <string name="dns_intro">Your own DNS servers. Queries go through the VPN tunnel. Changes apply immediately while connected.</string>
+    <string name="dns_order_hint">Order matters: servers are queried top to bottom. Up to %1$d in total, at most %2$d enabled at once.</string>
+    <string name="dns_added_disabled">Added as disabled: at most %1$d can be enabled at once</string>
+    <string name="dns_add_button">Add server</string>
+    <string name="dns_presets_label">Add:</string>
+    <string name="dns_preset_already_added">already added</string>
+    <string name="dns_list_empty">The list is empty — default servers are used (Cloudflare, Google DoH).</string>
+    <string name="dns_all_disabled">All servers are disabled — default servers are used (Cloudflare, Google DoH).</string>
+    <string name="dns_ipv6_title">IPv6 answers (AAAA)</string>
+    <string name="dns_ipv6_on">Return IPv4 and IPv6 addresses</string>
+    <string name="dns_ipv6_off">IPv4 only (recommended)</string>
+    <string name="dns_reset_button">Reset to default</string>
+    <string name="dns_limitations">Doesn\'t affect excluded apps, Android Private DNS in strict mode, or browsers\' built-in DNS.</string>
+    <string name="dns_delete_title">Delete server?</string>
+    <string name="dns_delete_confirm">Delete</string>
+    <string name="dns_cancel">Cancel</string>
+    <string name="dns_reset_title">Reset DNS?</string>
+    <string name="dns_reset_message">The list will be cleared and the default servers (Cloudflare, Google DoH) will be used. IPv6 answers will be turned off.</string>
+    <string name="dns_reset_confirm">Reset</string>
+    <string name="dns_cd_move_up">Move %1$s up</string>
+    <string name="dns_cd_move_down">Move %1$s down</string>
+    <string name="dns_cd_delete">Delete %1$s</string>
+
+    <!-- Hotspot sharing guide -->
+    <string name="hotspot_title">VPN sharing</string>
+    <string name="hotspot_cd_back">Back</string>
+    <string name="hotspot_back">Back</string>
+    <string name="hotspot_host_hint_unknown">IP from the block above</string>
+    <string name="hotspot_status_connect_first">Connect the VPN first</string>
+    <string name="hotspot_status_on_but_disabled">Sharing is active but turned off in Settings — it will stop after reconnecting</string>
+    <string name="hotspot_status_working">Sharing is active</string>
+    <string name="hotspot_status_enable_in_settings">Turn on “Share via hotspot” in Settings and reconnect</string>
+    <string name="hotspot_status_no_hotspot">Hotspot not detected. Turn on the hotspot and reconnect the VPN</string>
+    <string name="hotspot_params_title">Proxy settings</string>
+    <string name="hotspot_http_proxy">HTTP proxy</string>
+    <string name="hotspot_socks5">SOCKS5</string>
+    <string name="hotspot_auth_note">The HTTP proxy has no password. The login and password are only needed for SOCKS5.</string>
+    <string name="hotspot_login">Login</string>
+    <string name="hotspot_password">Password</string>
+    <string name="hotspot_new_password_pending">The new password applies after reconnecting the VPN.</string>
+    <string name="hotspot_change_password">Change password</string>
+    <string name="hotspot_password_change_note">A password change applies after reconnecting the VPN.</string>
+    <string name="hotspot_copied">Copied: %1$s</string>
+    <string name="hotspot_cd_copy">Copy: %1$s</string>
+    <string name="hotspot_cd_show_password">Show password</string>
+    <string name="hotspot_cd_hide_password">Hide password</string>
+    <string name="hotspot_before_title">Before you start</string>
+    <string name="hotspot_before_step1">Turn on “Share via hotspot” in Settings</string>
+    <string name="hotspot_before_step2">Turn on the hotspot on this phone</string>
+    <string name="hotspot_before_step3">Connect the VPN (after turning on the hotspot)</string>
+    <string name="hotspot_before_step4">Connect the other device to your hotspot</string>
+    <string name="hotspot_step_save">Tap “Save”</string>
+    <string name="hotspot_android_title">Android</string>
+    <string name="hotspot_android_step1">Settings → Wi-Fi</string>
+    <string name="hotspot_android_step2">Long-press your hotspot network → “Modify” (or the ⚙ icon)</string>
+    <string name="hotspot_android_step3">Open “Advanced options”</string>
+    <string name="hotspot_android_step4">Proxy → “Manual”</string>
+    <string name="hotspot_android_step5">Host: %1$s, port: %2$d</string>
+    <string name="hotspot_ios_title">iPhone / iPad</string>
+    <string name="hotspot_ios_step1">Settings → Wi-Fi</string>
+    <string name="hotspot_ios_step2">Tap (i) next to your hotspot network</string>
+    <string name="hotspot_ios_step3">At the bottom: “Configure Proxy” → “Manual”</string>
+    <string name="hotspot_ios_step4">Server: %1$s, port: %2$d</string>
+    <string name="hotspot_ios_step5">Authentication — off</string>
+    <string name="hotspot_desktop_title">Windows / macOS</string>
+    <string name="hotspot_desktop_windows">Windows: Settings → Network &amp; Internet → Proxy → “Use a proxy server” → address %1$s, port %2$d → Save</string>
+    <string name="hotspot_desktop_macos">macOS: System Settings → Wi-Fi → Details… → Proxies → “Web proxy (HTTP)” and “Secure web proxy (HTTPS)” → %1$s : %2$d → OK</string>
+    <string name="hotspot_telegram_title">Telegram (SOCKS5)</string>
+    <string name="hotspot_telegram_step1">Settings → Data and Storage → Proxy → Add Proxy</string>
+    <string name="hotspot_telegram_step2">Type: SOCKS5</string>
+    <string name="hotspot_telegram_step3">Server: %1$s, port: %2$d</string>
+    <string name="hotspot_telegram_step4">Login: %1$s, password: from the block above</string>
+    <string name="hotspot_telegram_step5">Save and enable the proxy</string>
+    <string name="hotspot_notes_title">Important</string>
+    <string name="hotspot_note_access">The proxy is available only to devices connected to your hotspot. It is protected by the hotspot password.</string>
+    <string name="hotspot_note_not_all_traffic">Not all app traffic goes through the system proxy (some games and apps ignore it).</string>
+    <string name="hotspot_note_ip_changed">If the hotspot IP changed (the hotspot was turned off), reconnect the VPN and update the settings on the other device.</string>
+    <string name="hotspot_verify_title">Check</string>
+    <string name="hotspot_verify_text">Open a browser on the other device and check your IP on 2ip.ru or whoer.net — it should match the VPN server\'s IP.</string>
+    <string name="hotspot_disable_title">How to turn off</string>
+    <string name="hotspot_disable_text">On the other device, repeat the steps above and set “Proxy” to “None” (iOS — “Off”).</string>
+</resources>

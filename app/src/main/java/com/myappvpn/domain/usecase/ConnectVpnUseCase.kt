@@ -21,8 +21,19 @@ class ConnectVpnUseCase @Inject constructor(
     companion object {
         private const val TAG = "ConnectVpnUseCase"
         private const val POOL_LIMIT = 50
-        private const val SOCKS_PORT = 10808
+        // Placeholder ports only: the service picks random free loopback ports per session and
+        // rewrites the socks/http/api inbounds (and adds hotspot inbounds / auth) in its single
+        // config chokepoint (MyVpnService.prepareConfig), so the config built here is a template.
+        private const val TEMPLATE_SOCKS_PORT = 10808
     }
+
+    /** Balancer config + metadata shared by connectAuto() and switchToAuto(). */
+    private class BalancerSpec(
+        val xrayJson: String,
+        val serverName: String,
+        val hotspotSharing: Boolean,
+        val poolIds: ArrayList<String>,
+    )
 
     /** Manual mode: connect to a single chosen server. */
     suspend operator fun invoke(server: ServerProfile) {
@@ -32,10 +43,9 @@ class ConnectVpnUseCase @Inject constructor(
             ?: throw IllegalArgumentException("Cannot parse VLESS URI for ${server.name}")
 
         val hotspotSharing = preferences.hotspotSharing.first()
-        val xrayJson = XrayConfigBuilder.build(vlessConfig, socksPort = SOCKS_PORT, listenOnAllInterfaces = hotspotSharing)
+        val xrayJson = XrayConfigBuilder.build(vlessConfig, socksPort = TEMPLATE_SOCKS_PORT)
 
         configRepository.selectServer(server.id)
-        preferences.setSelectedServerId(server.id)
 
         startService(xrayJson, server.name, hotspotSharing, balancerMode = false)
     }
@@ -45,10 +55,33 @@ class ConnectVpnUseCase @Inject constructor(
      * pool and let Xray pick/seamlessly switch the active server in-core.
      */
     suspend fun connectAuto() {
+        val spec = buildBalancerSpec()
+        if (com.myappvpn.BuildConfig.DEBUG) Log.i(TAG, "Connecting (auto/balancer) with ${spec.poolIds.size} servers")
+        startService(spec.xrayJson, spec.serverName, spec.hotspotSharing, balancerMode = true, poolIds = spec.poolIds)
+    }
+
+    /**
+     * Live switch Manual → Auto under the running TUN: the service swaps the single outbound for
+     * the balancer config without tearing the tunnel down. Same config as connectAuto().
+     */
+    suspend fun switchToAuto() {
+        val spec = buildBalancerSpec()
+        if (com.myappvpn.BuildConfig.DEBUG) Log.i(TAG, "Switching to auto/balancer with ${spec.poolIds.size} servers")
+        val intent = Intent(context, MyVpnService::class.java).apply {
+            action = MyVpnService.ACTION_SWITCH_AUTO
+            putExtra(MyVpnService.EXTRA_XRAY_CONFIG, spec.xrayJson)
+            putExtra(MyVpnService.EXTRA_SERVER_NAME, spec.serverName)
+            putExtra(MyVpnService.EXTRA_HOTSPOT_SHARING, spec.hotspotSharing)
+            putStringArrayListExtra(MyVpnService.EXTRA_POOL_IDS, spec.poolIds)
+        }
+        context.startService(intent)
+    }
+
+    private suspend fun buildBalancerSpec(): BalancerSpec {
         val excluded = preferences.excludedCountries.first()
         val candidates = configRepository.getServersExcludingCountries(excluded)
         if (candidates.isEmpty()) {
-            throw IllegalStateException("No servers available (check subscription / country filter)")
+            throw IllegalStateException("Нет доступных серверов (проверьте подписки / фильтр стран)")
         }
 
         // Candidates already come ordered by latency (DB sort). Take the top N WITHOUT a
@@ -60,16 +93,14 @@ class ConnectVpnUseCase @Inject constructor(
         // real server id (mapNotNull alone would desync indices when a server fails to parse).
         val pairs = pool.mapNotNull { sp -> VlessUriParser.parse(sp.vlessUri)?.let { sp to it } }
         if (pairs.isEmpty()) {
-            throw IllegalStateException("No parseable servers in pool")
+            throw IllegalStateException("Нет корректных серверов в пуле")
         }
         val configs = pairs.map { it.second }
         val poolIds = ArrayList(pairs.map { it.first.id })   // index == proxy-N
 
-        if (com.myappvpn.BuildConfig.DEBUG) Log.i(TAG, "Connecting (auto/balancer) with ${configs.size} servers")
         val hotspotSharing = preferences.hotspotSharing.first()
-        val xrayJson = XrayConfigBuilder.buildBalancer(configs, socksPort = SOCKS_PORT, listenOnAllInterfaces = hotspotSharing)
-
-        startService(xrayJson, "Авто • ${configs.size} серверов", hotspotSharing, balancerMode = true, poolIds = poolIds)
+        val xrayJson = XrayConfigBuilder.buildBalancer(configs, socksPort = TEMPLATE_SOCKS_PORT)
+        return BalancerSpec(xrayJson, "Авто • ${configs.size} серверов", hotspotSharing, poolIds)
     }
 
     private fun startService(
@@ -82,7 +113,6 @@ class ConnectVpnUseCase @Inject constructor(
         val intent = Intent(context, MyVpnService::class.java).apply {
             action = MyVpnService.ACTION_CONNECT
             putExtra(MyVpnService.EXTRA_XRAY_CONFIG, xrayJson)
-            putExtra(MyVpnService.EXTRA_SOCKS_PORT, SOCKS_PORT)
             putExtra(MyVpnService.EXTRA_SERVER_NAME, serverName)
             putExtra(MyVpnService.EXTRA_HOTSPOT_SHARING, hotspotSharing)
             putExtra(MyVpnService.EXTRA_BALANCER_MODE, balancerMode)

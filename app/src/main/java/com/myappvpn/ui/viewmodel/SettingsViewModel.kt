@@ -1,15 +1,17 @@
 package com.myappvpn.ui.viewmodel
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.myappvpn.data.datastore.AppPreferences
+import com.myappvpn.service.MyVpnService
+import com.myappvpn.service.VpnState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class AppInfo(
@@ -24,32 +26,37 @@ class SettingsViewModel @Inject constructor(
     private val preferences: AppPreferences
 ) : ViewModel() {
 
-    val autoConnect: StateFlow<Boolean> = preferences.autoConnect
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
+    // Nullable initial values: null = DataStore not loaded yet. The UI renders a placeholder
+    // instead of a hardcoded default that would visibly flip a moment after the screen opens.
+    val autoConnect: StateFlow<Boolean?> = preferences.autoConnect
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val hotspotSharing: StateFlow<Boolean> = preferences.hotspotSharing
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
+    val hotspotSharing: StateFlow<Boolean?> = preferences.hotspotSharing
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val splitTunnelEnabled: StateFlow<Boolean> = preferences.splitTunnelEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
+    val splitTunnelEnabled: StateFlow<Boolean?> = preferences.splitTunnelEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val killSwitchEnabled: StateFlow<Boolean?> = preferences.killSwitchEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val excludedApps: StateFlow<Set<String>> = preferences.excludedApps
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptySet())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    val dnsPrimary: StateFlow<String> = preferences.dnsPrimary
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), "1.1.1.1")
+    /** "EXCLUDE" (selected apps bypass VPN) or "INCLUDE" (only selected apps via VPN). */
+    val splitTunnelMode: StateFlow<String> = preferences.splitTunnelMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppPreferences.SPLIT_MODE_EXCLUDE)
 
-    val dnsSecondary: StateFlow<String> = preferences.dnsSecondary
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), "8.8.8.8")
-
-    val socksPort: StateFlow<Int> = preferences.socksPort
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), 10808)
-
-    val killSwitchEnabled: StateFlow<Boolean> = preferences.killSwitchEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), true)
+    /** Used to hint that connection-time settings apply on the next connect. */
+    val vpnState: StateFlow<VpnState> = MyVpnService.vpnState
 
     private val _installedApps = MutableStateFlow<List<AppInfo>>(emptyList())
     val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
+
+    // True until the first installed-apps scan completes (distinguishes "loading" from "empty").
+    private val _appsLoading = MutableStateFlow(true)
+    val appsLoading: StateFlow<Boolean> = _appsLoading.asStateFlow()
+    private var appsLoadStarted = false
 
     // Split-tunnel app search
     private val _searchQuery = MutableStateFlow("")
@@ -62,22 +69,35 @@ class SettingsViewModel @Inject constructor(
                 it.appName.contains(q, ignoreCase = true) ||
                     it.packageName.contains(q, ignoreCase = true)
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
     fun loadInstalledApps() {
+        if (appsLoadStarted) return
+        appsLoadStarted = true
+        _appsLoading.value = true
         viewModelScope.launch {
-            val excluded = preferences.excludedApps.first()
+            try {
+                loadInstalledAppsInternal()
+            } finally {
+                _appsLoading.value = false
+            }
+        }
+    }
+
+    private suspend fun loadInstalledAppsInternal() {
+        val excluded = preferences.excludedApps.first()
+        // PackageManager IPC per app (launch intent + label) — must stay off Main,
+        // otherwise devices with hundreds of apps freeze / ANR on opening the screen.
+        val apps = withContext(Dispatchers.Default) {
             val pm = context.packageManager
-            val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            pm.getInstalledApplications(0)
+                .asSequence()
                 .filter { app ->
                     // Show only apps with launcher intent (user-visible apps)
-                    pm.getLaunchIntentForPackage(app.packageName) != null &&
-                    app.packageName != context.packageName
-                }
-                .sortedBy { app ->
-                    pm.getApplicationLabel(app).toString()
+                    app.packageName != context.packageName &&
+                        pm.getLaunchIntentForPackage(app.packageName) != null
                 }
                 .map { app ->
                     AppInfo(
@@ -86,9 +106,41 @@ class SettingsViewModel @Inject constructor(
                         isExcluded = app.packageName in excluded
                     )
                 }
-            _installedApps.value = apps
+                .sortedBy { it.appName.lowercase() }
+                .toList()
         }
+        _installedApps.value = apps
     }
+
+    fun setSplitTunnelMode(mode: String) = viewModelScope.launch {
+        preferences.setSplitTunnelMode(mode)
+    }
+
+    /** Select every app in the current (search-filtered) list. */
+    fun selectAllFiltered() = updateSelection { current, filtered -> current + filtered }
+
+    /** Deselect only the apps in the current (search-filtered) list. */
+    fun clearAllFiltered() = updateSelection { current, filtered -> current - filtered }
+
+    /** Flip selection of every app in the current (search-filtered) list. */
+    fun invertFiltered() = updateSelection { current, filtered ->
+        val selectedInFiltered = filtered intersect current
+        (current - selectedInFiltered) + (filtered - selectedInFiltered)
+    }
+
+    /** One read + one DataStore write, so the service rebuilds the TUN once (debounced). */
+    private fun updateSelection(transform: (Set<String>, Set<String>) -> Set<String>) =
+        viewModelScope.launch {
+            val filtered = filteredApps.value.mapTo(HashSet()) { it.packageName }
+            if (filtered.isEmpty()) return@launch
+            val current = preferences.excludedApps.first()
+            val updated = transform(current, filtered)
+            if (updated == current) return@launch
+            if (updated.isNotEmpty() && !preferences.splitTunnelEnabled.first()) {
+                preferences.setSplitTunnelEnabled(true)
+            }
+            preferences.setExcludedApps(updated)
+        }
 
     fun toggleAppExclusion(packageName: String) {
         viewModelScope.launch {
@@ -120,17 +172,5 @@ class SettingsViewModel @Inject constructor(
 
     fun setSplitTunnelEnabled(value: Boolean) = viewModelScope.launch {
         preferences.setSplitTunnelEnabled(value)
-    }
-
-    fun setDnsPrimary(dns: String) = viewModelScope.launch {
-        preferences.setDnsPrimary(dns)
-    }
-
-    fun setDnsSecondary(dns: String) = viewModelScope.launch {
-        preferences.setDnsSecondary(dns)
-    }
-
-    fun setSocksPort(port: Int) = viewModelScope.launch {
-        preferences.setSocksPort(port)
     }
 }

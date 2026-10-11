@@ -5,7 +5,7 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "servers")
 data class ServerProfile(
-    @PrimaryKey val id: String,         // hash of vlessUri
+    @PrimaryKey val id: String,         // VlessUriParser.stableId: md5 of normalized identity (no #name)
     val name: String,                   // e.g. "🇩🇪 DE #12"
     val flag: String,                   // country flag emoji
     val country: String,                // "Germany", "Russia", etc.

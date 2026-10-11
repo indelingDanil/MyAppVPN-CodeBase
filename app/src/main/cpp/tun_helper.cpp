@@ -119,29 +119,66 @@ Java_com_myappvpn_util_NativeHelper_startTun2Socks(
 }
 
 /**
- * Send SIGTERM to a process and reap the zombie.
+ * Stop a process and reap it (no zombies left behind):
+ * SIGTERM → poll waitpid(WNOHANG) for up to ~1s (20 × 50ms) → SIGKILL + blocking waitpid.
+ * Handles ECHILD (not our child / already reaped elsewhere) by falling back to kill(pid, 0).
  */
 JNIEXPORT void JNICALL
 Java_com_myappvpn_util_NativeHelper_killProcess(
         JNIEnv */*env*/, jclass /*cls*/, jint pid)
 {
-    if (pid > 0) {
-        kill((pid_t)pid, SIGTERM);
-        waitpid((pid_t)pid, nullptr, WNOHANG);
-        LOGI("Sent SIGTERM to pid=%d", pid);
+    if (pid <= 0) return;
+    const pid_t p = (pid_t)pid;
+    int status = 0;
+
+    if (kill(p, SIGTERM) == -1 && errno == ESRCH) {
+        // Fully gone already (no zombie either); nothing to reap.
+        LOGI("pid=%d already exited", pid);
+        return;
     }
+    LOGI("Sent SIGTERM to pid=%d", pid);
+
+    for (int i = 0; i < 20; i++) {
+        pid_t r = waitpid(p, &status, WNOHANG);
+        if (r == p) {
+            LOGI("pid=%d exited after SIGTERM", pid);
+            return;
+        }
+        if (r == -1) {
+            if (errno == EINTR) continue;
+            // ECHILD (or other): we can't reap it — just check whether it still exists.
+            if (kill(p, 0) == -1) return;
+        }
+        usleep(50 * 1000);
+    }
+
+    LOGE("pid=%d ignored SIGTERM for ~1s — sending SIGKILL", pid);
+    kill(p, SIGKILL);
+    while (waitpid(p, &status, 0) == -1 && errno == EINTR) { /* retry */ }
 }
 
 /**
- * Returns true if the process is still running.
- * Uses kill(pid, 0) which succeeds if the process exists.
+ * Returns true if the process is still running. Zombies count as NOT running:
+ * waitpid(WNOHANG) reaps an exited child (→ false); 0 means still running (→ true).
+ * If it isn't our child (ECHILD), fall back to kill(pid, 0).
+ * NOTE: once this returns false for our child, the pid has been reaped and may be reused —
+ * the caller must forget it.
  */
 JNIEXPORT jboolean JNICALL
 Java_com_myappvpn_util_NativeHelper_isProcessAlive(
         JNIEnv */*env*/, jclass /*cls*/, jint pid)
 {
     if (pid <= 0) return JNI_FALSE;
-    return (kill((pid_t)pid, 0) == 0) ? JNI_TRUE : JNI_FALSE;
+    const pid_t p = (pid_t)pid;
+    int status = 0;
+    pid_t r;
+    do {
+        r = waitpid(p, &status, WNOHANG);
+    } while (r == -1 && errno == EINTR);
+    if (r == p) return JNI_FALSE;   // exited and reaped just now
+    if (r == 0) return JNI_TRUE;    // our child, still running
+    // r == -1 (ECHILD etc.): not our child — best effort existence check.
+    return (kill(p, 0) == 0) ? JNI_TRUE : JNI_FALSE;
 }
 
 } // extern "C"

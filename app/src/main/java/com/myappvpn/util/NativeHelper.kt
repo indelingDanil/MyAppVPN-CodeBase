@@ -11,9 +11,15 @@ object NativeHelper {
         proxyUser: String? = null, proxyPass: String? = null
     ): Int
 
-    /** Send SIGTERM to a process. */
+    /**
+     * SIGTERM, wait up to ~1s, then SIGKILL; always reaps the child. BLOCKING (up to ~1s+) —
+     * don't call on the main thread.
+     */
     @JvmStatic external fun killProcess(pid: Int)
 
-    /** Returns true if the process is still running. */
+    /**
+     * Returns true if the process is still running (zombies → false). Reaps an exited child,
+     * so after a false result the pid must be forgotten (it may be reused).
+     */
     @JvmStatic external fun isProcessAlive(pid: Int): Boolean
 }

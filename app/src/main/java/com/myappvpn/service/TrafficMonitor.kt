@@ -2,6 +2,7 @@ package com.myappvpn.service
 
 import android.content.Context
 import android.net.TrafficStats
+import android.os.Process
 import com.myappvpn.data.model.TrafficStats as TrafficStatsModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -100,13 +101,18 @@ class TrafficMonitor @Inject constructor(
         )
     }
 
+    // Our UID only: Xray and tun2socks run as child processes under the app UID and carry the
+    // tunneled traffic exactly once on the upstream side. Device totals (getTotal*) counted both
+    // the TUN and the physical interface (~2x) plus traffic of apps excluded from the tunnel.
+    private val myUid = Process.myUid()
+
     private fun totalTxBytes(): Long {
-        val v = TrafficStats.getTotalTxBytes()
-        return if (v == TrafficStats.UNSUPPORTED.toLong()) 0L else v
+        val v = TrafficStats.getUidTxBytes(myUid)
+        return if (v == TrafficStats.UNSUPPORTED.toLong() || v < 0) 0L else v
     }
 
     private fun totalRxBytes(): Long {
-        val v = TrafficStats.getTotalRxBytes()
-        return if (v == TrafficStats.UNSUPPORTED.toLong()) 0L else v
+        val v = TrafficStats.getUidRxBytes(myUid)
+        return if (v == TrafficStats.UNSUPPORTED.toLong() || v < 0) 0L else v
     }
 }
