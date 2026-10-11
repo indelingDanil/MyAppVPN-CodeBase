@@ -111,6 +111,27 @@ object DnsConfigInjector {
         return root.toString(2)
     }
 
+    /**
+     * Restrict [dns] to resolvers reachable through an exit that only does TCP CONNECT to
+     * 80/443 (OpenFlux bridge): keeps DoH (`https://…`) entries on port 443 (no explicit port
+     * or `:443`); drops plain UDP/TCP and DoH on other ports. Empty result → the built-in
+     * default ([DnsPresets.DEFAULT_SERVERS], Cloudflare + Google DoH). hosts / queryStrategy kept.
+     */
+    fun restrictToDoh443(dns: EffectiveDns): EffectiveDns {
+        val kept = dns.servers.filter { isDoh443(it) }
+        if (kept.size == dns.servers.size) return dns
+        val servers = kept.ifEmpty { DnsPresets.DEFAULT_SERVERS.map { XrayDnsEntry(it) } }
+        return dns.copy(servers = servers)
+    }
+
+    private fun isDoh443(e: XrayDnsEntry): Boolean {
+        if (e.port != null) return false   // object form = plain UDP on a custom port
+        val a = e.address.trim()
+        if (!a.lowercase().startsWith("https://")) return false
+        val port = try { java.net.URI(a).port } catch (_: Exception) { return false }
+        return port == -1 || port == 443
+    }
+
     /** Tag of the first VLESS outbound ("proxy" in XrayConfigBuilder.build); fallback "proxy". */
     private fun findProxyOutboundTag(root: JSONObject): String {
         val outs = root.optJSONArray("outbounds") ?: return "proxy"

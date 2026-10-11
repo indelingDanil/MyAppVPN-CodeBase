@@ -19,6 +19,9 @@ fun AppNavGraph(navController: NavHostController) {
                 },
                 onNavigateToHotspotSetup = {
                     navController.navigate(Screen.HotspotSetup.route) { launchSingleTop = true }
+                },
+                onNavigateToOpenFlux = {
+                    navController.navigate(Screen.OpenFlux.route) { launchSingleTop = true }
                 }
             )
         }
@@ -52,7 +55,16 @@ fun AppNavGraph(navController: NavHostController) {
                 },
                 onNavigateToHotspotSetup = {
                     navController.navigate(Screen.HotspotSetup.route) { launchSingleTop = true }
+                },
+                onNavigateToOpenFlux = {
+                    navController.navigate(Screen.OpenFlux.route) { launchSingleTop = true }
                 }
+            )
+        }
+
+        composable(Screen.OpenFlux.route) {
+            OpenFluxScreen(
+                onBack = { navController.popBackStack() }
             )
         }
 

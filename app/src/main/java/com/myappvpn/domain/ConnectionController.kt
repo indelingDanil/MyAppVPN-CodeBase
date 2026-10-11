@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -43,7 +44,16 @@ class ConnectionController @Inject constructor(
 ) {
     private companion object {
         const val TAG = "ConnectionController"
+        // Reconnect (mode change to/from OpenFlux): max wait for the old session's teardown.
+        const val RECONNECT_TEARDOWN_TIMEOUT_MS = 10_000L
+        // Reconnect while the old connect is only pending: max wait for it to become visible.
+        const val PENDING_CONNECT_WAIT_MS = 3_000L
+        const val MSG_LEAVE_OPENFLUX_NO_SERVERS =
+            "Нет доступных серверов для выбранного режима — OpenFlux остаётся активным"
     }
+
+    /** Outcome of [leaveOpenFlux]. */
+    private enum class Leave { NOT_INVOLVED, LEFT, ABORTED }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
@@ -56,6 +66,8 @@ class ConnectionController @Inject constructor(
     val errors: Flow<String> = _errors.receiveAsFlow()
 
     init {
+        // One-time: move a demo URL/token stored by older versions to the openfluxDemo flag.
+        scope.launch { OpenFluxEndpoint.migrateOnce(preferences) }
         scope.launch {
             for (op in ops) {
                 try {
@@ -78,6 +90,7 @@ class ConnectionController @Inject constructor(
     private sealed interface Target {
         object Auto : Target
         data class Server(val id: String) : Target
+        object OpenFlux : Target
     }
 
     // Our own last request to the live session. The service applies queued switches later, so
@@ -114,11 +127,108 @@ class ConnectionController @Inject constructor(
     private fun currentTarget(): Target? = lastRequested ?: when (MyVpnService.activeMode.value) {
         ActiveMode.AUTO -> Target.Auto
         ActiveMode.MANUAL -> MyVpnService.connectedServer.value?.id?.let { Target.Server(it) }
+        ActiveMode.OPENFLUX -> Target.OpenFlux
         null -> null
+    }
+
+    private fun hasOpenFluxSession(): Boolean = hasSession() && currentTarget() == Target.OpenFlux
+
+    /**
+     * Full reconnect into the CURRENTLY STORED mode (OpenFlux can't be hot-switched — it is a
+     * different process chain): disconnect, wait for DISCONNECTED/ERROR (bounded), connect.
+     * Caller holds [mutex].
+     */
+    private suspend fun reconnectLocked() {
+        Log.i(TAG, "Reconnecting to apply the connection mode")
+        // The old session may only be "pending" (CONNECT sent, service hasn't published
+        // CONNECTING yet). Waiting for DISCONNECTED/ERROR would then return at once and the new
+        // CONNECT could race the old one — first let the old connect become visible (bounded).
+        val st = MyVpnService.vpnState.value
+        if (connectPendingSince != 0L && (st == VpnState.DISCONNECTED || st == VpnState.ERROR)) {
+            val left = withTimeoutOrNull(PENDING_CONNECT_WAIT_MS) {
+                MyVpnService.vpnState.first { it != VpnState.DISCONNECTED && it != VpnState.ERROR }
+            }
+            if (left == null) Log.w(TAG, "Pending connect not visible within ${PENDING_CONNECT_WAIT_MS}ms — reconnecting anyway")
+        }
+        connectPendingSince = 0L
+        lastRequested = null
+        connectVpnUseCase.disconnect()
+        val done = withTimeoutOrNull(RECONNECT_TEARDOWN_TIMEOUT_MS) {
+            MyVpnService.vpnState.first { it == VpnState.DISCONNECTED || it == VpnState.ERROR }
+        }
+        // On timeout still connect: the service queues a CONNECT behind an in-flight teardown.
+        if (done == null) Log.w(TAG, "Teardown not confirmed within ${RECONNECT_TEARDOWN_TIMEOUT_MS}ms — connecting anyway")
+        connectLocked()
+    }
+
+    /**
+     * Leaving OpenFlux for Auto/Manual: turn the OpenFlux pref off.
+     *  - [Leave.NOT_INVOLVED]: OpenFlux pref off and no OpenFlux session — hot-switch as usual.
+     *  - [Leave.LEFT]: pref turned off — the caller stores its mode and reconnects instead of
+     *    hot-switching (the service ignores switches in OpenFlux).
+     *  - [Leave.ABORTED]: a live OpenFlux session exists but [targetReady] says the target mode
+     *    can't connect — nothing changed (OpenFlux stays on, tunnel kept); the caller stores its
+     *    mode prefs and reports [MSG_LEAVE_OPENFLUX_NO_SERVERS].
+     */
+    private suspend fun leaveOpenFlux(targetReady: suspend () -> Boolean): Leave {
+        val enabled = preferences.openfluxEnabled.first()
+        if (!enabled && !hasOpenFluxSession()) return Leave.NOT_INVOLVED
+        if (hasOpenFluxSession() && !targetReady()) {
+            Log.w(TAG, "Leave OpenFlux aborted — target mode has no servers")
+            return Leave.ABORTED
+        }
+        if (enabled) preferences.setOpenfluxEnabled(false)
+        MyVpnService.clearOpenFluxStatus()
+        return Leave.LEFT
+    }
+
+    /** Cheap pre-check: Auto has at least one candidate server. */
+    private suspend fun autoHasCandidates(): Boolean =
+        configRepository.getServersExcludingCountries(preferences.excludedCountries.first()).isNotEmpty()
+
+    /** Cheap pre-check: the STORED Auto/Manual mode can connect (used when leaving OpenFlux). */
+    private suspend fun storedModeReady(): Boolean =
+        if (preferences.autoMode.first()) autoHasCandidates()
+        else configRepository.getSelectedServer() != null
+
+    /**
+     * OpenFlux (Beta) on/off. Writes the pref; with a live session, reconnects so the change
+     * applies (enabling always reconnects — that also re-applies an edited URL/token; disabling
+     * reconnects only if the live session is OpenFlux).
+     * @throws IllegalStateException (via [errors]) when enabling during a session without URL/token
+     *         — checked BEFORE anything changes, so the running tunnel isn't dropped.
+     */
+    fun setOpenFluxEnabled(enabled: Boolean) = enqueue {
+        // Effective config (the demo exit counts as complete).
+        if (enabled && hasSession() && !OpenFluxEndpoint.resolve(preferences).complete) {
+            throw IllegalStateException("Укажите адрес и токен OpenFlux")
+        }
+        // Disabling during a live OpenFlux session: verify the stored mode can connect BEFORE
+        // anything changes, so the tunnel isn't dropped into "no servers" (pref stays on).
+        if (!enabled && hasOpenFluxSession() && !storedModeReady()) {
+            throw IllegalStateException(MSG_LEAVE_OPENFLUX_NO_SERVERS)
+        }
+        preferences.setOpenfluxEnabled(enabled)
+        // Leaving OpenFlux: a kept refusal reason (busy / expired / …) is no longer relevant.
+        if (!enabled) MyVpnService.clearOpenFluxStatus()
+        if (hasSession() && (enabled || currentTarget() == Target.OpenFlux)) reconnectLocked()
     }
 
     /** Switch to Auto (balancer). Live-applies under the running tunnel if there is one. */
     fun setAuto() = enqueue {
+        when (leaveOpenFlux { autoHasCandidates() }) {
+            Leave.LEFT -> {
+                preferences.setAutoMode(true)
+                if (hasOpenFluxSession()) reconnectLocked()
+                return@enqueue
+            }
+            Leave.ABORTED -> {
+                preferences.setAutoMode(true)
+                _errors.trySend(MSG_LEAVE_OPENFLUX_NO_SERVERS)
+                return@enqueue
+            }
+            Leave.NOT_INVOLVED -> Unit
+        }
         if (hasSession() && currentTarget() != Target.Auto) {
             // Builds the balancer spec first — throws (no servers…) BEFORE the pref is written,
             // so a failed switch can't leave "Авто" stored while the tunnel stays manual.
@@ -133,6 +243,21 @@ class ConnectionController @Inject constructor(
         if (VlessUriParser.parse(server.vlessUri) == null) {
             throw IllegalStateException("Не удаётся разобрать конфигурацию сервера ${server.name}")
         }
+        when (leaveOpenFlux { configRepository.getServerById(server.id) != null }) {
+            Leave.LEFT -> {
+                preferences.setAutoMode(false)
+                configRepository.selectServer(server.id)
+                if (hasOpenFluxSession()) reconnectLocked()
+                return@enqueue
+            }
+            Leave.ABORTED -> {
+                // The server vanished (e.g. subscription refresh): the pin can't be stored, and
+                // storing Manual without a pin would only make the next connect fail.
+                _errors.trySend(MSG_LEAVE_OPENFLUX_NO_SERVERS)
+                return@enqueue
+            }
+            Leave.NOT_INVOLVED -> Unit
+        }
         val target = Target.Server(server.id)
         if (hasSession() && currentTarget() != target) {
             connectVpnUseCase.switchServer(server.id)
@@ -144,10 +269,18 @@ class ConnectionController @Inject constructor(
 
     /**
      * Start a new session in the stored mode. Caller must have obtained VPN permission.
-     * @throws IllegalStateException when in Manual mode with no pinned server, or no servers.
+     * @throws IllegalStateException when in Manual mode with no pinned server, or no servers,
+     *         or in OpenFlux mode without URL/token.
      */
-    suspend fun connect() = mutex.withLock {
-        if (preferences.autoMode.first()) {
+    suspend fun connect() = mutex.withLock { connectLocked() }
+
+    /** Body of [connect]; caller holds [mutex]. OpenFlux (if enabled) wins over Auto/Manual. */
+    private suspend fun connectLocked() {
+        if (preferences.openfluxEnabled.first()) {
+            // Validates URL/token itself ("Укажите адрес и токен OpenFlux").
+            connectVpnUseCase.connectOpenFlux()
+            lastRequested = Target.OpenFlux
+        } else if (preferences.autoMode.first()) {
             connectVpnUseCase.connectAuto()
             lastRequested = Target.Auto
         } else {

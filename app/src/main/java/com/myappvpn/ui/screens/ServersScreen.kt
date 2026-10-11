@@ -59,6 +59,7 @@ fun ServersScreen(
     val autoMode by viewModel.autoMode.collectAsStateWithLifecycle()
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
     val activeServer by viewModel.activeServer.collectAsStateWithLifecycle()
+    val openfluxEnabled by viewModel.openfluxEnabled.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
@@ -67,7 +68,8 @@ fun ServersScreen(
     val listState = rememberLazyListState()
 
     // Pinned check only in Manual mode (in Auto the Room pin isn't what's being used).
-    val showPin = autoMode == false
+    // (Not in OpenFlux mode either — the list isn't used then.)
+    val showPin = autoMode == false && !openfluxEnabled
     val activeId = activeServer?.id?.takeIf { vpnState == VpnState.CONNECTED }
     val excludeRussia = "Russia" in excludedCountries
 
@@ -123,6 +125,15 @@ fun ServersScreen(
                         onClick = { viewModel.refreshServers() },
                         color = AetherCyan
                     )
+                }
+
+                // OpenFlux (Beta) mode: the list below isn't used until it's turned off
+                // (tapping a server still works — the controller leaves OpenFlux and pins).
+                AnimatedVisibility(visible = openfluxEnabled) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OpenFluxBanner(onDisable = { viewModel.disableOpenFlux() })
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -252,7 +263,7 @@ fun ServersScreen(
                     // Auto mode is always the first choice.
                     item(key = "__auto__") {
                         AutoModeCard(
-                            checked = autoMode == true,
+                            checked = autoMode == true && !openfluxEnabled,
                             onClick = {
                                 viewModel.selectAuto()
                                 onServerSelected()
@@ -503,6 +514,39 @@ private fun EmptyServersState(searching: Boolean, refreshEnabled: Boolean, onRef
             modifier = Modifier.heightIn(min = 48.dp)
         ) {
             Text(text = stringResource(R.string.servers_refresh), color = AetherCyan)
+        }
+    }
+}
+
+@Composable
+private fun OpenFluxBanner(onDisable: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(AetherPurple.copy(alpha = 0.16f))
+            .border(1.dp, AetherPurple.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(text = "🧪", fontSize = 18.sp, modifier = Modifier.clearAndSetSemantics { })
+        Text(
+            text = stringResource(R.string.openflux_servers_banner),
+            color = AetherTextPrimary,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(
+            onClick = onDisable,
+            modifier = Modifier.heightIn(min = 48.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.openflux_turn_off),
+                color = AetherCyan,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
         }
     }
 }

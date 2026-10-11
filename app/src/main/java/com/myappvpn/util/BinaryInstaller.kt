@@ -19,6 +19,8 @@ object BinaryInstaller {
     // Generic binary names — not identifiable as VPN tools by other apps
     private const val XRAY_BINARY = "libcore.so"
     private const val TUN2SOCKS_BINARY = "libnetstack.so"
+    // OpenFlux (Beta) local SOCKS5 bridge to the user's PHP exit (Go executable, arm64 only).
+    private const val OPENFLUX_BRIDGE_BINARY = "libofbridge.so"
 
     /**
      * Returns path to xray executable (from nativeLibraryDir).
@@ -38,6 +40,14 @@ object BinaryInstaller {
         val nativeDir = context.applicationInfo.nativeLibraryDir
         val tun2socksBin = File(nativeDir, TUN2SOCKS_BINARY)
         return tun2socksBin.absolutePath
+    }
+
+    /**
+     * Returns path to the OpenFlux bridge executable (from nativeLibraryDir).
+     */
+    fun getOpenFluxBridgePath(context: Context): String {
+        val nativeDir = context.applicationInfo.nativeLibraryDir
+        return File(nativeDir, OPENFLUX_BRIDGE_BINARY).absolutePath
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.myappvpn.ui.screens
 
 import android.app.Activity
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -37,17 +39,21 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myappvpn.R
 import com.myappvpn.data.model.ServerProfile
+import com.myappvpn.service.MyVpnService
 import com.myappvpn.service.VpnState
 import com.myappvpn.ui.components.*
 import com.myappvpn.ui.theme.*
 import com.myappvpn.ui.viewmodel.HomeViewModel
+import com.myappvpn.ui.viewmodel.OpenFluxConfig
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     onNavigateToServers: () -> Unit,
-    onNavigateToHotspotSetup: () -> Unit = {}
+    onNavigateToHotspotSetup: () -> Unit = {},
+    onNavigateToOpenFlux: () -> Unit = {}
 ) {
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
     val trafficStats by viewModel.trafficStats.collectAsStateWithLifecycle()
@@ -56,6 +62,37 @@ fun HomeScreen(
     val activeServer by viewModel.activeServer.collectAsStateWithLifecycle()
     val switching by viewModel.switching.collectAsStateWithLifecycle()
     val hotspotInfo by viewModel.hotspotInfo.collectAsStateWithLifecycle()
+    val openfluxEnabled by viewModel.openfluxEnabled.collectAsStateWithLifecycle()
+    val openfluxHost by viewModel.openfluxHost.collectAsStateWithLifecycle()
+    val openfluxIsDemo by viewModel.openfluxIsDemo.collectAsStateWithLifecycle()
+    val openFluxStatus by viewModel.openFluxStatus.collectAsStateWithLifecycle()
+    val demoLeftSec by viewModel.openFluxDemoLeftSec.collectAsStateWithLifecycle()
+    val demoLeftMb by viewModel.openFluxDemoLeftMb.collectAsStateWithLifecycle()
+    val openFluxStatusRes = OpenFluxConfig.statusMessageRes(openFluxStatus)
+    val connectedViaOpenFlux = vpnState == VpnState.CONNECTED &&
+        activeServer?.id == OpenFluxConfig.SYNTHETIC_SERVER_ID
+    // Demo trial left: seconds as reported (at session start) minus the time since then,
+    // re-evaluated every 30 s; MB as reported.
+    var nowElapsed by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(connectedViaOpenFlux, openfluxIsDemo, demoLeftSec) {
+        while (connectedViaOpenFlux && openfluxIsDemo && demoLeftSec != null) {
+            nowElapsed = SystemClock.elapsedRealtime()
+            delay(30_000L)
+        }
+    }
+    val demoLeftText: String? = if (connectedViaOpenFlux && openfluxIsDemo) {
+        val minutes = demoLeftSec?.let { sec ->
+            val elapsedSec = ((nowElapsed - MyVpnService.openFluxDemoLeftSecAt) / 1000L).coerceAtLeast(0L)
+            ((sec - elapsedSec).coerceAtLeast(0L) + 59L) / 60L
+        }?.toInt()
+        val mb = demoLeftMb
+        when {
+            minutes != null && mb != null -> stringResource(R.string.openflux_demo_left, minutes, mb)
+            minutes != null -> stringResource(R.string.openflux_demo_left_min, minutes)
+            mb != null -> stringResource(R.string.openflux_demo_left_mb, mb)
+            else -> null
+        }
+    } else null
     // Last non-null value, so the banner keeps its content while the exit animation runs.
     var lastHotspotInfo by remember { mutableStateOf(hotspotInfo) }
     if (hotspotInfo != null && hotspotInfo != lastHotspotInfo) lastHotspotInfo = hotspotInfo
@@ -83,6 +120,20 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         viewModel.error.collectLatest { message ->
             snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    // OpenFlux refusal: snackbar once when a reason first appears (saveable → not repeated when
+    // coming back to Home; reset once the reason is cleared so a new refusal shows again).
+    val openFluxStatusMsg = openFluxStatusRes?.let { stringResource(it) }
+    var snackedOpenFluxStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(openFluxStatus) {
+        val s = openFluxStatus
+        if (s == null) {
+            snackedOpenFluxStatus = null
+        } else if (s != snackedOpenFluxStatus && openFluxStatusMsg != null) {
+            snackedOpenFluxStatus = s
+            snackbarHostState.showSnackbar(openFluxStatusMsg, duration = SnackbarDuration.Long)
         }
     }
 
@@ -170,6 +221,11 @@ fun HomeScreen(
                     activeServer = activeServer,
                     vpnState = vpnState,
                     switching = switching,
+                    openfluxEnabled = openfluxEnabled,
+                    openfluxHost = openfluxHost,
+                    openfluxIsDemo = openfluxIsDemo,
+                    demoLeftText = demoLeftText,
+                    onDisableOpenFlux = { viewModel.disableOpenFlux() },
                     onSelectAuto = { viewModel.setAuto() },
                     onSelectManual = {
                         val pin = pinnedServer
@@ -177,6 +233,26 @@ fun HomeScreen(
                     },
                     onOpenServers = onNavigateToServers
                 )
+
+                // OpenFlux refusal (session was stopped): why + a way out.
+                AnimatedVisibility(
+                    visible = openFluxStatusMsg != null,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    // Keep the last text while the exit animation runs.
+                    var lastMsg by remember { mutableStateOf(openFluxStatusMsg.orEmpty()) }
+                    if (openFluxStatusMsg != null && openFluxStatusMsg != lastMsg) lastMsg = openFluxStatusMsg
+                    Column {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OpenFluxStatusCard(
+                            message = lastMsg,
+                            showHowTo = openFluxStatus == "expired" || openFluxStatus == "ended",
+                            onRegularServers = { viewModel.disableOpenFlux() },
+                            onHowTo = onNavigateToOpenFlux
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(40.dp))
 
@@ -294,6 +370,11 @@ private fun ModeCard(
     activeServer: ServerProfile?,
     vpnState: VpnState,
     switching: Boolean,
+    openfluxEnabled: Boolean,
+    openfluxHost: String,
+    openfluxIsDemo: Boolean,
+    demoLeftText: String?,
+    onDisableOpenFlux: () -> Unit,
     onSelectAuto: () -> Unit,
     onSelectManual: () -> Unit,
     onOpenServers: () -> Unit
@@ -307,6 +388,16 @@ private fun ModeCard(
             if (autoMode == null) {
                 // DataStore not loaded yet: reserve the space, never flash a wrong mode.
                 Spacer(modifier = Modifier.fillMaxWidth().height(120.dp))
+            } else if (openfluxEnabled) {
+                OpenFluxModeContent(
+                    host = openfluxHost,
+                    isDemo = openfluxIsDemo,
+                    connectedViaOpenFlux = vpnState == VpnState.CONNECTED &&
+                        activeServer?.id == OpenFluxConfig.SYNTHETIC_SERVER_ID,
+                    demoLeftText = demoLeftText,
+                    switching = switching,
+                    onDisable = onDisableOpenFlux
+                )
             } else {
                 ModeCardContent(
                     autoMode = autoMode,
@@ -474,6 +565,141 @@ private fun ColumnScope.ModeCardContent(
                     color = AetherCyan,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+        }
+    }
+}
+
+/** Compact mode card while OpenFlux (Beta) is on: replaces the Auto/Manual segment. */
+@Composable
+private fun OpenFluxModeContent(
+    host: String,
+    isDemo: Boolean,
+    connectedViaOpenFlux: Boolean,
+    demoLeftText: String?,
+    switching: Boolean,
+    onDisable: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (switching) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = AetherCyan,
+                strokeWidth = 2.dp
+            )
+        } else {
+            FlagText("🧪")
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.openflux_home_title),
+                color = AetherCyan,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = when {
+                    switching -> stringResource(R.string.home_switching)
+                    // Demo exit: never show its host.
+                    isDemo && connectedViaOpenFlux -> stringResource(R.string.openflux_home_via_demo)
+                    isDemo -> stringResource(R.string.openflux_home_demo)
+                    connectedViaOpenFlux -> stringResource(R.string.openflux_home_via) +
+                        if (host.isNotEmpty()) " · $host" else ""
+                    host.isNotEmpty() -> host
+                    else -> stringResource(R.string.openflux_home_no_url)
+                },
+                color = AetherTextSecondary,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (demoLeftText != null && !switching) {
+                Text(
+                    text = demoLeftText,
+                    color = AetherConnecting,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        TextButton(
+            onClick = onDisable,
+            enabled = !switching,
+            modifier = Modifier.heightIn(min = 48.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.openflux_turn_off),
+                color = if (switching) AetherTextTertiary else AetherCyan,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/** OpenFlux refusal warning under the mode card: the reason + «Обычные серверы» (+ how-to). */
+@Composable
+private fun OpenFluxStatusCard(
+    message: String,
+    showHowTo: Boolean,
+    onRegularServers: () -> Unit,
+    onHowTo: () -> Unit
+) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(text = "⚠", color = AetherConnecting, fontSize = 18.sp, modifier = Modifier.clearAndSetSemantics { })
+                Text(
+                    text = message,
+                    color = AetherTextPrimary,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite }
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                if (showHowTo) {
+                    TextButton(onClick = onHowTo, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(
+                            text = stringResource(R.string.openflux_howto_button),
+                            color = AetherTextSecondary,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                }
+                TextButton(onClick = onRegularServers, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(
+                        text = stringResource(R.string.openflux_regular_servers),
+                        color = AetherCyan,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }

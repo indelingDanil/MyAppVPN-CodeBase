@@ -39,14 +39,17 @@ fun StatsScreen(
     val activeServer by viewModel.activeServer.collectAsStateWithLifecycle()
     val pinnedServer by viewModel.pinnedServer.collectAsStateWithLifecycle()
     val autoMode by viewModel.autoMode.collectAsStateWithLifecycle()
+    val openfluxEnabled by viewModel.openfluxEnabled.collectAsStateWithLifecycle()
 
     val isConnected = vpnState == VpnState.CONNECTED
     val hasSession = vpnState == VpnState.CONNECTED || vpnState == VpnState.CONNECTING ||
         vpnState == VpnState.BLOCKED
-    // Live session → the server actually in use (synthetic "__balancer__" ignored);
-    // otherwise the pinned one in Manual mode, if any.
+    // Live session → the server actually in use (synthetic "__balancer__" / "__openflux__"
+    // ignored); otherwise the pinned one in Manual mode, if any (not in OpenFlux mode — the
+    // pinned server isn't used there).
     val realActive = activeServer?.takeIf { !it.id.startsWith("__") }
-    val shownServer = realActive?.takeIf { hasSession } ?: pinnedServer.takeIf { autoMode == false }
+    val shownServer = realActive?.takeIf { hasSession }
+        ?: pinnedServer.takeIf { autoMode == false && !openfluxEnabled }
 
     val (statusRes, statusColor) = when (vpnState) {
         VpnState.CONNECTED -> R.string.stats_vpn_active to AetherConnected

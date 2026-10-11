@@ -42,6 +42,14 @@ class AppPreferences @Inject constructor(
         val KEY_KILL_SWITCH = booleanPreferencesKey("kill_switch_enabled")
         val KEY_AUTO_MODE = booleanPreferencesKey("auto_mode")
         val KEY_EXCLUDED_COUNTRIES = stringSetPreferencesKey("excluded_countries")
+        // OpenFlux (Beta): own exit via a PHP script (phpbox.php) on ordinary web hosting.
+        val KEY_OPENFLUX_ENABLED = booleanPreferencesKey("openflux_enabled")
+        val KEY_OPENFLUX_URL = stringPreferencesKey("openflux_url")
+        val KEY_OPENFLUX_TOKEN = stringPreferencesKey("openflux_token")
+        // true = use the author's public demo exit (URL/token are constants, never stored).
+        val KEY_OPENFLUX_DEMO = booleanPreferencesKey("openflux_demo")
+        // Random per-install id (see installId()).
+        val KEY_INSTALL_ID = stringPreferencesKey("install_id")
         // Custom subscriptions: JSON array of {name,url,enabled}. Built-in sources that the user
         // turned OFF are tracked by id in KEY_DISABLED_BUILTINS (empty = all built-ins enabled).
         val KEY_CUSTOM_SUBS = stringPreferencesKey("custom_subscriptions")
@@ -284,5 +292,72 @@ class AppPreferences @Inject constructor(
             it[KEY_EXCLUDED_COUNTRIES] =
                 if (countries.isEmpty()) setOf(EXCLUDED_NONE) else countries
         }
+    }
+
+    /** OpenFlux (Beta) mode: route traffic through the user's own PHP exit instead of VLESS. */
+    val openfluxEnabled: Flow<Boolean> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_OPENFLUX_ENABLED] ?: false }
+
+    suspend fun setOpenfluxEnabled(v: Boolean) {
+        dataStore.edit { it[KEY_OPENFLUX_ENABLED] = v }
+    }
+
+    /** Full URL of phpbox.php (http/https). */
+    val openfluxUrl: Flow<String> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_OPENFLUX_URL] ?: "" }
+
+    suspend fun setOpenfluxUrl(v: String) {
+        dataStore.edit { it[KEY_OPENFLUX_URL] = v }
+    }
+
+    /** Shared secret configured in the server's config.php. */
+    val openfluxToken: Flow<String> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_OPENFLUX_TOKEN] ?: "" }
+
+    suspend fun setOpenfluxToken(v: String) {
+        dataStore.edit { it[KEY_OPENFLUX_TOKEN] = v }
+    }
+
+    /**
+     * OpenFlux uses the author's public demo exit. Its URL/token are NOT stored in
+     * [openfluxUrl]/[openfluxToken] (those hold only the user's own exit) — see OpenFluxEndpoint.
+     */
+    val openfluxDemo: Flow<Boolean> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_OPENFLUX_DEMO] ?: false }
+
+    suspend fun setOpenfluxDemo(v: Boolean) {
+        dataStore.edit { it[KEY_OPENFLUX_DEMO] = v }
+    }
+
+    /**
+     * One-time migration (idempotent, single edit): older versions wrote the demo URL/token into
+     * [openfluxUrl]/[openfluxToken]. If the stored pair is a demo pair ([isDemoPair]), clear it and
+     * set [openfluxDemo] instead.
+     */
+    suspend fun migrateOpenfluxDemo(isDemoPair: (url: String, token: String) -> Boolean) {
+        dataStore.edit { p ->
+            val u = p[KEY_OPENFLUX_URL].orEmpty()
+            val t = p[KEY_OPENFLUX_TOKEN].orEmpty()
+            if (u.isNotEmpty() && isDemoPair(u, t)) {
+                p[KEY_OPENFLUX_URL] = ""
+                p[KEY_OPENFLUX_TOKEN] = ""
+                p[KEY_OPENFLUX_DEMO] = true
+            }
+        }
+    }
+
+    /**
+     * Random per-install id (UUID), generated once. Sent to OpenFlux demo exits (`-client`) so the
+     * one-time trial is tracked per install. Read + generate + write in ONE dataStore.edit.
+     */
+    suspend fun installId(): String {
+        val prefs = dataStore.edit { p ->
+            if (p[KEY_INSTALL_ID].isNullOrEmpty()) p[KEY_INSTALL_ID] = java.util.UUID.randomUUID().toString()
+        }
+        return prefs[KEY_INSTALL_ID]!!
     }
 }

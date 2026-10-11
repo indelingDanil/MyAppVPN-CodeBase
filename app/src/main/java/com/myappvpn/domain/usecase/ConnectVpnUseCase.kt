@@ -7,6 +7,7 @@ import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.data.repository.ConfigRepository
+import com.myappvpn.domain.OpenFluxEndpoint
 import com.myappvpn.service.MyVpnService
 import com.myappvpn.util.XrayConfigBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -58,6 +59,33 @@ class ConnectVpnUseCase @Inject constructor(
         val spec = buildBalancerSpec()
         if (com.myappvpn.BuildConfig.DEBUG) Log.i(TAG, "Connecting (auto/balancer) with ${spec.poolIds.size} servers")
         startService(spec.xrayJson, spec.serverName, spec.hotspotSharing, balancerMode = true, poolIds = spec.poolIds)
+    }
+
+    /**
+     * OpenFlux (Beta): tunnel through the user's own PHP exit via the bundled bridge. Only the
+     * URL/token are sent — the service builds the Xray→bridge chain config itself, because it
+     * owns the random per-session ports (incl. the bridge port). Never touches the Room selection.
+     * @throws IllegalStateException if the URL or token is not set.
+     */
+    suspend fun connectOpenFlux() {
+        // Demo flag → demo constants; else the user's own URL/token (OpenFluxEndpoint decides).
+        val endpoint = OpenFluxEndpoint.resolve(preferences)
+        if (!endpoint.complete) {
+            throw IllegalStateException("Укажите адрес и токен OpenFlux")
+        }
+        val hotspotSharing = preferences.hotspotSharing.first()
+        Log.i(TAG, "Connecting (OpenFlux)")   // never log the URL/token
+        val intent = Intent(context, MyVpnService::class.java).apply {
+            action = MyVpnService.ACTION_CONNECT
+            putExtra(MyVpnService.EXTRA_OPENFLUX, true)
+            putExtra(MyVpnService.EXTRA_OPENFLUX_URL, endpoint.url)
+            putExtra(MyVpnService.EXTRA_OPENFLUX_TOKEN, endpoint.token)
+            putExtra(MyVpnService.EXTRA_OPENFLUX_DEMO, endpoint.demo)
+            putExtra(MyVpnService.EXTRA_SERVER_NAME, "OpenFlux (Beta)")
+            putExtra(MyVpnService.EXTRA_HOTSPOT_SHARING, hotspotSharing)
+            putExtra(MyVpnService.EXTRA_BALANCER_MODE, false)
+        }
+        context.startForegroundService(intent)
     }
 
     /**

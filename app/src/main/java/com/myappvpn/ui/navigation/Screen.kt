@@ -10,4 +10,5 @@ sealed class Screen(val route: String) {
     object HotspotSetup : Screen("hotspot_setup")
     object Subscriptions : Screen("subscriptions")
     object Dns : Screen("dns")
+    object OpenFlux : Screen("openflux")
 }

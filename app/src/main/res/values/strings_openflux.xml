@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- OpenFlux (Beta): own exit via a PHP script on ordinary web hosting (Russian = default). -->
+<resources>
+
+    <!-- Settings row -->
+    <string name="openflux_settings_section">Эксперименты</string>
+    <string name="openflux_settings_title">OpenFlux (Beta)</string>
+    <string name="openflux_settings_subtitle">Свой выход через PHP-хостинг</string>
+    <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
+    <string name="openflux_state_on">Включён</string>
+    <string name="openflux_state_off">Выключен</string>
+
+    <!-- Screen -->
+    <string name="openflux_title" translatable="false">OpenFlux</string>
+    <string name="openflux_beta">Beta</string>
+    <string name="openflux_cd_back">Назад</string>
+    <string name="openflux_intro">Экспериментальный режим. Трафик идёт не через VLESS-серверы, а через ваш собственный выход — PHP-скрипт OpenFlux на обычном веб-хостинге. Полезно, когда мобильный оператор пропускает только «белые» сайты, а ваш хостинг среди них. Работает только TCP (порты 80/443), скорость скромная.</string>
+    <string name="openflux_enable_title">Использовать OpenFlux</string>
+    <string name="openflux_enable_subtitle">Трафик пойдёт через ваш выход вместо VLESS-серверов</string>
+    <string name="openflux_enable_hint_fill">Сначала укажите корректный адрес выхода и токен и сохраните их.</string>
+    <string name="openflux_section_settings">Подключение к выходу</string>
+    <string name="openflux_url_label">Адрес выхода</string>
+    <string name="openflux_url_placeholder" translatable="false">http://example.com/n/</string>
+    <string name="openflux_url_err_invalid">Некорректный адрес</string>
+    <string name="openflux_url_err_scheme">Адрес должен начинаться с http:// или https://</string>
+    <string name="openflux_url_err_host">В адресе не указан домен</string>
+    <string name="openflux_url_err_php">Адрес должен вести на файл .php (например …/phpbox.php)</string>
+    <string name="openflux_token_label">Токен</string>
+    <string name="openflux_token_show">Показать токен</string>
+    <string name="openflux_token_hide">Скрыть токен</string>
+    <string name="openflux_save">Сохранить</string>
+    <string name="openflux_saved">Сохранено</string>
+    <string name="openflux_unsaved">Есть несохранённые изменения</string>
+    <string name="openflux_http_warning">Без HTTPS провайдер видит токен и адреса сайтов. Содержимое HTTPS-сайтов остаётся зашифрованным.</string>
+    <string name="openflux_reconnect_note">VPN сейчас подключён — изменения адреса и токена применятся при переподключении.</string>
+    <string name="openflux_howto_title">Как поднять свой выход</string>
+    <string name="openflux_howto_step1">1. Скачайте phpbox.php и config.example.php из ветки openflux-exit (кнопка ниже) — там же пошаговая инструкция для Beget.</string>
+    <string name="openflux_howto_step2">2. Впишите в config.php свой длинный случайный токен.</string>
+    <string name="openflux_howto_step3">3. На некоторых хостингах (например Beget) укажите папку шины вне public_html (см. config.example.php).</string>
+    <string name="openflux_howto_step4">4. Вставьте сюда адрес выхода и токен.</string>
+    <string name="openflux_github">Открыть репозиторий на GitHub</string>
+    <string name="openflux_no_browser">Не найдено приложение для открытия ссылки</string>
+    <string name="openflux_cd_expand">Развернуть</string>
+    <string name="openflux_cd_collapse">Свернуть</string>
+
+    <!-- Home -->
+    <string name="openflux_home_title">OpenFlux (Beta)</string>
+    <string name="openflux_home_via">через ваш выход OpenFlux</string>
+    <string name="openflux_home_no_url">адрес не задан</string>
+    <string name="openflux_home_demo">Демо-сервер MyAppVPN</string>
+    <string name="openflux_home_via_demo">через демо-сервер MyAppVPN</string>
+    <string name="openflux_turn_off">Выключить</string>
+
+    <!-- Servers -->
+    <string name="openflux_servers_banner">Включён режим OpenFlux — серверы из списка сейчас не используются</string>
+
+    <!-- Exit refusals (session stopped) -->
+    <string name="openflux_status_busy">Демо-сервер перегружен — все 8 мест заняты. Попробуйте позже.</string>
+    <string name="openflux_status_expired">Ваш пробный час (или 2 ГБ) на демо-сервере закончился. Чтобы продолжить — поднимите свой выход OpenFlux (инструкция по кнопке ниже) или пользуйтесь обычными серверами.</string>
+    <string name="openflux_status_ended">Демо OpenFlux завершено. Поднимите свой выход — инструкция в репозитории.</string>
+    <string name="openflux_status_quota">Демо-сервер исчерпал дневной лимит трафика. Попробуйте завтра.</string>
+    <string name="openflux_status_badtoken">Неверный токен или адрес OpenFlux.</string>
+    <string name="openflux_status_noclient">Нужно обновить приложение.</string>
+    <string name="openflux_regular_servers">Обычные серверы</string>
+    <string name="openflux_howto_button">Инструкция</string>
+
+    <!-- Demo -->
+    <string name="openflux_demo_left">Демо: осталось ~%1$d мин · %2$d МБ</string>
+    <string name="openflux_demo_left_min">Демо: осталось ~%1$d мин</string>
+    <string name="openflux_demo_left_mb">Демо: осталось %1$d МБ</string>
+    <string name="openflux_demo_title">Попробовать демо-сервер</string>
+    <string name="openflux_demo_text">Пробный доступ к выходу автора, один раз: 1 час с момента подключения (таймер не останавливается) или 2 ГБ трафика — что закончится раньше. До 8 человек одновременно, до 14 октября. Если мест нет — попробуйте позже.</string>
+    <string name="openflux_demo_button">Подключить демо</string>
+    <string name="openflux_demo_selected">Сейчас выбран демо-сервер MyAppVPN</string>
+    <string name="openflux_own_exit_note">Свой выход — без ограничений</string>
+</resources>

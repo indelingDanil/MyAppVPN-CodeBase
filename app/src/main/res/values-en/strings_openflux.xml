@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English translation of values/strings_openflux.xml. -->
+<resources>
+
+    <!-- Settings row -->
+    <string name="openflux_settings_section">Experiments</string>
+    <string name="openflux_settings_title">OpenFlux (Beta)</string>
+    <string name="openflux_settings_subtitle">Your own exit via PHP hosting</string>
+    <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
+    <string name="openflux_state_on">On</string>
+    <string name="openflux_state_off">Off</string>
+
+    <!-- Screen -->
+    <string name="openflux_beta">Beta</string>
+    <string name="openflux_cd_back">Back</string>
+    <string name="openflux_intro">Experimental mode. Traffic goes not through VLESS servers but through your own exit: the OpenFlux PHP script on ordinary web hosting. Useful when your mobile carrier only lets \"whitelisted\" sites through and your hosting is one of them. TCP only (ports 80/443), speed is modest.</string>
+    <string name="openflux_enable_title">Use OpenFlux</string>
+    <string name="openflux_enable_subtitle">Traffic goes through your exit instead of VLESS servers</string>
+    <string name="openflux_enable_hint_fill">First enter a valid exit address and token, then save them.</string>
+    <string name="openflux_section_settings">Exit connection</string>
+    <string name="openflux_url_label">Exit address</string>
+    <string name="openflux_url_err_invalid">Invalid address</string>
+    <string name="openflux_url_err_scheme">The address must start with http:// or https://</string>
+    <string name="openflux_url_err_host">The address has no domain</string>
+    <string name="openflux_url_err_php">The address must point to a .php file (e.g. …/phpbox.php)</string>
+    <string name="openflux_token_label">Token</string>
+    <string name="openflux_token_show">Show token</string>
+    <string name="openflux_token_hide">Hide token</string>
+    <string name="openflux_save">Save</string>
+    <string name="openflux_saved">Saved</string>
+    <string name="openflux_unsaved">You have unsaved changes</string>
+    <string name="openflux_http_warning">Without HTTPS your provider can see the token and the site addresses. The content of HTTPS sites stays encrypted.</string>
+    <string name="openflux_reconnect_note">The VPN is connected: address and token changes apply on reconnect.</string>
+    <string name="openflux_howto_title">How to set up your own exit</string>
+    <string name="openflux_howto_step1">1. Download phpbox.php and config.example.php from the openflux-exit branch (button below) — it also has a step-by-step Beget guide.</string>
+    <string name="openflux_howto_step2">2. Put your own long random token into config.php.</string>
+    <string name="openflux_howto_step3">3. On some hosts (e.g. Beget) set the bus folder outside public_html (see config.example.php).</string>
+    <string name="openflux_howto_step4">4. Paste the exit address and the token here.</string>
+    <string name="openflux_github">Open the repository on GitHub</string>
+    <string name="openflux_no_browser">No app found to open the link</string>
+    <string name="openflux_cd_expand">Expand</string>
+    <string name="openflux_cd_collapse">Collapse</string>
+
+    <!-- Home -->
+    <string name="openflux_home_title">OpenFlux (Beta)</string>
+    <string name="openflux_home_via">via your OpenFlux exit</string>
+    <string name="openflux_home_no_url">address not set</string>
+    <string name="openflux_home_demo">MyAppVPN demo server</string>
+    <string name="openflux_home_via_demo">via the MyAppVPN demo server</string>
+    <string name="openflux_turn_off">Turn off</string>
+
+    <!-- Servers -->
+    <string name="openflux_servers_banner">OpenFlux mode is on: servers from the list are not used right now</string>
+
+    <!-- Exit refusals (session stopped) -->
+    <string name="openflux_status_busy">The demo server is full: all 8 slots are taken. Please try again later.</string>
+    <string name="openflux_status_expired">Your trial hour (or 2 GB) on the demo server is over. To continue, set up your own OpenFlux exit (instructions via the button below) or use the regular servers.</string>
+    <string name="openflux_status_ended">The OpenFlux demo has ended. Set up your own exit: instructions are in the repository.</string>
+    <string name="openflux_status_quota">The demo server has used up its daily traffic limit. Please try again tomorrow.</string>
+    <string name="openflux_status_badtoken">Wrong OpenFlux token or address.</string>
+    <string name="openflux_status_noclient">Please update the app.</string>
+    <string name="openflux_regular_servers">Regular servers</string>
+    <string name="openflux_howto_button">Instructions</string>
+
+    <!-- Demo -->
+    <string name="openflux_demo_left">Demo: ~%1$d min · %2$d MB left</string>
+    <string name="openflux_demo_left_min">Demo: ~%1$d min left</string>
+    <string name="openflux_demo_left_mb">Demo: %1$d MB left</string>
+    <string name="openflux_demo_title">Try the demo server</string>
+    <string name="openflux_demo_text">One-time trial access to the author\'s exit: 1 hour from the moment you connect (the timer keeps running) or 2 GB of traffic, whichever comes first. Up to 8 people at once, until October 14. If there are no free slots, try again later.</string>
+    <string name="openflux_demo_button">Connect demo</string>
+    <string name="openflux_demo_selected">The MyAppVPN demo server is selected</string>
+    <string name="openflux_own_exit_note">Your own exit: no limits</string>
+</resources>

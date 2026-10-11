@@ -16,8 +16,8 @@ android {
         applicationId = "com.myappvpn"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "2.1.0"
+        versionCode = 11
+        versionName = "2.1.1-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

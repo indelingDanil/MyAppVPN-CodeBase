@@ -37,3 +37,11 @@ app/src/main/assets/tun2socks/tun2socks-*
 
 # Claude Code
 .claude/
+
+# openflux-bridge build outputs (the shipped copy lives in app/src/main/jniLibs)
+openflux-bridge/ofbridge.exe
+openflux-bridge/ofbridge-android-arm64
+openflux-bridge/*.log
+
+# Local release artifacts and secrets (APKs, OpenFlux tokens) — never commit
+builds/

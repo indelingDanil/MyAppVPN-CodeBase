@@ -288,6 +288,127 @@ object XrayConfigBuilder {
     }
 
     /**
+     * OpenFlux (Beta) chain: the same loopback inbounds as [build] (socks + http; the service
+     * injects auth / rewrites ports), but the "proxy" outbound is a SOCKS5 client to the local
+     * OpenFlux bridge (127.0.0.1:[bridgePort], user/pass auth), which tunnels TCP through the
+     * user's PHP exit.
+     *
+     * The bridge carries TCP CONNECT only, so UDP (QUIC, plain DNS to non-53 ports…) is blocked
+     * right away → apps fall back to TCP fast instead of timing out. App DNS on :53 is still
+     * hijacked to the DoH resolver (dns-out), whose HTTPS requests egress via "proxy" (the tag
+     * [DnsConfigInjector] routes the dns-internal resolver to). The outbound tag MUST stay "proxy".
+     */
+    fun buildSocksChain(
+        socksPort: Int,
+        httpPort: Int,
+        bridgePort: Int,
+        bridgeUser: String,
+        bridgePass: String,
+    ): String {
+        val listenAddr = "127.0.0.1"
+        val root = JSONObject()
+
+        root.put("log", JSONObject().apply {
+            put("loglevel", "warning")
+            put("access", "none")
+        })
+
+        // DoH only (TCP 443 → through the bridge). Plain UDP resolvers would be dead here.
+        root.put("dns", JSONObject().apply {
+            put("servers", JSONArray().apply {
+                put("https://1.1.1.1/dns-query")
+                put("https://8.8.8.8/dns-query")
+            })
+        })
+
+        root.put("inbounds", JSONArray().apply {
+            put(JSONObject().apply {
+                put("tag", "socks")
+                put("port", socksPort)
+                put("listen", listenAddr)
+                put("protocol", "socks")
+                put("settings", JSONObject().apply {
+                    put("auth", "noauth")   // the service injects the session credentials
+                    put("udp", true)        // tun2socks needs UDP ASSOCIATE (DNS :53 → dns-out)
+                    put("ip", listenAddr)
+                })
+            })
+            put(JSONObject().apply {
+                put("tag", "http")
+                put("port", httpPort)
+                put("listen", listenAddr)
+                put("protocol", "http")
+                put("settings", JSONObject().apply { put("allowTransparent", false) })
+            })
+        })
+
+        root.put("outbounds", JSONArray().apply {
+            // First outbound = default route.
+            put(JSONObject().apply {
+                put("tag", "proxy")
+                put("protocol", "socks")
+                put("settings", JSONObject().apply {
+                    put("servers", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("address", "127.0.0.1")
+                            put("port", bridgePort)
+                            put("users", JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("user", bridgeUser)
+                                    put("pass", bridgePass)
+                                })
+                            })
+                        })
+                    })
+                })
+            })
+            put(JSONObject().apply {
+                put("tag", "dns-out")
+                put("protocol", "dns")
+            })
+            put(JSONObject().apply {
+                put("tag", "direct")
+                put("protocol", "freedom")
+                put("settings", JSONObject())
+            })
+            put(JSONObject().apply {
+                put("tag", "block")
+                put("protocol", "blackhole")
+                put("settings", JSONObject().apply {
+                    put("response", JSONObject().apply { put("type", "none") })
+                })
+            })
+        })
+
+        root.put("routing", JSONObject().apply {
+            put("domainStrategy", "IPIfNonMatch")
+            put("rules", JSONArray().apply {
+                // Hijack ALL DNS (:53) → DoH resolver. MUST precede the UDP block below.
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("port", 53)
+                    put("network", "tcp,udp")
+                    put("outboundTag", "dns-out")
+                })
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("outboundTag", "direct")
+                    put("ip", JSONArray().apply { put("geoip:private") })
+                })
+                // The bridge is TCP-only: drop UDP immediately (QUIC → TCP fallback).
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("network", "udp")
+                    put("outboundTag", "block")
+                })
+            })
+        })
+
+        applyLocalBlockRules(root)
+        return root.toString(2)
+    }
+
+    /**
      * Kill-switch config: the SAME loopback inbounds (socks/http/api on the session ports — the
      * service injects auth) but a single blackhole outbound. Keeps our local ports bound while
      * the session is BLOCKED, so no other local app can grab them and receive tun2socks traffic
@@ -386,6 +507,9 @@ object XrayConfigBuilder {
             put("type", "field")
             put("ruleTag", RULE_TAG_LOCAL_BLOCK)
             put("ip", JSONArray().apply { LOCAL_BLOCK_IPS.forEach { put(it) } })
+            // Except :53 — the TUN's placeholder resolver (172.19.0.2 / fdfe:dcba:9876::2) lives in
+            // the blocked subnet; DNS to it must fall through to the port-53 → dns-out hijack.
+            put("port", "0-52,54-65535")
             put("outboundTag", "block")
         })
         ours.add(JSONObject().apply {

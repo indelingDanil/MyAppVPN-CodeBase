@@ -65,12 +65,24 @@ class MyVpnService : VpnService() {
         // Ordered server ids matching proxy-0..N in the balancer config (index = N). Lets the
         // service map the active/pinned `proxy-N` (from `xray api bi/bo`) back to a real server.
         const val EXTRA_POOL_IDS = "pool_ids"
+        // OpenFlux (Beta) connect: ACTION_CONNECT with EXTRA_OPENFLUX=true + URL/token, and NO
+        // EXTRA_XRAY_CONFIG — the service builds the Xray→bridge chain itself (it owns the random
+        // session ports, incl. the bridge's). EXTRA_SERVER_NAME / EXTRA_HOTSPOT_SHARING as usual.
+        const val EXTRA_OPENFLUX = "openflux"
+        const val EXTRA_OPENFLUX_URL = "openflux_url"
+        const val EXTRA_OPENFLUX_TOKEN = "openflux_token"
+        /** true = the URL/token are the author's demo exit → never show/log its host. */
+        const val EXTRA_OPENFLUX_DEMO = "openflux_demo"
+        /** [connectedServer] id of an OpenFlux session (synthetic profile, not in Room). */
+        const val OPENFLUX_SERVER_ID = "__openflux__"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "vpn_service"
         // Sticky balancer: only re-check the active route's Telegram reachability this often.
         private const val BALANCER_PROBE_INTERVAL_MS = 5 * 60_000L
         // "Too slow / dead" = couldn't FULLY load Telegram within this budget (one probe).
         private const val TELEGRAM_PROBE_TIMEOUT_MS = 18_000
+        // OpenFlux connect: wait this long for the exit's first OFSTATUS before going CONNECTED.
+        private const val OPENFLUX_FIRST_STATUS_TIMEOUT_MS = 8_000L
 
         private val _vpnState = MutableStateFlow(VpnState.DISCONNECTED)
         val vpnState: StateFlow<VpnState> = _vpnState.asStateFlow()
@@ -84,9 +96,32 @@ class MyVpnService : VpnService() {
         val connectedServer: StateFlow<ServerProfile?> = _connectedServer.asStateFlow()
 
         // AUTO while a balancer session exists, MANUAL while a single-server session exists,
-        // null when DISCONNECTED/ERROR.
+        // OPENFLUX while an OpenFlux (Beta) session exists, null when DISCONNECTED/ERROR.
         private val _activeMode = MutableStateFlow<ActiveMode?>(null)
         val activeMode: StateFlow<ActiveMode?> = _activeMode.asStateFlow()
+
+        // OpenFlux (Beta) refusal reported by the exit: "busy" (demo full), "expired" (this
+        // install's one-time demo trial is used up), "ended" (demo campaign over), "quota" (demo
+        // daily traffic budget spent), "noclient" (outdated app) or "badtoken" (wrong token/URL).
+        // Each one STOPS the session (see stopOnOpenFluxRefusal) and the reason stays here after
+        // the teardown so the UI can explain it; cleared when the next connect starts (or via
+        // clearOpenFluxStatus()). null = no refusal.
+        private val _openFluxStatus = MutableStateFlow<String?>(null)
+        val openFluxStatus: StateFlow<String?> = _openFluxStatus.asStateFlow()
+        val OPENFLUX_REFUSALS = setOf("busy", "expired", "ended", "quota", "noclient", "badtoken")
+
+        /** Dismiss a stale refusal reason (e.g. the user left OpenFlux mode). */
+        fun clearOpenFluxStatus() { _openFluxStatus.value = null }
+
+        // Demo exit only: trial seconds / traffic MB left as last reported by the bridge (at each
+        // session start). null when not connected via OpenFlux or the exit doesn't report it.
+        private val _openFluxDemoLeftSec = MutableStateFlow<Int?>(null)
+        val openFluxDemoLeftSec: StateFlow<Int?> = _openFluxDemoLeftSec.asStateFlow()
+        /** SystemClock.elapsedRealtime() when [openFluxDemoLeftSec] was last received. */
+        @Volatile var openFluxDemoLeftSecAt: Long = 0L
+            private set
+        private val _openFluxDemoLeftMb = MutableStateFlow<Int?>(null)
+        val openFluxDemoLeftMb: StateFlow<Int?> = _openFluxDemoLeftMb.asStateFlow()
 
         // True while a hot-switch (to a server or back to Auto) is being applied.
         private val _switching = MutableStateFlow(false)
@@ -110,6 +145,8 @@ class MyVpnService : VpnService() {
     // startDnsObserver(); applied to every Xray config in prepareConfig().
     @Volatile private var currentDns: EffectiveDns? = null
     private var dnsObserverJob: Job? = null
+    // OpenFlux: the DNS setting whose non-DoH:443 entries we last logged as dropped (log once).
+    @Volatile private var openFluxDnsWarnedFor: EffectiveDns? = null
 
     // An uncaught exception in any service coroutine must not crash the process (that would drop
     // the TUN and leak traffic): log it and, if a session is live, engage the kill-switch.
@@ -118,6 +155,26 @@ class MyVpnService : VpnService() {
     )
     private lateinit var xrayManager: XrayManager
     private lateinit var tun2SocksManager: Tun2SocksManager
+    private lateinit var openFluxManager: OpenFluxManager
+
+    /** OpenFlux (Beta) session parameters (URL/token from the connect intent). */
+    private class OpenFluxTarget(val url: String, val token: String, val demo: Boolean) {
+        override fun toString(): String = "OpenFluxTarget(demo=$demo)"   // never leak URL/token
+    }
+
+    // OpenFlux session: Xray's "proxy" outbound → local bridge (libofbridge) → user's PHP exit.
+    // Read on the main thread (switch filtering) → volatile.
+    @Volatile private var openFluxMode = false
+    // Session generation: incremented at the start of every connect() (under opMutex). An async
+    // refusal stop captures it and only tears down if it still matches (else it's stale).
+    @Volatile private var sessionGen = 0L
+    private var openFlux: OpenFluxTarget? = null
+    // Bridge listen port + SOCKS5 credentials (random per session; kept across bridge restarts).
+    private var bridgePort = 0
+    private var bridgeUser = ""
+    private var bridgePass = ""
+    // AppPreferences.installId() (sent to the exit as -client), cached after the first read.
+    @Volatile private var installIdCache: String? = null
 
     private var tunFd: ParcelFileDescriptor? = null
 
@@ -164,6 +221,8 @@ class MyVpnService : VpnService() {
     // In-flight connect / disconnect coroutines (touched on the main thread only).
     private var connectJob: Job? = null
     private var disconnectJob: Job? = null
+    // The disconnectJob the current connectJob waits for (null = it didn't wait). Main thread.
+    private var connectQueuedBehind: Job? = null
 
     // Serializes EVERY state-mutating operation (connect body, hot-switches, watchdog actions,
     // recovery attempts, split-tunnel TUN rebuild, disconnect teardown) so they never race on
@@ -194,7 +253,77 @@ class MyVpnService : VpnService() {
         super.onCreate()
         xrayManager = XrayManager(this)
         tun2SocksManager = Tun2SocksManager(this)
+        openFluxManager = OpenFluxManager(this)
         createNotificationChannel()
+        // Bridge exit status while in OpenFlux mode: a refusal (busy / expired / ended / quota /
+        // noclient / badtoken) is published and ends the session. Outside OpenFlux mode the
+        // published reason is left alone — it must survive the teardown for the UI.
+        serviceScope.launch {
+            openFluxManager.status.collect { s ->
+                if (!openFluxMode) return@collect
+                when {
+                    s in OPENFLUX_REFUSALS -> {
+                        val gen = sessionGen   // the session this refusal belongs to
+                        _openFluxStatus.value = s
+                        stopOnOpenFluxRefusal(s, gen)
+                    }
+                    // "" = bridge (re)started / stopped by the kill-switch — nothing new.
+                    s.isEmpty() -> Unit
+                    else -> _openFluxStatus.value = null   // "ok" (or "error": transient, not surfaced)
+                }
+            }
+        }
+        serviceScope.launch {
+            openFluxManager.leftSec.collect {
+                openFluxDemoLeftSecAt = android.os.SystemClock.elapsedRealtime()
+                _openFluxDemoLeftSec.value = if (openFluxMode) it else null
+            }
+        }
+        serviceScope.launch {
+            openFluxManager.leftMb.collect { _openFluxDemoLeftMb.value = if (openFluxMode) it else null }
+        }
+    }
+
+    /**
+     * The OpenFlux exit refused us (see [OPENFLUX_REFUSALS]): end the session like a normal
+     * disconnect — no kill-switch, no retries — keeping [openFluxStatus] = [reason] for the UI.
+     * A connect still in flight handles a refusal itself (it waits for the first answer), so we
+     * only act after it finished and only if the SAME OpenFlux session ([gen] = [sessionGen] when
+     * the refusal was observed) is still there — checked under opMutex, so a stale refusal can't
+     * kill a newer session. Any thread.
+     */
+    private fun stopOnOpenFluxRefusal(reason: String, gen: Long) {
+        Handler(Looper.getMainLooper()).post {
+            if (!openFluxMode || gen != sessionGen || disconnectJob?.isActive == true) return@post
+            val inFlightConnect = connectJob?.takeIf { it.isActive }
+            Log.w(TAG, "OpenFlux exit refused the session ('$reason') — stopping")
+            disconnectJob = serviceScope.launch {
+                inFlightConnect?.join()
+                val stopped = opMutex.withLock {
+                    // The connect already stopped / a teardown ran / a newer session took over.
+                    if (!openFluxMode || gen != sessionGen) {
+                        Log.i(TAG, "Stale OpenFlux refusal ('$reason') dropped")
+                        return@withLock false
+                    }
+                    _vpnState.value = VpnState.DISCONNECTING
+                    pendingSwitch.set(null)
+                    teardownSessionLocked()   // also cancels watchdog / recovery / observers
+                    // The reason outlives the session so the UI can explain it.
+                    _openFluxStatus.value = reason
+                    _vpnState.value = VpnState.DISCONNECTED
+                    true
+                }
+                if (!stopped) return@launch
+                Log.i(TAG, "VPN disconnected (OpenFlux refusal)")
+                withContext(Dispatchers.Main) {
+                    val newerConnect = connectJob?.let { it !== inFlightConnect && it.isActive } == true
+                    if (!newerConnect) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf(lastStartId)
+                    }
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -206,14 +335,35 @@ class MyVpnService : VpnService() {
 
         when (intent?.action) {
             ACTION_CONNECT -> {
-                val xrayConfig = intent.getStringExtra(EXTRA_XRAY_CONFIG)
+                val ofTarget = if (intent.getBooleanExtra(EXTRA_OPENFLUX, false)) {
+                    val url = intent.getStringExtra(EXTRA_OPENFLUX_URL)?.trim().orEmpty()
+                    val token = intent.getStringExtra(EXTRA_OPENFLUX_TOKEN)?.trim().orEmpty()
+                    if (url.isEmpty() || token.isEmpty()) {
+                        Log.w(TAG, "OpenFlux CONNECT without URL/token — ignored")
+                        stopIfIdle(startId)
+                        return START_NOT_STICKY
+                    }
+                    OpenFluxTarget(url, token, intent.getBooleanExtra(EXTRA_OPENFLUX_DEMO, false))
+                } else null
+                // OpenFlux: the service builds the chain config itself (needs the session ports).
+                val xrayConfig = if (ofTarget != null) "" else intent.getStringExtra(EXTRA_XRAY_CONFIG)
                 if (xrayConfig == null) {
                     Log.w(TAG, "CONNECT without config — ignored")
                     stopIfIdle(startId)
                     return START_NOT_STICKY
                 }
                 val st = _vpnState.value
-                if (st == VpnState.CONNECTED || st == VpnState.CONNECTING || connectJob?.isActive == true) {
+                val disconnectInFlight = disconnectJob?.takeIf { it.isActive }
+                if (disconnectInFlight != null) {
+                    // A disconnect is tearing the current session down (its state may not even
+                    // be published yet, e.g. CONNECT→DISCONNECT→CONNECT back-to-back): don't drop
+                    // this CONNECT — queue it behind the teardown. Only ignore it if a connect is
+                    // already queued behind this very disconnect.
+                    if (connectJob?.isActive == true && connectQueuedBehind === disconnectInFlight) {
+                        Log.w(TAG, "CONNECT ignored — a connect is already queued behind the disconnect")
+                        return START_NOT_STICKY
+                    }
+                } else if (st == VpnState.CONNECTED || st == VpnState.CONNECTING || connectJob?.isActive == true) {
                     // A second connect would build a new TUN and leak the old fd / processes.
                     Log.w(TAG, "CONNECT ignored — session already $st")
                     return START_NOT_STICKY
@@ -226,10 +376,11 @@ class MyVpnService : VpnService() {
                 val poolIds = intent.getStringArrayListExtra(EXTRA_POOL_IDS) ?: emptyList<String>()
                 // If a disconnect is still tearing down, let it finish first (it would otherwise
                 // kill the processes this connect starts).
-                val pendingDisconnect = disconnectJob
+                val pendingDisconnect = disconnectInFlight
+                connectQueuedBehind = pendingDisconnect
                 connectJob = serviceScope.launch {
                     pendingDisconnect?.join()
-                    connect(xrayConfig, serverName, hotspotSharing, balancer, poolIds)
+                    connect(xrayConfig, serverName, hotspotSharing, balancer && ofTarget == null, poolIds, ofTarget)
                 }
             }
             ACTION_SWITCH_SERVER -> {
@@ -287,9 +438,13 @@ class MyVpnService : VpnService() {
         alwaysOnJob = serviceScope.launch {
             pendingDisconnect?.join()
             try {
-                val auto = preferences.autoMode.first()
-                val pinned = if (auto) null else configRepository.getSelectedServer()
-                if (pinned != null) connectVpnUseCase(pinned) else connectVpnUseCase.connectAuto()
+                if (preferences.openfluxEnabled.first()) {
+                    connectVpnUseCase.connectOpenFlux()   // throws if URL/token are missing
+                } else {
+                    val auto = preferences.autoMode.first()
+                    val pinned = if (auto) null else configRepository.getSelectedServer()
+                    if (pinned != null) connectVpnUseCase(pinned) else connectVpnUseCase.connectAuto()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -343,6 +498,11 @@ class MyVpnService : VpnService() {
             stopIfIdle(startId)
             return
         }
+        if (openFluxMode && inFlightConnect == null) {
+            // Don't even preempt the watchdog: leaving OpenFlux is a controller-driven reconnect.
+            Log.i(TAG, "Switch ignored — OpenFlux session (controller reconnects instead)")
+            return
+        }
         pendingSwitch.set(req)   // latest wins
         if (inFlightConnect != null) Log.i(TAG, "Switch queued until connect completes")
         serviceScope.launch(switchParent) { applyPendingSwitch(inFlightConnect) }
@@ -360,6 +520,12 @@ class MyVpnService : VpnService() {
             val st = _vpnState.value
             if (req == null || tunFd == null || (st != VpnState.CONNECTED && st != VpnState.BLOCKED)) {
                 if (req != null) Log.w(TAG, "Switch dropped — no live tunnel ($st)")
+                resumeMonitoringLocked()
+                return
+            }
+            if (openFluxMode) {
+                // Leaving OpenFlux is a full reconnect driven by ConnectionController.
+                Log.i(TAG, "Switch ignored — OpenFlux session (controller reconnects instead)")
                 resumeMonitoringLocked()
                 return
             }
@@ -387,15 +553,26 @@ class MyVpnService : VpnService() {
         hotspotSharing: Boolean = false,
         balancer: Boolean = false,
         poolIds: List<String> = emptyList(),
+        openFluxTarget: OpenFluxTarget? = null,
     ) { opMutex.withLock {
+        sessionGen++   // only written under opMutex
         // Leftovers of a previous session (e.g. BLOCKED kill-switch TUN, ERROR) — release them
         // so we never overwrite (leak) a live TUN fd / processes.
-        if (tunFd != null || xrayManager.isRunning) cleanupProcesses()
+        if (tunFd != null || xrayManager.isRunning || openFluxManager.isRunning) cleanupProcesses()
+        // A refusal reason of the previous OpenFlux session is kept past its teardown for the
+        // UI — a new connect (any mode) starts clean.
+        _openFluxStatus.value = null
         currentServerName = serverName
         hotspotSharingEnabled = hotspotSharing
-        balancerMode = balancer
-        balancerPoolIds = poolIds
-        _activeMode.value = if (balancer) ActiveMode.AUTO else ActiveMode.MANUAL
+        openFluxMode = openFluxTarget != null
+        openFlux = openFluxTarget
+        balancerMode = balancer && !openFluxMode
+        balancerPoolIds = if (balancerMode) poolIds else emptyList()
+        _activeMode.value = when {
+            openFluxMode -> ActiveMode.OPENFLUX
+            balancerMode -> ActiveMode.AUTO
+            else -> ActiveMode.MANUAL
+        }
         try {
             killSwitchEnabled = preferences.killSwitchEnabled.first()
             currentDns = try {
@@ -411,8 +588,15 @@ class MyVpnService : VpnService() {
 
             // Random loopback ports for this session (SOCKS/HTTP/API). Fixed well-known ports
             // could be pre-bound by another app whenever Xray isn't listening.
-            val picked = LocalProxyAuth.pickFreeLoopbackPorts(3)
+            // OpenFlux: one more port for the local bridge + its own random SOCKS5 credentials.
+            val picked = LocalProxyAuth.pickFreeLoopbackPorts(if (openFluxMode) 4 else 3)
             ports = LocalPorts(socks = picked[0], http = picked[1], api = picked[2])
+            if (openFluxMode) {
+                bridgePort = picked[3]
+                val (bu, bp) = LocalProxyAuth.randomCredentials()
+                bridgeUser = bu
+                bridgePass = bp
+            }
 
             // Hotspot sharing: stable credentials for the hotspot SOCKS inbound.
             hotspotCreds = if (!hotspotSharing) null else try {
@@ -426,7 +610,12 @@ class MyVpnService : VpnService() {
 
             // Generate per-session proxy auth to prevent other apps from using our SOCKS5 proxy
             generateProxyAuth()
-            val authedConfig = prepareConfig(xrayConfig)
+            // OpenFlux: the bridge must be listening BEFORE Xray (its "proxy" outbound dials it).
+            if (openFluxMode && !startOpenFluxBridge()) {
+                failConnect("Failed to start OpenFlux bridge")
+                return
+            }
+            val authedConfig = prepareConfig(if (openFluxMode) openFluxChainTemplate() else xrayConfig)
             lastXrayConfig = authedConfig
             LocalProxyAuth.setSession(proxyUser, proxyPass)
 
@@ -434,6 +623,20 @@ class MyVpnService : VpnService() {
             if (!startXray(authedConfig)) {
                 failConnect("Failed to start XRay")
                 return
+            }
+
+            // OpenFlux: don't go CONNECTED before the exit's first session answer. A refusal
+            // (busy / expired / …) ends the connect cleanly; "ok"/"error"/timeout → go on (the
+            // watchdog handles a silent exit).
+            if (openFluxMode) {
+                val first = withTimeoutOrNull(OPENFLUX_FIRST_STATUS_TIMEOUT_MS) {
+                    openFluxManager.status.first { it.isNotEmpty() }
+                }
+                if (first in OPENFLUX_REFUSALS) {
+                    stopForOpenFluxRefusalLocked(first!!)
+                    return
+                }
+                if (first == null) Log.w(TAG, "OpenFlux: no exit answer within ${OPENFLUX_FIRST_STATUS_TIMEOUT_MS / 1000} s — continuing")
             }
             activeSocksPort = currentSocksPort   // expose for in-tunnel subscription refresh
 
@@ -465,7 +668,9 @@ class MyVpnService : VpnService() {
             }
 
             _vpnState.value = VpnState.CONNECTED
-            _connectedServer.value = if (balancerMode) {
+            _connectedServer.value = if (openFluxMode) {
+                openFluxProfile()   // synthetic — never touches the Room selection
+            } else if (balancerMode) {
                 connectedServerForTag(pinnedTag) ?: balancerPlaceholder(serverName)
             } else {
                 safeDb("selected server") { configRepository.getSelectedServer() }
@@ -490,6 +695,81 @@ class MyVpnService : VpnService() {
             failConnect("Connect failed: ${e.message}")
         }
     } }
+
+    // ── OpenFlux (Beta) ──────────────────────────────────────────────────────────
+
+    /**
+     * UI model of an OpenFlux session: "OpenFlux · <host of the phpbox URL>" (no path/query) for
+     * the user's own exit, "OpenFlux · демо" for the author's demo exit (its host is never shown).
+     */
+    private fun openFluxProfile(): ServerProfile {
+        val target = openFlux
+        val label = if (target?.demo == true) {
+            "демо"
+        } else {
+            target?.url?.let { u -> runCatching { java.net.URI(u).host }.getOrNull() }
+                ?.takeIf { it.isNotBlank() } ?: "?"
+        }
+        return ServerProfile(
+            id = OPENFLUX_SERVER_ID, name = "OpenFlux · $label", flag = "🧪",
+            country = "OpenFlux", address = "", port = 0, vlessUri = "",
+        )
+    }
+
+    /** Xray → bridge chain template for the current session ports (prepareConfig adds auth etc.). */
+    private fun openFluxChainTemplate(): String =
+        XrayConfigBuilder.buildSocksChain(ports.socks, ports.http, bridgePort, bridgeUser, bridgePass)
+
+    /** (Re)start the bridge on the session's bridge port/credentials. Caller holds opMutex. */
+    private suspend fun startOpenFluxBridge(): Boolean {
+        val target = openFlux ?: return false
+        // Stable per install → cached; the first call happens inside connect()'s try.
+        val clientId = installIdCache ?: preferences.installId().also { installIdCache = it }
+        return openFluxManager.start(target.url, target.token, clientId, bridgePort, bridgeUser, bridgePass, target.demo)
+    }
+
+    /**
+     * Connect-time refusal by the OpenFlux exit: tear down like a normal disconnect (no ERROR,
+     * no kill-switch), keep [openFluxStatus] = [reason], then leave the foreground once the
+     * connect coroutine has returned. Caller (connect) holds opMutex.
+     */
+    private fun stopForOpenFluxRefusalLocked(reason: String) {
+        Log.w(TAG, "OpenFlux exit refused the session ('$reason') — stopping")
+        pendingSwitch.set(null)
+        teardownSessionLocked()
+        _openFluxStatus.value = reason
+        _vpnState.value = VpnState.DISCONNECTED
+        serviceScope.launch(Dispatchers.Main) {
+            // connectJob is main-thread state: read it here. It is the calling connect (CONNECT
+            // is ignored while that is active) or, if it already finished, possibly a newer one.
+            val job = connectJob
+            job?.join()
+            // Skip if a newer connect / a user disconnect took over meanwhile.
+            if (_vpnState.value == VpnState.DISCONNECTED && connectJob === job) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf(lastStartId)
+            }
+        }
+    }
+
+    /**
+     * Rebuild the whole OpenFlux chain under the live TUN: restart the bridge (same port/creds;
+     * a fresh port if that one got taken meanwhile), then start Xray with a freshly built chain
+     * config. Used by the watchdog's one-shot restart and by kill-switch recovery (replaces the
+     * blackhole Xray). Caller holds opMutex.
+     */
+    private suspend fun recoverOpenFluxLocked(): Boolean {
+        openFluxManager.stop()
+        if (!startOpenFluxBridge()) {
+            Log.w(TAG, "OpenFlux bridge restart failed — retrying on a fresh port")
+            bridgePort = LocalProxyAuth.pickFreeLoopbackPorts(1)[0]
+            if (!startOpenFluxBridge()) return false
+        }
+        val cfg = prepareConfig(openFluxChainTemplate())
+        if (!startXray(cfg)) return false   // start() replaces the old / blackhole process
+        lastXrayConfig = cfg
+        return true
+    }
 
     /** UI model for the Auto session before/without a resolved pinned server. */
     private fun balancerPlaceholder(name: String) = ServerProfile(
@@ -568,7 +848,21 @@ class MyVpnService : VpnService() {
 
         val authed = root.toString(2)
         if (!withDns) return authed
-        val dns = currentDns ?: return authed
+        val userDns = currentDns ?: return authed
+        // OpenFlux: the resolver's traffic goes to the bridge, which only does TCP CONNECT to
+        // 80/443 — plain UDP/TCP DNS and DoH on other ports would silently fail (CONNECTED but
+        // nothing resolves). Keep DoH:443 only (default DoH if none is left).
+        val dns = if (openFluxMode) {
+            DnsConfigInjector.restrictToDoh443(userDns).also { filtered ->
+                if (filtered !== userDns && openFluxDnsWarnedFor != userDns) {
+                    openFluxDnsWarnedFor = userDns   // log once per DNS setting, not per restart
+                    val kept = userDns.servers.count { it in filtered.servers }
+                    val fallback = if (kept == 0) " — using default DoH" else ""
+                    Log.w(TAG, "OpenFlux: dropped ${userDns.servers.size - kept} non-DoH:443 DNS " +
+                        "server(s) (bridge only reaches 80/443)$fallback")
+                }
+            }
+        } else userDns
         return try {
             DnsConfigInjector.inject(authed, dns)
         } catch (e: Exception) {
@@ -721,8 +1015,12 @@ class MyVpnService : VpnService() {
             .addRoute("0.0.0.0", 0)
             .addRoute("::", 0)
             .setMtu(1500)
-            .addDnsServer("1.1.1.1")       // Cloudflare
-            .addDnsServer("8.8.8.8")       // Google
+            // Placeholder resolver INSIDE the TUN subnet: every :53 query is hijacked to Xray's DNS
+            // anyway. NOT 1.1.1.1/8.8.8.8 — Chrome-based browsers see a known DoH provider and
+            // auto-upgrade to their own DoH, bypassing our DNS (custom servers, IPv4-only answers);
+            // in OpenFlux mode that handed browsers IPv6 addresses the exit can't dial.
+            .addDnsServer("172.19.0.2")
+            .addDnsServer("fdfe:dcba:9876::2")
             // Follow the system default network; the network callback pins the actual one.
             .setUnderlyingNetworks(null)
             .apply {
@@ -915,6 +1213,10 @@ class MyVpnService : VpnService() {
      */
     private fun startWatchdog() {
         watchdogJob?.cancel()
+        if (openFluxMode) {
+            startOpenFluxWatchdog()
+            return
+        }
         watchdogJob = serviceScope.launch {
             // Still the live watchdog of a CONNECTED session? (checked under the lock before acting)
             fun stillCurrent() = isActive && _vpnState.value == VpnState.CONNECTED
@@ -1174,6 +1476,131 @@ class MyVpnService : VpnService() {
         }
     }
 
+    /**
+     * OpenFlux (Beta) watchdog: bridge alive (restart on the same port/creds if it died), Xray
+     * alive, tun2socks alive, then the generic internet probe through the session SOCKS. Two
+     * failed probes → rebuild bridge + Xray once; still failing → kill-switch (recovery keeps
+     * rebuilding the chain). No throttling/speed checks, background probe or pool re-verify —
+     * there is no server list in this mode. Same locking discipline as [startWatchdog].
+     */
+    private fun startOpenFluxWatchdog() {
+        watchdogJob = serviceScope.launch {
+            // A refusal (stop pending) is never "current": no restart / kill-switch over it.
+            fun stillCurrent() = isActive && _vpnState.value == VpnState.CONNECTED && openFluxMode &&
+                openFluxManager.status.value !in OPENFLUX_REFUSALS
+
+            delay(20_000L + (Math.random() * 10_000L).toLong()) // jittered grace period
+            var failStreak = 0
+            var restartUsed = false   // one bridge+xray rebuild per failure episode
+            while (isActive) {
+                val jitter = (Math.random() * 15_000L).toLong()
+                delay(if (failStreak == 0) 30_000L + jitter else 8_000L + jitter)
+                if (!stillCurrent()) break
+
+                if (networkSwitched) {
+                    networkSwitched = false
+                    if (failStreak > 0 || restartUsed) Log.i(TAG, "Network handover — resetting failure streak")
+                    failStreak = 0
+                    restartUsed = false
+                    continue
+                }
+
+                // Bridge died → restart it on the same port/credentials (Xray keeps dialing it).
+                if (!openFluxManager.isRunning) {
+                    Log.w(TAG, "OpenFlux bridge died — restarting")
+                    val ok = opMutex.withLock {
+                        if (!stillCurrent()) return@withLock null
+                        if (openFluxManager.isRunning) return@withLock true
+                        if (startOpenFluxBridge()) return@withLock true
+                        // Port taken meanwhile? Full chain rebuild moves the bridge to a fresh port.
+                        if (recoverOpenFluxLocked()) {
+                            publishHotspotInfo()
+                            return@withLock true
+                        }
+                        enterBlackhole("openflux bridge restart failed")
+                        false
+                    }
+                    if (ok != true) break
+                }
+
+                // Xray crash → restart the same chain config.
+                if (!xrayManager.isRunning) {
+                    Log.w(TAG, "XRay died (OpenFlux) — restarting the chain config")
+                    val ok = opMutex.withLock {
+                        if (!stillCurrent()) return@withLock null
+                        if (restartUsed || !restartXray()) {
+                            enterBlackhole("openflux xray died, restart failed")
+                            return@withLock false
+                        }
+                        true
+                    }
+                    if (ok != true) break
+                    restartUsed = true
+                    failStreak = 0
+                    continue
+                }
+
+                // tun2socks crash → restart it on the existing TUN fd.
+                if (!tun2SocksManager.isRunning) {
+                    Log.w(TAG, "tun2socks died while CONNECTED (OpenFlux) — restarting on existing TUN")
+                    val ok = opMutex.withLock {
+                        if (!stillCurrent()) return@withLock null
+                        if (ensureTun2SocksLocked()) return@withLock true
+                        enterBlackhole("tun2socks restart failed")
+                        false
+                    }
+                    if (ok != true) break
+                }
+
+                if (!isUnderlyingNetworkAvailable()) {
+                    Log.d(TAG, "No underlying network (Doze?) — skipping health check")
+                    failStreak = 0
+                    continue
+                }
+
+                // Exit refused us (busy / expired / ended / quota / noclient / badtoken): the
+                // session is being stopped by stopOnOpenFluxRefusal — never restart/blackhole.
+                val bridgeState = openFluxManager.status.value
+                if (bridgeState in OPENFLUX_REFUSALS) {
+                    Log.i(TAG, "OpenFlux exit reports '$bridgeState' — session stop pending")
+                    break
+                }
+
+                val internetOk = withContext(Dispatchers.IO) { isInternetReachableViaSocks(currentSocksPort) }
+                if (!stillCurrent()) break
+                if (internetOk) {
+                    failStreak = 0
+                    restartUsed = false
+                    continue
+                }
+
+                failStreak++
+                Log.w(TAG, "OpenFlux health check failed #$failStreak")
+                if (failStreak < 2) continue
+                if (restartUsed) {
+                    Log.w(TAG, "OpenFlux still unreachable after restart — kill-switch")
+                    opMutex.withLock {
+                        if (stillCurrent()) enterBlackhole("openflux unreachable")
+                    }
+                    break
+                }
+                Log.w(TAG, "2 consecutive failures — restarting OpenFlux bridge + Xray once")
+                val ok = opMutex.withLock {
+                    if (!stillCurrent()) return@withLock null
+                    if (!recoverOpenFluxLocked()) {
+                        enterBlackhole("openflux chain restart failed")
+                        return@withLock false
+                    }
+                    publishHotspotInfo()   // prepareConfig re-resolved the hotspot IP
+                    true
+                }
+                if (ok != true) break
+                restartUsed = true
+                failStreak = 0
+            }
+        }
+    }
+
     // ── 24h working-pool re-verify ───────────────────────────────────────────────
 
     /**
@@ -1183,6 +1610,8 @@ class MyVpnService : VpnService() {
      */
     private fun startWorkingPoolReverify() {
         poolReverifyJob?.cancel()
+        poolReverifyJob = null
+        if (openFluxMode) return   // no server pool in OpenFlux mode
         poolReverifyJob = serviceScope.launch {
             while (isActive && _vpnState.value == VpnState.CONNECTED) {
                 delay(10 * 60_000L)   // every ~10 min
@@ -1216,6 +1645,8 @@ class MyVpnService : VpnService() {
      */
     private fun startBackgroundProbe() {
         backgroundProbeJob?.cancel()
+        backgroundProbeJob = null
+        if (openFluxMode) return   // no server list to probe in OpenFlux mode
         backgroundProbeJob = serviceScope.launch {
             delay(60_000L) // wait 1 min after connection stabilizes
             val currentId = safeDb("selected server") { configRepository.getSelectedServer() }?.id ?: return@launch
@@ -1783,6 +2214,9 @@ class MyVpnService : VpnService() {
         // NonCancellable: the caller may be the watchdog we just cancelled above — the blackhole
         // must still come up (else the port would be left unbound).
         withContext(NonCancellable) { startBlackholeXray() }
+        // OpenFlux: nothing dials the bridge while blackholed — stop its upstream polling;
+        // recovery restarts it (same port/creds) together with the chain config.
+        if (openFluxMode) openFluxManager.stop()
         updateNotification(currentServerName, VpnState.BLOCKED)
         Log.w(TAG, "Kill-switch active — traffic blocked ($reason)")
         scheduleRecovery()
@@ -1843,7 +2277,11 @@ class MyVpnService : VpnService() {
                     // Someone else (user switch / disconnect) already changed the session.
                     if (!isActive || _vpnState.value != VpnState.BLOCKED || tunFd == null) return@withLock null
                     val ok = try {
-                        if (balancerMode) rebuildBalancer() else recoverSingle()
+                        when {
+                            openFluxMode -> recoverOpenFluxLocked()
+                            balancerMode -> rebuildBalancer()
+                            else -> recoverSingle()
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -1854,18 +2292,22 @@ class MyVpnService : VpnService() {
                         // The attempt replaced/stopped the blackhole Xray — put it back so the
                         // session ports stay bound while we wait for the next attempt.
                         if (!xrayManager.isRunning) withContext(NonCancellable) { startBlackholeXray() }
+                        if (openFluxMode) openFluxManager.stop()   // restarted on the next attempt
                         return@withLock false
                     }
                     currentCoroutineContext().ensureActive()
                     if (!ensureTun2SocksLocked()) {
                         Log.w(TAG, "Recovery: tun2socks restart failed")
                         withContext(NonCancellable) { startBlackholeXray() }
+                        if (openFluxMode) openFluxManager.stop()
                         return@withLock false
                     }
                     activeSocksPort = currentSocksPort
-                    _connectedServer.value =
-                        if (balancerMode) connectedServerForTag(pinnedTag) ?: balancerPlaceholder(currentServerName)
-                        else safeDb("selected server") { configRepository.getSelectedServer() }
+                    _connectedServer.value = when {
+                        openFluxMode -> openFluxProfile()
+                        balancerMode -> connectedServerForTag(pinnedTag) ?: balancerPlaceholder(currentServerName)
+                        else -> safeDb("selected server") { configRepository.getSelectedServer() }
+                    }
                     _vpnState.value = VpnState.CONNECTED
                     updateNotification(currentServerName, VpnState.CONNECTED)
                     publishHotspotInfo()
@@ -1909,7 +2351,7 @@ class MyVpnService : VpnService() {
      * onStartCommand) and is skipped if a newer Connect is already queued, so a quick
      * Disconnect→Connect doesn't kill the freshly started service.
      */
-    private suspend fun disconnect(inFlightConnect: Job? = null) {
+    private suspend fun disconnect(inFlightConnect: Job? = null, refusal: String? = null) {
         _vpnState.value = VpnState.DISCONNECTING
         // Preempt everything that may hold (or queue for) opMutex BEFORE taking it: cancellation
         // makes a holder release the lock at its next suspension point.
@@ -1924,15 +2366,9 @@ class MyVpnService : VpnService() {
         dnsObserverJob?.cancel()
         inFlightConnect?.cancelAndJoin()
         opMutex.withLock {
-            cleanupProcesses()
-            LocalProxyAuth.clearSession()
-            proxyUser = ""
-            proxyPass = ""
-            hotspotCreds = null
-            balancerMode = false
-            lastXrayConfig = ""
-            balancerPoolIds = emptyList()
-            pinnedTag = null
+            teardownSessionLocked()
+            // OpenFlux refusal: the reason outlives the session so the UI can explain it.
+            if (refusal != null) _openFluxStatus.value = refusal
             // Publish DISCONNECTED only after teardown is complete.
             _vpnState.value = VpnState.DISCONNECTED
         }
@@ -1945,6 +2381,19 @@ class MyVpnService : VpnService() {
                 stopSelf(lastStartId)
             }
         }
+    }
+
+    /** Full teardown of a session (processes + per-session state). Caller holds opMutex. */
+    private fun teardownSessionLocked() {
+        cleanupProcesses()
+        LocalProxyAuth.clearSession()
+        proxyUser = ""
+        proxyPass = ""
+        hotspotCreds = null
+        balancerMode = false
+        lastXrayConfig = ""
+        balancerPoolIds = emptyList()
+        pinnedTag = null
     }
 
     private fun cleanupProcesses() {
@@ -1960,6 +2409,15 @@ class MyVpnService : VpnService() {
         tun2SocksManager.stop()
         xrayManager.stop()
         xrayManager.deleteConfigs()   // no session credentials / server secrets left on disk
+        openFluxManager.stop()        // after Xray: nothing dials the bridge any more
+        openFluxMode = false
+        // _openFluxStatus is NOT cleared here: a refusal reason must outlive the teardown (the
+        // next connect clears it).
+        _openFluxDemoLeftSec.value = null
+        _openFluxDemoLeftMb.value = null
+        openFlux = null               // drop the token from memory
+        bridgeUser = ""
+        bridgePass = ""
         tunFd?.close(); tunFd = null
         configHotspot = null
         _hotspotInfo.value = null
@@ -1989,6 +2447,10 @@ class MyVpnService : VpnService() {
         _connectedServer.value = null
         _activeMode.value = null
         _switching.value = false
+        // _openFluxStatus is kept: a refusal stop ends in stopSelf → onDestroy, and the UI still
+        // has to explain why. The next connect clears it.
+        _openFluxDemoLeftSec.value = null
+        _openFluxDemoLeftMb.value = null
         _vpnState.value = VpnState.DISCONNECTED
     }
 

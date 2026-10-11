@@ -12,6 +12,7 @@ import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.model.TrafficStats
 import com.myappvpn.data.repository.ConfigRepository
 import com.myappvpn.domain.ConnectionController
+import com.myappvpn.domain.OpenFluxEndpoint
 import com.myappvpn.domain.usecase.GetTrafficStatsUseCase
 import com.myappvpn.service.HotspotInfo
 import com.myappvpn.service.MyVpnService
@@ -50,6 +51,30 @@ class HomeViewModel @Inject constructor(
 
     /** The server the live session is actually using (null when there is no session). */
     val activeServer: StateFlow<ServerProfile?> = MyVpnService.connectedServer
+
+    /** OpenFlux (Beta) mode on: the mode card shows the OpenFlux exit instead of Auto/Manual. */
+    val openfluxEnabled: StateFlow<Boolean> = preferences.openfluxEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * Host of the user's OWN saved exit URL ("" when not set / unparsable / the demo is selected).
+     * The demo exit's host is never exposed to the UI.
+     */
+    val openfluxHost: StateFlow<String> = combine(preferences.openfluxUrl, preferences.openfluxDemo) { u, demo ->
+        if (demo) "" else OpenFluxConfig.host(u).orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    /** The author's public demo exit is selected (openfluxDemo pref). */
+    val openfluxIsDemo: StateFlow<Boolean> = combine(preferences.openfluxDemo, preferences.openfluxUrl) { demo, u ->
+        demo   // the flag only: an own exit may use the same URL as the demo (different token)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Last OpenFlux refusal (busy / expired / ended / quota / noclient / badtoken) or null. */
+    val openFluxStatus: StateFlow<String?> = MyVpnService.openFluxStatus
+
+    /** Demo trial seconds / MB left as last reported by the exit (null = unknown / not demo). */
+    val openFluxDemoLeftSec: StateFlow<Int?> = MyVpnService.openFluxDemoLeftSec
+    val openFluxDemoLeftMb: StateFlow<Int?> = MyVpnService.openFluxDemoLeftMb
 
     /** True while the service is applying a live mode/server switch. */
     val switching: StateFlow<Boolean> = MyVpnService.switching
@@ -96,7 +121,9 @@ class HomeViewModel @Inject constructor(
                 viewModelScope.launch {
                     // Read the real stored mode (not a possibly not-yet-loaded StateFlow value).
                     val auto = preferences.autoMode.first()
-                    if (!auto && configRepository.getSelectedServer() == null) {
+                    // OpenFlux mode doesn't use the server list → no pinned server needed.
+                    val openflux = preferences.openfluxEnabled.first()
+                    if (!openflux && !auto && configRepository.getSelectedServer() == null) {
                         clearInFlight()
                         _error.emit(context.getString(R.string.home_err_pick_server))
                         return@launch
@@ -141,4 +168,9 @@ class HomeViewModel @Inject constructor(
 
     /** Pin a server → Manual (live hot-switch if connected). */
     fun pin(server: ServerProfile) = controller.pin(server)
+
+    /** Leave OpenFlux mode (reconnects a live session through the controller). */
+    fun disableOpenFlux() {
+        controller.setOpenFluxEnabled(false)
+    }
 }

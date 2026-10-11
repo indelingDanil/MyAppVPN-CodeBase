@@ -27,6 +27,7 @@ import com.myappvpn.service.VpnState
 import com.myappvpn.ui.components.GlassCard
 import com.myappvpn.ui.theme.*
 import com.myappvpn.ui.viewmodel.DnsViewModel
+import com.myappvpn.ui.viewmodel.OpenFluxViewModel
 import com.myappvpn.ui.viewmodel.SettingsViewModel
 
 @Composable
@@ -37,8 +38,11 @@ fun SettingsScreen(
     onNavigateToDns: () -> Unit,
     dnsViewModel: DnsViewModel = hiltViewModel(),
     /** Optional: when wired in the NavGraph, the "Раздача" section links to the setup guide. */
-    onNavigateToHotspotSetup: (() -> Unit)? = null
+    onNavigateToHotspotSetup: (() -> Unit)? = null,
+    onNavigateToOpenFlux: () -> Unit = {},
+    openFluxViewModel: OpenFluxViewModel = hiltViewModel()
 ) {
+    val openfluxEnabled by openFluxViewModel.enabled.collectAsStateWithLifecycle()
     val dnsSummary by dnsViewModel.summary.collectAsStateWithLifecycle()
     // null = still loading from DataStore → rows show a neutral placeholder instead of a Switch.
     val autoConnect by viewModel.autoConnect.collectAsStateWithLifecycle()
@@ -147,6 +151,26 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+
+        // Experiments
+        SettingsSection(title = stringResource(R.string.openflux_settings_section)) {
+            val base = stringResource(R.string.openflux_settings_subtitle)
+            val state = when (openfluxEnabled) {
+                true -> stringResource(R.string.openflux_state_on)
+                false -> stringResource(R.string.openflux_state_off)
+                null -> null
+            }
+            SettingsNavigateItem(
+                icon = Icons.Default.Science,
+                title = stringResource(R.string.openflux_settings_title),
+                subtitle = if (state != null) {
+                    stringResource(R.string.openflux_settings_subtitle_state, base, state)
+                } else {
+                    base
+                },
+                onClick = onNavigateToOpenFlux
+            )
         }
 
         // About

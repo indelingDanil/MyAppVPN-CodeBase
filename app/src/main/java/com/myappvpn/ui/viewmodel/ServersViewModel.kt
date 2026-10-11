@@ -52,6 +52,10 @@ class ServersViewModel @Inject constructor(
 
     val vpnState: StateFlow<VpnState> = MyVpnService.vpnState
 
+    /** OpenFlux (Beta) mode on → the list isn't used; the screen shows a banner. */
+    val openfluxEnabled: StateFlow<Boolean> = preferences.openfluxEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     /** The server the live session is using right now (null = no session). */
     val activeServer: StateFlow<ServerProfile?> = MyVpnService.connectedServer
 
@@ -214,6 +218,11 @@ class ServersViewModel @Inject constructor(
 
     /** Back to Auto (balancer) mode — live under the running tunnel. */
     fun selectAuto() = controller.setAuto()
+
+    /** Leave OpenFlux mode (live session follows via the controller). */
+    fun disableOpenFlux() {
+        controller.setOpenFluxEnabled(false)
+    }
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
