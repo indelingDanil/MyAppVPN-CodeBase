@@ -79,8 +79,12 @@ function num(v, def) { return typeof v === 'number' && Number.isFinite(v) && v >
 function compileConfig(j) {
   const tokens = new Map();
   if (j && typeof j.personal === 'object' && j.personal) {
-    for (const [id, tok] of Object.entries(j.personal)) {
-      if (typeof tok === 'string' && tok.length >= 8) tokens.set(sha(tok), { kind: 'personal', id: String(id), key: 'p:' + id });
+    // "id": "token"  or  "id": { "token": "…", "until": <unix sec> } — a temporary pass that stops
+    // working (as an unknown token) after `until`.
+    for (const [id, v] of Object.entries(j.personal)) {
+      const tok = typeof v === 'string' ? v : v && typeof v === 'object' ? v.token : null;
+      const until = v && typeof v === 'object' ? num(v.until, 0) : 0;
+      if (typeof tok === 'string' && tok.length >= 8) tokens.set(sha(tok), { kind: 'personal', id: String(id), key: 'p:' + id, until });
     }
   }
   let demo = null;
@@ -96,7 +100,9 @@ function compileConfig(j) {
   const adminIds = Array.isArray(j && j.admin) ? j.admin.map(String) : ['p1'];
   for (const r of tokens.values()) if (r.kind === 'personal' && adminIds.includes(r.id)) r.admin = true;
   const personalIds = j && typeof j.personal === 'object' && j.personal ? Object.keys(j.personal) : [];
-  return { tokens, demo, personalIds };
+  const personalUntil = {};
+  for (const r of tokens.values()) if (r.kind === 'personal' && r.until > 0) personalUntil[r.id] = r.until;
+  return { tokens, demo, personalIds, personalUntil };
 }
 
 function loadConfig(force) {
@@ -120,7 +126,9 @@ function loadConfig(force) {
 
 function roleFor(k) {
   if (typeof k !== 'string' || k.length < 8 || k.length > 512) return null;
-  return cfg.tokens.get(sha(k)) || null;
+  const role = cfg.tokens.get(sha(k)) || null;
+  if (role && role.until > 0 && nowSec() > role.until) return null;   // expired temporary pass
+  return role;
 }
 
 // ── persistent demo counters ─────────────────────────────────────────────────
@@ -703,9 +711,11 @@ function statsData() {
   const personal = [...ids].sort().map((id) => {
     const key = 'p:' + id;
     const p = state.personal[key] || {};
+    const until = (cfg.personalUntil || {})[id] || 0;
     return {
       id,
-      active: (cfg.personalIds || []).includes(id),
+      active: (cfg.personalIds || []).includes(id) && !(until > 0 && now > until),
+      until,
       liveSessions: live[key] || 0,
       lastSeen: p.last || 0,
       firstSeen: p.first || 0,
@@ -746,9 +756,16 @@ function handleStats(res, asJson) {
     if (d < 86400) return Math.round(d / 3600) + ' ч назад';
     return Math.round(d / 86400) + ' дн назад';
   };
+  const left = (t) => {
+    const d = t - s.now;
+    return d >= 3600 ? Math.floor(d / 3600) + ' ч ' + Math.floor((d % 3600) / 60) + ' мин' : Math.max(1, Math.ceil(d / 60)) + ' мин';
+  };
+  const term = (p) => !p.until ? 'бессрочно'
+    : p.until > s.now ? `до ${msk(p.until)} <span class="sub">(ещё ${left(p.until)})</span>` : `истёк ${msk(p.until)}`;
   const rows = s.personal.map((p) => `<tr${p.active ? '' : ' class="off"'}><td>${esc(p.id)}${p.active ? '' : ' (выкл.)'}</td>` +
     `<td class="n">${p.liveSessions ? '<b>' + p.liveSessions + '</b>' : '0'}</td><td>${ago(p.lastSeen)}</td>` +
-    `<td class="n">${mb(p.bytesToday)}</td><td class="n">${mb(p.bytesWeek)}</td><td class="n">${p.sessionsTotal}</td></tr>`).join('');
+    `<td class="n">${mb(p.bytesToday)}</td><td class="n">${mb(p.bytesWeek)}</td><td class="n">${p.sessionsTotal}</td>` +
+    `<td>${term(p)}</td></tr>`).join('');
   const d = s.demo;
   const demoBlock = d ? `<h2>Демо</h2><table>
 <tr><td>Занято мест сейчас</td><td class="n"><b>${d.liveSessions}</b> из ${d.max}</td></tr>
@@ -767,7 +784,7 @@ th{color:#94a3b8;font-weight:500;font-size:13px}.n{text-align:right;font-variant
 .wrap{overflow-x:auto}</style></head><body>
 <h1>OpenFlux · статистика</h1>
 <div class="sub">${msk(s.now)} МСК · сервер работает ${Math.floor(s.uptimeSec / 3600)} ч ${Math.floor(s.uptimeSec % 3600 / 60)} мин · всего сессий сейчас: ${s.sessionsTotal} · обновляется каждые 30 с</div>
-<h2>Личные токены</h2><div class="wrap"><table><tr><th>Токен</th><th class="n">Сессий сейчас</th><th>Активность</th><th class="n">Сегодня</th><th class="n">7 дней</th><th class="n">Подключений всего</th></tr>${rows || '<tr><td colspan="6">нет</td></tr>'}</table></div>
+<h2>Личные токены</h2><div class="wrap"><table><tr><th>Токен</th><th class="n">Сессий сейчас</th><th>Активность</th><th class="n">Сегодня</th><th class="n">7 дней</th><th class="n">Подключений всего</th><th>Срок</th></tr>${rows || '<tr><td colspan="7">нет</td></tr>'}</table></div>
 ${demoBlock}
 <p class="sub">«Сессий сейчас» — открытые подключения; сессия живёт ещё ~1 мин после отключения. Учёт по личным токенам ведётся с момента обновления сервера.</p>
 </body></html>`;
