@@ -22,7 +22,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -138,21 +144,18 @@ fun HomeScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier.padding(bottom = LocalBottomBarPadding.current)
+            )
+        },
         containerColor = AetherBackground
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            GradientBackgroundStart,
-                            GradientBackgroundEnd
-                        )
-                    )
-                )
         ) {
             // Scrollable: when connected (stats card + hotspot banner) the content is taller
             // than most phone screens, and without scroll the bottom part was unreachable.
@@ -315,7 +318,7 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp + LocalBottomBarPadding.current))
             }
         }
     }
@@ -425,13 +428,32 @@ private fun ColumnScope.ModeCardContent(
     onSelectManual: () -> Unit,
     onOpenServers: () -> Unit
 ) {
-    // ── Segmented control ──
+    // ── Segmented control: capsule track + sliding indicator ──
+    val indicatorColor = AetherPalette.accentSoft
+    val indicatorPos by animateFloatAsState(
+        targetValue = if (autoMode) 0f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "modeIndicator"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(AetherBackground.copy(alpha = 0.5f))
-            .padding(4.dp),
+            .clip(RoundedCornerShape(50))
+            .background(AetherSurfaceVariant)
+            .padding(4.dp)
+            .drawBehind {
+                val gap = 4.dp.toPx()
+                val w = (size.width - gap) / 2f
+                drawRoundRect(
+                    color = indicatorColor,
+                    topLeft = Offset((w + gap) * indicatorPos, 0f),
+                    size = Size(w, size.height),
+                    cornerRadius = CornerRadius(size.height / 2f)
+                )
+            },
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         ModeSegment(
@@ -720,8 +742,12 @@ private fun ModeSegment(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(10.dp)
-    val textColor = if (selected) AetherCyan else AetherTextSecondary
+    val shape = RoundedCornerShape(50)
+    val textColor by animateColorAsState(
+        targetValue = if (selected) AetherCyan else AetherTextSecondary,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "modeSegmentText"
+    )
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
@@ -729,12 +755,6 @@ private fun ModeSegment(
             .heightIn(min = 48.dp)
             .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
-            .background(if (selected) AetherCyan.copy(alpha = 0.18f) else Color.Transparent)
-            .border(
-                width = 1.dp,
-                color = if (selected) AetherCyan.copy(alpha = 0.7f) else Color.Transparent,
-                shape = shape
-            )
             .selectable(
                 selected = selected,
                 enabled = enabled,

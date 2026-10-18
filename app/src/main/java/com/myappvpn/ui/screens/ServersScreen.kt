@@ -37,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myappvpn.R
 import com.myappvpn.service.VpnState
 import com.myappvpn.ui.components.ServerCard
+import com.myappvpn.ui.components.LocalBottomBarPadding
 import com.myappvpn.ui.theme.*
 import com.myappvpn.ui.viewmodel.ServersViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -83,7 +84,12 @@ fun ServersScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier.padding(bottom = LocalBottomBarPadding.current)
+            )
+        },
         containerColor = AetherBackground,
         topBar = {
             Column(
@@ -242,7 +248,7 @@ fun ServersScreen(
                         .background(AetherBackground),
                     contentPadding = PaddingValues(
                         start = 16.dp, end = 16.dp,
-                        top = 0.dp, bottom = 16.dp
+                        top = 0.dp, bottom = 16.dp + LocalBottomBarPadding.current
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {

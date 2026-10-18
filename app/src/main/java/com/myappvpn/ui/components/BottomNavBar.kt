@@ -1,9 +1,15 @@
 package com.myappvpn.ui.components
 
 import androidx.annotation.StringRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -18,12 +24,17 @@ import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.myappvpn.R
@@ -45,71 +56,106 @@ val navItems = listOf(
     NavItem(Screen.Project, R.string.nav_project, Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder)
 )
 
+val BottomBarHeight = 64.dp
+val BottomBarMargin = 12.dp
+
+/** Extra bottom padding scrollable screen content needs to clear the floating bar (0 when hidden). */
+val LocalBottomBarPadding = compositionLocalOf { 0.dp }
+
 @Composable
 fun AetherBottomNavBar(
     currentRoute: String?,
     onNavigate: (Screen) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(20.dp)
-    Box(
+    val c = AetherPalette
+    val selectedIndex = navItems.indexOfFirst { it.screen.route == currentRoute }
+
+    GlassSurface(
         modifier = modifier
             .fillMaxWidth()
-            .background(AetherBackground)
-            // ~8dp total vertical chrome around the 80dp bar (was 16dp).
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .height(BottomBarHeight),
+        shape = RoundedCornerShape(50)
     ) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(AetherSurface)
-                .border(
-                    width = 1.dp,
-                    color = AetherBorder.copy(alpha = 0.3f),
-                    shape = shape
-                )
+                .fillMaxSize()
+                .padding(6.dp)
         ) {
-            NavigationBar(
-                containerColor = Color.Transparent,
-                // System-bar insets are already applied by MainContent (systemBarsPadding).
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                navItems.forEach { item ->
-                    val isSelected = currentRoute == item.screen.route
-                    NavigationBarItem(
-                        selected = isSelected,
+            val itemWidth = maxWidth / navItems.size
+            val indicatorX by animateDpAsState(
+                targetValue = itemWidth * selectedIndex.coerceAtLeast(0),
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                ),
+                label = "navIndicator"
+            )
+            if (selectedIndex >= 0) {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(indicatorX.roundToPx(), 0) }
+                        .width(itemWidth)
+                        .fillMaxHeight()
+                        .background(c.accentSoft, RoundedCornerShape(50))
+                )
+            }
+            Row(modifier = Modifier.fillMaxSize().selectableGroup()) {
+                navItems.forEachIndexed { index, item ->
+                    NavBarItem(
+                        item = item,
+                        selected = index == selectedIndex,
                         onClick = { onNavigate(item.screen) },
-                        icon = {
-                            Icon(
-                                imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                                // The visible label already names the item.
-                                contentDescription = null
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = stringResource(item.labelRes),
-                                // Theme styles bake in a text color; use the item's content
-                                // color so selected/unselected tinting still applies.
-                                color = LocalContentColor.current,
-                                // 5 tabs: 11sp, no letter-spacing so "Статистика"/"Поддержать" fit uncut.
-                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = AetherCyan,
-                            selectedTextColor = AetherCyan,
-                            unselectedIconColor = AetherTextTertiary,
-                            unselectedTextColor = AetherTextTertiary,
-                            indicatorColor = AetherCyanGlow
-                        )
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NavBarItem(
+    item: NavItem,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val c = AetherPalette
+    val color by animateColorAsState(
+        targetValue = if (selected) c.accent else c.textSecondary,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "navItemColor"
+    )
+    Column(
+        modifier = modifier
+            .selectable(
+                selected = selected,
+                onClick = onClick,
+                role = Role.Tab,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            )
+            .padding(horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
+            // The visible label already names the item.
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = stringResource(item.labelRes),
+            color = color,
+            // 5 tabs: no letter-spacing so "Статистика"/"Поддержать" fit uncut.
+            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

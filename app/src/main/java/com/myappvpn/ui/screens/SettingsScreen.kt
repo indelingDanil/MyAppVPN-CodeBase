@@ -4,7 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -25,6 +28,7 @@ import com.myappvpn.BuildConfig
 import com.myappvpn.R
 import com.myappvpn.service.VpnState
 import com.myappvpn.ui.components.GlassCard
+import com.myappvpn.ui.components.LocalBottomBarPadding
 import com.myappvpn.ui.theme.*
 import com.myappvpn.ui.viewmodel.DnsViewModel
 import com.myappvpn.ui.viewmodel.OpenFluxViewModel
@@ -50,6 +54,8 @@ fun SettingsScreen(
     val splitTunnelEnabled by viewModel.splitTunnelEnabled.collectAsStateWithLifecycle()
     val killSwitchEnabled by viewModel.killSwitchEnabled.collectAsStateWithLifecycle()
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    var showThemeDialog by rememberSaveable { mutableStateOf(false) }
 
     // Connection-time settings only take effect on the next connect while a session is active.
     val sessionActive = vpnState != VpnState.DISCONNECTED && vpnState != VpnState.ERROR
@@ -59,7 +65,7 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(AetherBackground)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 16.dp + LocalBottomBarPadding.current),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
@@ -173,6 +179,16 @@ fun SettingsScreen(
             )
         }
 
+        // Appearance
+        SettingsSection(title = stringResource(R.string.settings_section_appearance)) {
+            SettingsNavigateItem(
+                icon = Icons.Default.Palette,
+                title = stringResource(R.string.settings_theme_title),
+                subtitle = themeMode?.let { stringResource(themeLabelRes(it)) } ?: "",
+                onClick = { showThemeDialog = true }
+            )
+        }
+
         // About
         SettingsSection(title = stringResource(R.string.settings_section_about)) {
             SettingsInfoItem(
@@ -198,6 +214,65 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
     }
+
+    if (showThemeDialog) {
+        ThemeDialog(
+            current = themeMode ?: ThemeMode.SYSTEM.name,
+            onSelect = {
+                viewModel.setThemeMode(it)
+                showThemeDialog = false
+            },
+            onDismiss = { showThemeDialog = false }
+        )
+    }
+}
+
+private fun themeLabelRes(mode: String): Int = when (mode) {
+    ThemeMode.LIGHT.name -> R.string.settings_theme_light
+    ThemeMode.DARK.name -> R.string.settings_theme_dark
+    else -> R.string.settings_theme_system
+}
+
+@Composable
+private fun ThemeDialog(current: String, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = AetherSurface,
+        title = { Text(stringResource(R.string.settings_theme_title), color = AetherTextPrimary) },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                ThemeMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .selectable(
+                                selected = current == mode.name,
+                                role = Role.RadioButton,
+                                onClick = { onSelect(mode.name) }
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        RadioButton(
+                            selected = current == mode.name,
+                            onClick = null,
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = AetherCyan,
+                                unselectedColor = AetherTextTertiary
+                            )
+                        )
+                        Text(stringResource(themeLabelRes(mode.name)), color = AetherTextPrimary)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.dns_cancel), color = AetherCyan)
+            }
+        }
+    )
 }
 
 @Composable

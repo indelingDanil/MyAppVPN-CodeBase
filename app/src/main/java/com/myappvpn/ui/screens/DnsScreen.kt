@@ -23,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -67,10 +68,13 @@ fun DnsScreen(
         if (raw.isNotEmpty()) viewModel.add(raw) { input = "" } // clear ONLY on success
     }
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         containerColor = AetherBackground,
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = {
                     Column {
                         Text(stringResource(R.string.dns_title), color = AetherTextPrimary, fontWeight = FontWeight.Bold)
@@ -94,7 +98,10 @@ fun DnsScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherBackground)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = AetherBackground,
+                    scrolledContainerColor = AetherSurface
+                )
             )
         }
     ) { padding ->

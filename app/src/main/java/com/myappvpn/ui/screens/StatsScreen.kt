@@ -27,6 +27,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myappvpn.R
 import com.myappvpn.service.VpnState
 import com.myappvpn.ui.components.GlassCard
+import com.myappvpn.ui.components.LocalBottomBarPadding
 import com.myappvpn.ui.theme.*
 import com.myappvpn.ui.viewmodel.HomeViewModel
 
@@ -65,7 +66,7 @@ fun StatsScreen(
             .fillMaxSize()
             .background(AetherBackground)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 16.dp + LocalBottomBarPadding.current),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Header

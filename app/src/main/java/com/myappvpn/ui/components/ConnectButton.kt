@@ -1,26 +1,36 @@
 package com.myappvpn.ui.components
 
+import android.os.Build
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -43,23 +53,29 @@ fun ConnectButton(
     modifier: Modifier = Modifier,
     size: Dp = 180.dp
 ) {
+    val c = AetherPalette
     val isConnected = vpnState == VpnState.CONNECTED
-    // Any in-between state: spinner arc + dimmed inner ring.
+    // Any in-between state: rotating progress ring around the circle.
     val isTransient = vpnState == VpnState.CONNECTING || vpnState == VpnState.DISCONNECTING ||
         vpnState == VpnState.BLOCKED
-    // Breathing pulse only while we're actively trying to (re)establish the tunnel.
-    val isPulsing = vpnState == VpnState.CONNECTING || vpnState == VpnState.BLOCKED
+    // Actively trying to (re)establish the tunnel: a tap cancels.
+    val isCancellable = vpnState == VpnState.CONNECTING || vpnState == VpnState.BLOCKED
 
-    val primaryColor by animateColorAsState(
-        targetValue = when (vpnState) {
-            VpnState.CONNECTED -> AetherConnected
-            VpnState.CONNECTING -> AetherConnecting
-            VpnState.BLOCKED -> AetherConnecting
-            VpnState.ERROR -> AetherDisconnected
-            else -> AetherCyan
-        },
-        animationSpec = tween(500),
-        label = "color"
+    val glassFill = c.glass.copy(alpha = if (c.isDark) 0.72f else 0.80f)
+    val fillColor by animateColorAsState(
+        targetValue = if (isConnected) c.connected else glassFill,
+        animationSpec = tween(250),
+        label = "fill"
+    )
+    val iconColor by animateColorAsState(
+        targetValue = if (isConnected) c.onAccent else c.accent,
+        animationSpec = tween(250),
+        label = "icon"
+    )
+    val labelColor by animateColorAsState(
+        targetValue = if (isConnected) c.onAccent else c.textPrimary,
+        animationSpec = tween(250),
+        label = "label"
     )
 
     val buttonLabel = stringResource(
@@ -83,44 +99,64 @@ fun ConnectButton(
         }
     )
     val clickLabel = stringResource(
-        if (isConnected || isPulsing) R.string.main_connect_click_disconnect
+        if (isConnected || isCancellable) R.string.main_connect_click_disconnect
         else R.string.main_connect_click_connect
     )
     val buttonDescription = stringResource(R.string.main_connect_cd)
 
     val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
     val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "pressScale"
+    )
 
-    // Animated values are read only inside graphicsLayer / draw lambdas → no per-frame recomposition.
-    val pulseScale: State<Float>? = if (isPulsing) rememberPulseScale() else null
+    // Haptic on outcome: confirm when connected, reject on error (not on first composition).
+    var lastState by remember { mutableStateOf(vpnState) }
+    LaunchedEffect(vpnState) {
+        if (vpnState == lastState) return@LaunchedEffect
+        lastState = vpnState
+        when (vpnState) {
+            VpnState.CONNECTED -> view.performHapticFeedback(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM
+                else HapticFeedbackConstants.VIRTUAL_KEY
+            )
+            VpnState.ERROR -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+            }
+            else -> Unit
+        }
+    }
 
     Box(
         contentAlignment = Alignment.Center,
-        modifier = modifier.size(size + 60.dp)  // extra space for rings
+        modifier = modifier.size(size + 24.dp)  // room for the progress ring
     ) {
-        // Expanding glow rings — only while connected.
-        if (isConnected) {
-            ConnectedRings(color = primaryColor, modifier = Modifier.size(size + 60.dp))
+        if (isTransient) {
+            ProgressRing(color = c.accent, modifier = Modifier.size(size + 14.dp))
         }
 
-        // Main button circle
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(size)
                 .graphicsLayer {
-                    val s = pulseScale?.value ?: 1f
-                    scaleX = s
-                    scaleY = s
+                    scaleX = pressScale
+                    scaleY = pressScale
                 }
                 .clip(CircleShape)
-                .background(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            primaryColor.copy(alpha = 0.2f),
-                            Color.Transparent
-                        )
-                    )
+                .background(fillColor)
+                .border(
+                    width = 1.dp,
+                    brush = if (isConnected) {
+                        SolidColor(Color.Transparent)
+                    } else {
+                        glassBorderBrush(c)
+                    },
+                    shape = CircleShape
                 )
                 .clickable(
                     interactionSource = interactionSource,
@@ -137,32 +173,7 @@ fun ConnectButton(
                     stateDescription = stateText
                 }
         ) {
-            // Spinning arc for in-between states
-            if (isTransient) {
-                SpinnerArc(color = primaryColor, modifier = Modifier.size(size - 8.dp))
-            }
-
-            // Inner border circle
-            Canvas(modifier = Modifier.size(size - 8.dp)) {
-                drawCircle(
-                    color = primaryColor.copy(alpha = if (isTransient) 0.3f else 0.6f),
-                    style = Stroke(width = 2.dp.toPx())
-                )
-            }
-
-            // Glow background
-            Canvas(modifier = Modifier.size(size - 20.dp)) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            primaryColor.copy(alpha = 0.15f),
-                            Color.Transparent
-                        )
-                    )
-                )
-            }
-
-            // Button label (visual only — semantics come from the clickable node above)
+            // Visual only — semantics come from the clickable node above.
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
@@ -170,20 +181,27 @@ fun ConnectButton(
                     .padding(horizontal = 16.dp)
                     .clearAndSetSemantics { }
             ) {
+                Icon(
+                    imageVector = Icons.Filled.PowerSettingsNew,
+                    contentDescription = null,
+                    tint = iconColor,
+                    modifier = Modifier.size(44.dp)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     text = buttonLabel,
-                    color = primaryColor,
+                    color = labelColor,
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.sp,
                     textAlign = TextAlign.Center,
                     maxLines = 1
                 )
-                if (isPulsing) {
+                if (isCancellable) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = stringResource(R.string.main_connect_hint_cancel),
-                        color = primaryColor.copy(alpha = 0.75f),
+                        color = c.textSecondary,
                         style = MaterialTheme.typography.labelSmall,
                         textAlign = TextAlign.Center,
                         maxLines = 1
@@ -195,70 +213,32 @@ fun ConnectButton(
 }
 
 @Composable
-private fun rememberPulseScale(): State<Float> {
-    val transition = rememberInfiniteTransition(label = "pulse")
-    return transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = EaseInOut),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-}
-
-@Composable
-private fun ConnectedRings(color: Color, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "rings")
-    val progress = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1600, easing = EaseOut),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "ringProgress"
-    )
-    Canvas(
-        modifier = modifier.graphicsLayer {
-            val p = progress.value
-            val s = 0.8f + 0.2f * p
-            scaleX = s
-            scaleY = s
-            alpha = 0.6f * (1f - p)
-        }
-    ) {
-        val maxRadius = this.size.minDimension / 2f
-        drawCircle(
-            color = color.copy(alpha = 0.5f),
-            radius = maxRadius * 0.92f,
-            style = Stroke(width = 2.dp.toPx())
-        )
-        drawCircle(
-            color = color.copy(alpha = 0.3f),
-            radius = maxRadius * 0.99f,
-            style = Stroke(width = 1.5.dp.toPx())
-        )
-    }
-}
-
-@Composable
-private fun SpinnerArc(color: Color, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "arc")
+private fun ProgressRing(color: Color, modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "ring")
     val angle = transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
-        animationSpec = infiniteRepeatable(animation = tween(1000, easing = LinearEasing)),
-        label = "arcAngle"
+        animationSpec = infiniteRepeatable(animation = tween(1100, easing = LinearEasing)),
+        label = "ringAngle"
     )
     Canvas(modifier = modifier.graphicsLayer { rotationZ = angle.value }) {
+        val stroke = 3.dp.toPx()
+        drawCircle(
+            color = color.copy(alpha = 0.15f),
+            radius = (this.size.minDimension - stroke) / 2f,
+            style = Stroke(width = stroke)
+        )
         drawArc(
             color = color,
             startAngle = 0f,
-            sweepAngle = 120f,
+            sweepAngle = 90f,
             useCenter = false,
-            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+            topLeft = Offset(stroke / 2f, stroke / 2f),
+            size = Size(
+                this.size.width - stroke,
+                this.size.height - stroke
+            ),
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
         )
     }
 }

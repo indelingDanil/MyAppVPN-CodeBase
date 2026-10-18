@@ -158,6 +158,14 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** "SYSTEM" / "LIGHT" / "DARK"; null = not loaded yet. */
+    val themeMode: StateFlow<String?> = preferences.themeMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun setThemeMode(value: String) = viewModelScope.launch {
+        preferences.setThemeMode(value)
+    }
+
     fun setHotspotSharing(value: Boolean) = viewModelScope.launch {
         preferences.setHotspotSharing(value)
     }

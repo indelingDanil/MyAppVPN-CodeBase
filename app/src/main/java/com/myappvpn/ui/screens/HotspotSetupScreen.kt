@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -65,9 +66,12 @@ fun HotspotSetupScreen(
 
     val hostHint = if (ipKnown) ip else stringResource(R.string.hotspot_host_hint_unknown)
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = {
                     Text(
                         text = stringResource(R.string.hotspot_title),
@@ -84,7 +88,10 @@ fun HotspotSetupScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherBackground)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = AetherBackground,
+                    scrolledContainerColor = AetherSurface
+                )
             )
         },
         containerColor = AetherBackground

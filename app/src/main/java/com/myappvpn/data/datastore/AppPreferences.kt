@@ -37,6 +37,8 @@ class AppPreferences @Inject constructor(
         // Xray dns.queryStrategy: "UseIPv4" (default) or "UseIP".
         val KEY_DNS_QUERY_STRATEGY = stringPreferencesKey("dns_query_strategy")
         val KEY_SHOW_STATS = booleanPreferencesKey("show_stats")
+        // UI theme: ThemeMode name (SYSTEM / LIGHT / DARK); absent = SYSTEM.
+        val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_SOCKS_PORT = intPreferencesKey("socks_port")
         val KEY_HOTSPOT_SHARING = booleanPreferencesKey("hotspot_sharing")
         val KEY_KILL_SWITCH = booleanPreferencesKey("kill_switch_enabled")
@@ -142,6 +144,15 @@ class AppPreferences @Inject constructor(
     val showStats: Flow<Boolean> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { it[KEY_SHOW_STATS] ?: true }
+
+    /** ThemeMode name: "SYSTEM" (default), "LIGHT" or "DARK". */
+    val themeMode: Flow<String> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_THEME_MODE] ?: "SYSTEM" }
+
+    suspend fun setThemeMode(value: String) {
+        dataStore.edit { it[KEY_THEME_MODE] = value }
+    }
 
     val socksPort: Flow<Int> = dataStore.data
         .catch { emit(emptyPreferences()) }

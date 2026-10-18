@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.myappvpn"
-    compileSdk = 34
+    compileSdk = 36
     // NDK r28+ links native libs with 16 KB page alignment by default
     ndkVersion = "28.2.13676358"
 
@@ -16,21 +16,19 @@ android {
         applicationId = "com.myappvpn"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "2.1.1-beta"
+        // Per-ABI APKs get versionCode * 10 + 1 (armeabi-v7a) / + 2 (arm64-v8a), see androidComponents.
+        versionCode = 13
+        versionName = "2.1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
 
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
-
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
             }
         }
     }
@@ -81,10 +79,29 @@ android {
         }
     }
 
-    // Don't compress xray/tun2socks binaries in APK — they are read from assets directly
-    androidResources {
-        noCompress += listOf("xray-arm64-v8a", "xray-armeabi-v7a", "xray-x86_64",
-            "tun2socks-arm64-v8a", "tun2socks-armeabi-v7a", "tun2socks-x86_64")
+    // One APK per ABI: 64-bit phones and 32-bit Android (e.g. budget Samsung on Android 10).
+    // Native executables live in src/main/jniLibs/<abi>/ (xray = libcore.so, tun2socks =
+    // libnetstack.so, OpenFlux bridge = libofbridge.so).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
+    }
+}
+
+// arm64 gets the higher code, so a 64-bit phone that once got the 32-bit APK can still update.
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val abi = output.filters.find {
+                it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI
+            }?.identifier
+            val suffix = when (abi) { "armeabi-v7a" -> 1; "arm64-v8a" -> 2; else -> 0 }
+            output.versionCode.set((output.versionCode.orNull ?: 0) * 10 + suffix)
+        }
     }
 }
 
@@ -103,6 +120,8 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.animation)
+    implementation(libs.haze)
+    implementation(libs.haze.materials)
 
     // Navigation
     implementation(libs.androidx.navigation.compose)

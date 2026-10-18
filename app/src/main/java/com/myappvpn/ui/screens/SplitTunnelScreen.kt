@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -55,10 +56,13 @@ fun SplitTunnelScreen(
         viewModel.loadInstalledApps()
     }
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         containerColor = AetherBackground,
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = {
                     Column {
                         Text(
@@ -96,7 +100,8 @@ fun SplitTunnelScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = AetherBackground
+                    containerColor = AetherBackground,
+                    scrolledContainerColor = AetherSurface
                 )
             )
         }

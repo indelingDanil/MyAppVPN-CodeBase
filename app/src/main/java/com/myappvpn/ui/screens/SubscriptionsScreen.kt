@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -73,11 +74,14 @@ fun SubscriptionsScreen(
         if (url.isNotEmpty()) viewModel.addSubscription(url)
     }
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         containerColor = AetherBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = {
                     Column {
                         Text(
@@ -103,7 +107,10 @@ fun SubscriptionsScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherBackground)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = AetherBackground,
+                    scrolledContainerColor = AetherSurface
+                )
             )
         }
     ) { padding ->

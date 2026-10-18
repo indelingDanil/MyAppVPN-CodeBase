@@ -32,6 +32,12 @@ class OpenFluxManager(private val context: Context) {
         private const val STATUS_PREFIX = "OFSTATUS "
         private const val LEFT_PREFIX = "OFLEFT "
         private const val LEFT_MB_PREFIX = "OFLEFTMB "
+        private const val NOTE_PREFIX = "OFNOTE "
+        private const val IPCACHE_FILE = "of-ipcache.json"
+
+        /** Exit-host IP cache shared by the running bridge and the diagnostics run. */
+        fun ipCachePath(context: Context): String =
+            java.io.File(context.filesDir, IPCACHE_FILE).absolutePath
     }
 
     @Volatile private var process: Process? = null
@@ -83,6 +89,10 @@ class OpenFluxManager(private val context: Context) {
                     "-listen", "127.0.0.1:$port",
                     "-user", user,
                     "-pass", pass,
+                    // Remembered exit-host IPs: keeps working when the carrier's DNS doesn't.
+                    "-ipcache", ipCachePath(context),
+                    // Short polls when a carrier proxy buffers long responses (bridge decides).
+                    "-shortpoll", "auto",
                 )
                 // -debug logs every destination — debug builds only.
                 if (BuildConfig.DEBUG) cmd.add("-debug")
@@ -113,6 +123,10 @@ class OpenFluxManager(private val context: Context) {
                                 } else if (t.startsWith(LEFT_PREFIX)) {
                                     val n = t.removePrefix(LEFT_PREFIX).trim().toDoubleOrNull()?.toInt()
                                     if (process === proc && n != null) _leftSec.value = n
+                                } else if (t.startsWith(NOTE_PREFIX)) {
+                                    // e.g. "OFNOTE shortpoll": the bridge switched to short polls
+                                    // (carrier proxy buffers long responses). Informational only.
+                                    if (BuildConfig.DEBUG) Log.d(TAG, "OpenFlux note: ${t.removePrefix(NOTE_PREFIX).trim()}")
                                 } else if (BuildConfig.DEBUG) {
                                     var safe = line
                                     for (s in secrets) safe = safe.replace(s, "***")

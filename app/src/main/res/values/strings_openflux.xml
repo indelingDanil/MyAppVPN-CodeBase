@@ -73,4 +73,15 @@
     <string name="openflux_demo_button">Подключить демо</string>
     <string name="openflux_demo_selected">Сейчас выбран демо-сервер MyAppVPN</string>
     <string name="openflux_own_exit_note">Свой выход — без ограничений</string>
+
+    <!-- Connection diagnostics -->
+    <string name="openflux_diag_button">Диагностика подключения</string>
+    <string name="openflux_diag_title">Диагностика подключения</string>
+    <string name="openflux_diag_running">Проверяем сеть… до полутора минут</string>
+    <string name="openflux_diag_note">Запускайте диагностику на той сети, где не работает (например, на мобильном интернете). VPN можно не отключать.</string>
+    <string name="openflux_diag_copy">Скопировать</string>
+    <string name="openflux_diag_share">Поделиться</string>
+    <string name="openflux_diag_close">Закрыть</string>
+    <string name="openflux_diag_copied">Отчёт скопирован</string>
+    <string name="openflux_diag_share_title">Отправить отчёт</string>
 </resources>

@@ -163,4 +163,10 @@
     <string name="hotspot_verify_text">Open a browser on the other device and check your IP on 2ip.ru or whoer.net — it should match the VPN server\'s IP.</string>
     <string name="hotspot_disable_title">How to turn off</string>
     <string name="hotspot_disable_text">On the other device, repeat the steps above and set “Proxy” to “None” (iOS — “Off”).</string>
+    <!-- Appearance -->
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_theme_title">Theme</string>
+    <string name="settings_theme_system">System default</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
 </resources>

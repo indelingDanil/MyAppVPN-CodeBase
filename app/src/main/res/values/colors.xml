@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="background">#090E1A</color>
-    <color name="surface">#111827</color>
-    <color name="primary">#00E5FF</color>
+    <!-- Light palette (values-night/colors.xml holds the dark one). Used by the window/splash
+         before Compose draws; Compose itself uses ui/theme/Color.kt. -->
+    <color name="background">#F5F6F8</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="primary">#2F6FE4</color>
+    <bool name="light_system_bars">true</bool>
 </resources>

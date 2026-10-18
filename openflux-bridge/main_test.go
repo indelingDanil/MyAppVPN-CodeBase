@@ -4,13 +4,21 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -128,10 +136,24 @@ type fakeV2 struct {
 	upHook func(w http.ResponseWriter, n int, s *fakeSess, off int64, body []byte) bool
 	echo   bool          // answer OPEN with OPEN_OK, echo DATA; a pad frame before each answer
 	life   time.Duration // a down ends cleanly after this
+	token  string        // accepted token
+	// shortLife: a poll=short down ends cleanly after this (the real exit: 250 ms after a burst / first keepalive).
+	shortLife time.Duration
+	pad       time.Duration // > 0: a 4096-byte pad frame after this much idle time (sequenced)
+	stallLong bool          // a long-poll down sends headers, then never the preamble (a buffering proxy)
+
+	qmu     sync.Mutex
+	queries []string // every down's raw query
+}
+
+func (f *fakeV2) downQueries() []string {
+	f.qmu.Lock()
+	defer f.qmu.Unlock()
+	return append([]string(nil), f.queries...)
 }
 
 func newFakeV2(t *testing.T) (*fakeV2, *httptest.Server) {
-	f := &fakeV2{sess: map[string]*fakeSess{}, life: 2 * time.Second}
+	f := &fakeV2{sess: map[string]*fakeSess{}, life: 2 * time.Second, token: "tok", shortLife: 100 * time.Millisecond}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	return f, srv
@@ -149,7 +171,7 @@ func (f *fakeV2) only() *fakeSess {
 func (f *fakeV2) serve(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	w.Header().Set("X-OF-Proto", "2")
-	if q.Get("k") != "tok" || q.Get("v") != "2" {
+	if q.Get("k") != f.token || q.Get("v") != "2" {
 		http.Error(w, "no", http.StatusNotFound)
 		return
 	}
@@ -166,8 +188,21 @@ func (f *fakeV2) serve(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeV2) serveDown(w http.ResponseWriter, r *http.Request, id string) {
 	from, _ := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
+	short := r.URL.Query().Get("poll") == "short"
+	f.qmu.Lock()
+	f.queries = append(f.queries, r.URL.RawQuery)
+	f.qmu.Unlock()
 	n := int(f.downs.Add(1))
 	if f.downHook != nil && f.downHook(w, n, from) {
+		return
+	}
+	if f.stallLong && !short {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		select { // the proxy holds the body until the response ends
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
 		return
 	}
 	f.mu.Lock()
@@ -204,8 +239,19 @@ func (f *fakeV2) serveDown(w http.ResponseWriter, r *http.Request, id string) {
 		cut, abort = f.downCut(n)
 	}
 	pos, sent := from, 0
-	deadline := time.Now().Add(f.life)
+	life := f.life
+	if short {
+		life = min(life, f.shortLife)
+	}
+	deadline := time.Now().Add(life)
+	lastWrite := time.Now()
 	for time.Now().Before(deadline) {
+		if f.pad > 0 && time.Since(lastWrite) >= f.pad {
+			lastWrite = time.Now()
+			s.mu.Lock()
+			s.produce(phpbox.Encode(nil, phpbox.Frame{Type: phpbox.FrameData, StreamID: 0xFFFFFFFF, Payload: make([]byte, 4087)}))
+			s.mu.Unlock()
+		}
 		s.mu.Lock()
 		if s.attach != my || pos < s.acked {
 			s.mu.Unlock()
@@ -225,6 +271,7 @@ func (f *fakeV2) serveDown(w http.ResponseWriter, r *http.Request, id string) {
 				return
 			}
 			fl.Flush()
+			lastWrite = time.Now()
 			pos += int64(len(chunk))
 			sent += len(chunk)
 			if cut > 0 && sent >= cut {
@@ -717,5 +764,319 @@ func TestV2MuxEchoThroughCutsAndPads(t *testing.T) {
 	}
 	if c.isEnded() {
 		t.Fatal("session ended")
+	}
+}
+
+// ── exit dialing: DNS fallback to the IP cache ──────────────────────────────
+
+type fakeResolver struct {
+	mu    sync.Mutex
+	addrs []net.IPAddr
+	err   error
+	calls int
+}
+
+func (r *fakeResolver) lookup(ctx context.Context, host string) ([]net.IPAddr, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IPAddr{{IP: ip}}, nil
+	}
+	return r.addrs, r.err
+}
+
+func (r *fakeResolver) set(addrs []net.IPAddr, err error) {
+	r.mu.Lock()
+	r.addrs, r.err = addrs, err
+	r.mu.Unlock()
+}
+
+func testDialer(t *testing.T, res *fakeResolver) *exitDialer {
+	d := newExitDialer()
+	d.lookup = res.lookup
+	d.cachePath = filepath.Join(t.TempDir(), "ipcache.json")
+	return d
+}
+
+func TestExitDialerCacheWriteAndFallback(t *testing.T) {
+	res := &fakeResolver{}
+	d := testDialer(t, res)
+	ctx := context.Background()
+
+	res.set([]net.IPAddr{{IP: net.ParseIP("2001:db8::1")}, {IP: net.ParseIP("203.0.113.7")}}, nil)
+	ip, how, err := d.resolve(ctx, "exit.example")
+	if err != nil || ip != "203.0.113.7" || how != "dns" {
+		t.Fatalf("dns: %q %q %v (want the IPv4)", ip, how, err)
+	}
+	b, err := os.ReadFile(d.cachePath)
+	if err != nil {
+		t.Fatalf("cache not written: %v", err)
+	}
+	var e ipCacheEntry
+	if json.Unmarshal(b, &e) != nil || e.Host != "exit.example" || e.IP != "203.0.113.7" || e.At == 0 {
+		t.Fatalf("cache content %s", b)
+	}
+
+	// A fresh dialer (new process) on a network whose DNS fails.
+	d2 := newExitDialer()
+	d2.lookup, d2.cachePath = res.lookup, d.cachePath
+	res.set(nil, &net.DNSError{Err: "server misbehaving", Name: "exit.example", IsTimeout: true})
+	ip, how, err = d2.resolve(ctx, "exit.example")
+	if err != nil || ip != "203.0.113.7" || how != "cache" {
+		t.Fatalf("fallback: %q %q %v", ip, how, err)
+	}
+	// No addresses at all is a failure too.
+	res.set(nil, nil)
+	if ip, how, _ = d2.resolve(ctx, "exit.example"); how != "cache" || ip != "203.0.113.7" {
+		t.Fatalf("empty answer: %q %q", ip, how)
+	}
+	// The cache is per host.
+	res.set(nil, errors.New("boom"))
+	if _, _, err = d2.resolve(ctx, "other.example"); err == nil {
+		t.Fatal("other host used a foreign cache entry")
+	}
+	// -ip skips DNS.
+	d2.override = "198.51.100.9"
+	calls := res.calls
+	if ip, how, _ = d2.resolve(ctx, "exit.example"); ip != "198.51.100.9" || how != "override" || res.calls != calls {
+		t.Fatalf("override: %q %q (lookups %d→%d)", ip, how, calls, res.calls)
+	}
+}
+
+func TestExitDialerKeepsHostHeader(t *testing.T) {
+	var gotHost atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost.Store(r.Host)
+		fmt.Fprint(w, "hi")
+	}))
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	res := &fakeResolver{err: &net.DNSError{Err: "no such host", Name: "exit.invalid", IsNotFound: true}}
+	d := testDialer(t, res)
+	b, _ := json.Marshal(ipCacheEntry{Host: "exit.invalid", IP: "127.0.0.1", At: 1})
+	if err := os.WriteFile(d.cachePath, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hc := &http.Client{Transport: newExitTransport(d), Timeout: 5 * time.Second}
+	resp, err := hc.Get("http://exit.invalid:" + port + "/n/")
+	if err != nil {
+		t.Fatalf("request via cached IP failed: %v", err)
+	}
+	resp.Body.Close()
+	if h := gotHost.Load(); h != "exit.invalid:"+port {
+		t.Fatalf("Host header %v, want the original host", h)
+	}
+	// Without a cache the DNS error surfaces, mapped to a short string.
+	d.cachePath, d.mem = "", nil
+	hc = &http.Client{Transport: newExitTransport(d), Timeout: 5 * time.Second}
+	_, err = hc.Get("http://exit.invalid:" + port + "/n/")
+	if err == nil || errStr(err) != "no such host" {
+		t.Fatalf("want 'no such host', got %v (%q)", err, errStr(err))
+	}
+}
+
+func TestErrStr(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.EPERM)}, "permission denied"},
+		{&net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.EACCES)}, "permission denied"},
+		{&net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}, "connection refused"},
+		{&net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ENETUNREACH)}, "network is unreachable"},
+		{&net.DNSError{Err: "no such host", Name: "x", IsNotFound: true}, "no such host"},
+		{context.DeadlineExceeded, "i/o timeout"},
+		{&url.Error{Op: "Get", URL: "http://h/?k=SECRET", Err: errors.New("dial tcp: i/o timeout")}, "i/o timeout"},
+		{&url.Error{Op: "Get", URL: "http://h/?k=SECRET", Err: errors.New("weird")}, "weird"},
+	} {
+		if got := errStr(c.err); got != c.want {
+			t.Errorf("errStr(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}
+
+// ── short-poll auto switch ──────────────────────────────────────────────────
+
+func resetShort(t *testing.T) {
+	old := v2PreambleWait
+	shortActive.Store(false)
+	t.Cleanup(func() { shortActive.Store(false); v2PreambleWait = old })
+}
+
+func TestV2ShortPollAutoSwitch(t *testing.T) {
+	fastV2(t)
+	resetShort(t)
+	v2PreambleWait = 150 * time.Millisecond
+	f, srv := newFakeV2(t)
+	f.stallLong = true // headers come, the preamble never does (proxy buffering)
+	c := startV2(t, srv, false)
+	waitFor(t, 5*time.Second, "short poll", func() bool {
+		q := f.downQueries()
+		return len(q) >= 2 && strings.Contains(q[len(q)-1], "poll=short")
+	})
+	if !shortActive.Load() {
+		t.Fatal("short mode not recorded")
+	}
+	if strings.Contains(f.downQueries()[0], "poll=short") {
+		t.Fatal("first poll was already short")
+	}
+	waitFor(t, 2*time.Second, "session", func() bool { return f.only() != nil })
+	want := randBytes(300000)
+	go produceSlowly(f, want, 1500)
+	waitFor(t, 10*time.Second, "all down bytes over short polls", func() bool { return len(c.received()) >= len(want) })
+	if !bytes.Equal(c.received(), want) {
+		t.Fatal("down stream corrupted over short polls")
+	}
+	if c.isEnded() {
+		t.Fatal("session ended")
+	}
+	if n := f.downs.Load(); n < 4 {
+		t.Fatalf("expected many short polls, got %d", n)
+	}
+	for _, q := range f.downQueries()[1:] {
+		if !strings.Contains(q, "poll=short") {
+			t.Fatalf("a later poll was long: %s", q)
+		}
+	}
+}
+
+func TestV2LongPollStaysLong(t *testing.T) {
+	fastV2(t)
+	resetShort(t)
+	v2PreambleWait = 150 * time.Millisecond
+	f, srv := newFakeV2(t)
+	f.life = 400 * time.Millisecond // clean ends, each well past the preamble wait
+	_ = startV2(t, srv, false)
+	waitFor(t, 5*time.Second, "several polls", func() bool { return f.downs.Load() >= 3 })
+	if shortActive.Load() {
+		t.Fatal("switched to short polls on a healthy long-poll")
+	}
+}
+
+// ── -diag ───────────────────────────────────────────────────────────────────
+
+func fastDiag(t *testing.T) *fakeResolver {
+	a, b, c, d, e, g := diagTCPTimeout, diagHTTPTimeout, diagPreambleWait, diagStreamWait, diagShortMax, exitDial
+	diagTCPTimeout, diagHTTPTimeout, diagPreambleWait, diagStreamWait, diagShortMax = time.Second, 2*time.Second, 600*time.Millisecond, 500*time.Millisecond, 2*time.Second
+	res := &fakeResolver{}
+	exitDial = testDialer(t, res)
+	t.Cleanup(func() {
+		diagTCPTimeout, diagHTTPTimeout, diagPreambleWait, diagStreamWait, diagShortMax, exitDial = a, b, c, d, e, g
+	})
+	return res
+}
+
+func diagJSON(t *testing.T, r *diagReport) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte("SECRETTOKEN")) {
+		t.Fatalf("token leaked into the report: %s", b)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"dns_system", "ipcache", "tcp", "http_probe", "stream_long", "stream_short", "up_post", "summary"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("report lacks %q: %s", k, b)
+		}
+	}
+	return m
+}
+
+func TestDiagHealthy(t *testing.T) {
+	fastDiag(t)
+	f, srv := newFakeV2(t)
+	f.token = "SECRETTOKEN"
+	f.pad = 100 * time.Millisecond
+	r := runDiag(srv.URL+"/n/", "SECRETTOKEN", "client-1234")
+	m := diagJSON(t, r)
+	if r.Summary != "ok" {
+		t.Fatalf("summary %q: %v", r.Summary, m)
+	}
+	if r.TCP.Family != "ipv4" || r.TCP.Source != "dns" || len(r.DNS.IPv4) != 1 {
+		t.Fatalf("dns/tcp: %+v %+v", r.DNS, r.TCP)
+	}
+	if r.HTTPProbe.Status != 404 || !r.HTTPProbe.Proto {
+		t.Fatalf("probe: %+v", r.HTTPProbe)
+	}
+	l, s := r.StreamLong, r.StreamShort
+	if l.Status != 200 || l.HeadersMs < 0 || l.PreambleMs < 0 || l.StreamingOK == nil || !*l.StreamingOK {
+		t.Fatalf("long: %+v", l)
+	}
+	if s.Status != 200 || s.PreambleMs < 0 || s.Bytes < v2PreambleLen || s.Err != "" {
+		t.Fatalf("short: %+v", s)
+	}
+	if r.UpPost == nil || r.UpPost.Status != 200 || r.UpPost.Body != "ok 0" {
+		t.Fatalf("up: %+v", r.UpPost)
+	}
+	for _, q := range f.downQueries() {
+		if strings.Contains(q, "SECRETTOKEN") && !strings.Contains(q, "c=client-1234") {
+			t.Fatalf("session poll without the client id: %s", q)
+		}
+	}
+}
+
+func TestDiagBufferingProxy(t *testing.T) {
+	fastDiag(t)
+	f, srv := newFakeV2(t)
+	f.token = "SECRETTOKEN"
+	f.stallLong = true
+	r := runDiag(srv.URL+"/n/", "SECRETTOKEN", "")
+	diagJSON(t, r)
+	if r.Summary != "proxy_buffering_use_shortpoll" {
+		t.Fatalf("summary %q, long %+v short %+v", r.Summary, r.StreamLong, r.StreamShort)
+	}
+	if r.StreamLong.PreambleMs != -1 || r.StreamLong.StreamingOK == nil || *r.StreamLong.StreamingOK {
+		t.Fatalf("long: %+v", r.StreamLong)
+	}
+}
+
+func TestDiagRefusals(t *testing.T) {
+	fastDiag(t)
+	f, srv := newFakeV2(t)
+	f.token = "SECRETTOKEN"
+	if r := runDiag(srv.URL+"/n/", "SECRETTOKEN-wrong", ""); r.Summary != "token_rejected" {
+		t.Fatalf("bad token: %q", r.Summary)
+	}
+	f.downHook = func(w http.ResponseWriter, n int, from int64) bool {
+		w.Header().Set("X-OF-Reason", "expired")
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+		return true
+	}
+	if r := runDiag(srv.URL+"/n/", "SECRETTOKEN", "c-12345678"); r.Summary != "demo_refused:expired" {
+		t.Fatalf("demo: %q", r.Summary)
+	}
+}
+
+func TestDiagDNSAndTCPFailures(t *testing.T) {
+	res := fastDiag(t)
+	f, srv := newFakeV2(t)
+	f.token = "SECRETTOKEN"
+	f.pad = 100 * time.Millisecond
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	u := "http://exit.invalid:" + port + "/n/"
+	res.set(nil, &net.DNSError{Err: "no such host", Name: "exit.invalid", IsNotFound: true})
+	r := runDiag(u, "SECRETTOKEN", "")
+	diagJSON(t, r)
+	if r.Summary != "dns_failed" || r.DNS.Err != "no such host" {
+		t.Fatalf("no cache: %q %+v", r.Summary, r.DNS)
+	}
+	b, _ := json.Marshal(ipCacheEntry{Host: "exit.invalid", IP: "127.0.0.1", At: 1})
+	_ = os.WriteFile(exitDial.cachePath, b, 0o600)
+	exitDial.mem = nil
+	r = runDiag(u, "SECRETTOKEN", "")
+	if r.Summary != "ok_via_ipcache" || r.TCP.Source != "cache" || r.IPCache == nil || r.IPCache.IP != "127.0.0.1" {
+		t.Fatalf("with cache: %q %+v %+v", r.Summary, r.TCP, r.IPCache)
+	}
+	exitDial.override = "127.0.0.1"
+	srv.Close()
+	r = runDiag(u, "SECRETTOKEN", "")
+	if r.Summary != "tcp_failed" || r.TCP.Err != "connection refused" {
+		t.Fatalf("closed port: %q %+v", r.Summary, r.TCP)
 	}
 }

@@ -170,4 +170,10 @@
     <string name="hotspot_verify_text">Откройте браузер на другом устройстве и проверьте IP на 2ip.ru или whoer.net — он должен совпадать с IP VPN-сервера.</string>
     <string name="hotspot_disable_title">Как отключить</string>
     <string name="hotspot_disable_text">На другом устройстве повторите шаги выше и в поле «Прокси» выберите «Нет» (iOS — «Выкл.»).</string>
+    <!-- Appearance -->
+    <string name="settings_section_appearance">Оформление</string>
+    <string name="settings_theme_title">Тема</string>
+    <string name="settings_theme_system">Как в системе</string>
+    <string name="settings_theme_light">Светлая</string>
+    <string name="settings_theme_dark">Тёмная</string>
 </resources>

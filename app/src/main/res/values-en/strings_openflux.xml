@@ -71,4 +71,15 @@
     <string name="openflux_demo_button">Connect demo</string>
     <string name="openflux_demo_selected">The MyAppVPN demo server is selected</string>
     <string name="openflux_own_exit_note">Your own exit: no limits</string>
+
+    <!-- Connection diagnostics -->
+    <string name="openflux_diag_button">Connection diagnostics</string>
+    <string name="openflux_diag_title">Connection diagnostics</string>
+    <string name="openflux_diag_running">Checking the network… up to a minute and a half</string>
+    <string name="openflux_diag_note">Run the diagnostics on the network where it doesn\'t work (e.g. mobile data). No need to turn the VPN off.</string>
+    <string name="openflux_diag_copy">Copy</string>
+    <string name="openflux_diag_share">Share</string>
+    <string name="openflux_diag_close">Close</string>
+    <string name="openflux_diag_copied">Report copied</string>
+    <string name="openflux_diag_share_title">Send report</string>
 </resources>

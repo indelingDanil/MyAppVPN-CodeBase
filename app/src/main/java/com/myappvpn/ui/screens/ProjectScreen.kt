@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import com.myappvpn.BuildConfig
 import com.myappvpn.R
 import com.myappvpn.ui.components.DisclaimerText
+import com.myappvpn.ui.components.LocalBottomBarPadding
 import com.myappvpn.ui.components.ProjectLinksCard
 import com.myappvpn.ui.components.SupportCard
 import com.myappvpn.ui.theme.*
@@ -26,7 +27,7 @@ fun ProjectScreen() {
             .fillMaxSize()
             .background(AetherBackground)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 16.dp + LocalBottomBarPadding.current),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Column {

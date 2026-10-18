@@ -46,7 +46,19 @@ object SubscriptionUrls {
         "https://codeberg.org/igareck/vpn-configs-for-russia/raw/branch/main/BLACK_VLESS_RUS.txt",
     )
 
+    /**
+     * Our own aggregated list (github.com/indelingDanil/MyAppVPN-subs, `output` branch): a bot
+     * discovers public sources, keeps live reality/tls VLESS only. jsDelivr first — raw GitHub is
+     * often throttled on RU mobile.
+     */
+    val MYAPPVPN_CHAIN = listOf(
+        "https://cdn.jsdelivr.net/gh/indelingDanil/MyAppVPN-subs@output/vless.txt",
+        "https://raw.githack.com/indelingDanil/MyAppVPN-subs/output/vless.txt",
+        "https://raw.githubusercontent.com/indelingDanil/MyAppVPN-subs/output/vless.txt",
+    )
+
     /** Stable ids for the built-in sources (used as DataStore keys for enable/disable state). */
+    const val ID_MYAPPVPN = "builtin:myappvpn"
     const val ID_UNIVERSAL = "builtin:universal"
     const val ID_IGARECK = "builtin:igareck"
 
@@ -55,6 +67,13 @@ object SubscriptionUrls {
      * delete them. Custom user sources are added on top by SubscriptionRepository.
      */
     val BUILTIN_SOURCES: List<SubscriptionSource> = listOf(
+        SubscriptionSource(
+            id = ID_MYAPPVPN,
+            name = "MyAppVPN (авто-сбор)",
+            urls = MYAPPVPN_CHAIN,
+            enabled = true,
+            isBuiltin = true,
+        ),
         SubscriptionSource(
             id = ID_UNIVERSAL,
             name = "Universal (zieng2/wl)",

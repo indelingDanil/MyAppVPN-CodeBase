@@ -1,18 +1,23 @@
 package com.myappvpn.ui.viewmodel
 
+import android.content.Context
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import com.myappvpn.R
 import androidx.lifecycle.viewModelScope
 import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.domain.ConnectionController
+import com.myappvpn.domain.OpenFluxDiagnostics
 import com.myappvpn.domain.OpenFluxEndpoint
 import com.myappvpn.service.MyVpnService
 import com.myappvpn.service.VpnState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -83,9 +88,39 @@ object OpenFluxConfig {
 
 @HiltViewModel
 class OpenFluxViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val preferences: AppPreferences,
     private val controller: ConnectionController,
 ) : ViewModel() {
+
+    // ── Connection diagnostics ──
+    private val _diagRunning = MutableStateFlow(false)
+    val diagRunning: StateFlow<Boolean> = _diagRunning.asStateFlow()
+
+    /** Last diagnostics report (shown in a dialog); null = none / dismissed. */
+    private val _diagReport = MutableStateFlow<String?>(null)
+    val diagReport: StateFlow<String?> = _diagReport.asStateFlow()
+
+    fun runDiagnostics() {
+        if (_diagRunning.value) return
+        _diagRunning.value = true
+        viewModelScope.launch {
+            try {
+                writeMutex.withLock { }   // let a just-requested save() land first
+                _diagReport.value = OpenFluxDiagnostics.run(appContext, preferences)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _diagReport.value = "OpenFlux diagnostics failed: ${e.javaClass.simpleName}"
+            } finally {
+                _diagRunning.value = false
+            }
+        }
+    }
+
+    fun dismissDiagReport() {
+        _diagReport.value = null
+    }
 
     /** null until DataStore is loaded. */
     val enabled: StateFlow<Boolean?> = preferences.openfluxEnabled

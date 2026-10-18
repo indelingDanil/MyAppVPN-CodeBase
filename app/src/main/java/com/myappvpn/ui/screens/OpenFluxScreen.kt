@@ -1,9 +1,14 @@
 package com.myappvpn.ui.screens
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -64,6 +70,8 @@ fun OpenFluxScreen(
     val demoOrNull by viewModel.demo.collectAsStateWithLifecycle()
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
     val openFluxStatus by viewModel.openFluxStatus.collectAsStateWithLifecycle()
+    val diagRunning by viewModel.diagRunning.collectAsStateWithLifecycle()
+    val diagReport by viewModel.diagReport.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
@@ -114,10 +122,13 @@ fun OpenFluxScreen(
         onDispose { latestSave() }
     }
 
+    val topBarScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         containerColor = AetherBackground,
         topBar = {
             TopAppBar(
+                scrollBehavior = topBarScroll,
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -140,7 +151,10 @@ fun OpenFluxScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AetherBackground)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = AetherBackground,
+                    scrolledContainerColor = AetherSurface
+                )
             )
         }
     ) { padding ->
@@ -493,6 +507,52 @@ fun OpenFluxScreen(
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                     )
                 }
+
+                // ── Connection diagnostics ──
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        save()   // diagnose what's in the fields (if valid)
+                        focusManager.clearFocus()
+                        viewModel.runDiagnostics()
+                    },
+                    enabled = !diagRunning,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = AetherCyan,
+                        disabledContentColor = AetherTextTertiary
+                    )
+                ) {
+                    Text(stringResource(R.string.openflux_diag_button), fontWeight = FontWeight.SemiBold)
+                }
+                if (diagRunning) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = AetherCyan
+                        )
+                        Text(
+                            stringResource(R.string.openflux_diag_running),
+                            color = AetherTextPrimary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.openflux_diag_note),
+                    color = AetherTextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                )
             }
 
             // ── How-to (collapsible) ──
@@ -575,6 +635,76 @@ fun OpenFluxScreen(
             Spacer(Modifier.height(8.dp))
         }
     }
+
+    diagReport?.let { report ->
+        DiagReportDialog(report = report, onDismiss = { viewModel.dismissDiagReport() })
+    }
+}
+
+@Composable
+private fun DiagReportDialog(report: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val copiedMsg = stringResource(R.string.openflux_diag_copied)
+    val shareTitle = stringResource(R.string.openflux_diag_share_title)
+    val subject = stringResource(R.string.openflux_diag_title)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = AetherSurface,
+        title = {
+            Text(subject, color = AetherTextPrimary, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            SelectionContainer {
+                Text(
+                    report,
+                    color = AetherTextPrimary,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                )
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = {
+                        val cm = context.getSystemService(ClipboardManager::class.java)
+                        cm?.setPrimaryClip(ClipData.newPlainText(subject, report))
+                        // Android 13+ shows its own "copied" confirmation.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                            Toast.makeText(context, copiedMsg, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text(stringResource(R.string.openflux_diag_copy), color = AetherCyan, fontWeight = FontWeight.SemiBold)
+                }
+                TextButton(
+                    onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, subject)
+                            putExtra(Intent.EXTRA_TEXT, report)
+                        }
+                        try {
+                            context.startActivity(Intent.createChooser(send, shareTitle))
+                        } catch (_: ActivityNotFoundException) { }
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text(stringResource(R.string.openflux_diag_share), color = AetherCyan, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.openflux_diag_close), color = AetherTextSecondary)
+            }
+        }
+    )
 }
 
 @Composable

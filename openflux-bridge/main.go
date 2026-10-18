@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strconv"
@@ -41,13 +43,16 @@ import (
 )
 
 var (
-	flagURL    = flag.String("url", "", "exit URL: https://example.com/phpbox.php (v1), or a v2 base URL not ending in .php, e.g. https://example.com/n/")
-	flagToken  = flag.String("token", "", "phpbox token (PHPBOX_TOKEN on the host)")
-	flagListen = flag.String("listen", "127.0.0.1:10818", "local SOCKS5 listen address (loopback only)")
-	flagUser   = flag.String("user", "", "SOCKS5 username (empty = no auth; strongly discouraged)")
-	flagPass   = flag.String("pass", "", "SOCKS5 password")
-	flagDebug  = flag.Bool("debug", false, "log every stream (destinations are logged!)")
-	flagClient = flag.String("client", "", "install id sent to the exit (demo exits grant a one-time trial per id)")
+	flagURL       = flag.String("url", "", "exit URL: https://example.com/phpbox.php (v1), or a v2 base URL not ending in .php, e.g. https://example.com/n/")
+	flagToken     = flag.String("token", "", "phpbox token (PHPBOX_TOKEN on the host)")
+	flagListen    = flag.String("listen", "127.0.0.1:10818", "local SOCKS5 listen address (loopback only)")
+	flagUser      = flag.String("user", "", "SOCKS5 username (empty = no auth; strongly discouraged)")
+	flagPass      = flag.String("pass", "", "SOCKS5 password")
+	flagDebug     = flag.Bool("debug", false, "log every stream (destinations are logged!)")
+	flagClient    = flag.String("client", "", "install id sent to the exit (demo exits grant a one-time trial per id)")
+	flagIPCache   = flag.String("ipcache", "", "JSON file caching the exit host's last resolved IPv4; dialed when DNS fails")
+	flagIP        = flag.String("ip", "", "IPv4 to dial for the exit host (skips DNS; the Host header stays the URL's host)")
+	flagShortPoll = flag.String("shortpoll", "auto", "v2 down polls: auto (long-poll, switch to short if the preamble stalls), on, off")
 )
 
 // ── phpbox session management ───────────────────────────────────────────────
@@ -211,7 +216,7 @@ func newHTTPCarrier(endpoint, token, session string) *httpCarrier {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &httpCarrier{
 		endpoint: endpoint, token: token, session: session,
-		hc:  &http.Client{Timeout: 0},
+		hc:  newExitClient(),
 		ctx: ctx, cancel: cancel,
 		up: newUpQueue(),
 	}
@@ -374,7 +379,26 @@ var (
 	// "from" and stops reading destinations once 8 MiB are unacknowledged, so a
 	// long poll would stall a bulk download. Re-poll after this many bytes.
 	v2DownRotate int64 = 4 << 20
+	// v2PreambleWait: in -shortpoll auto, a long-poll whose 4096-byte preamble
+	// has not fully arrived this long after the request was sent is taken as a
+	// buffering proxy (e.g. a carrier's transparent HTTP proxy on :80).
+	v2PreambleWait = 8 * time.Second
+	// v2ShortRepoll: re-poll delay after a clean end in short-poll mode.
+	v2ShortRepoll = 20 * time.Millisecond
 )
+
+// shortActive: v2 down polls ask for poll=short (the exit ends each response
+// ~250 ms after a burst or at the first 5 s keepalive). Process-wide: once a
+// buffering proxy is detected every later session uses short polls too.
+var shortActive atomic.Bool
+
+// switchToShortPoll turns short polls on and reports it once ("OFNOTE shortpoll").
+func switchToShortPoll(why string) {
+	if shortActive.CompareAndSwap(false, true) {
+		log.Printf("of2: %s — switching to short polls", why)
+		fmt.Printf("OFNOTE shortpoll\n")
+	}
+}
 
 // isV2URL: .php URLs are the v1 phpbox exit, everything else speaks v2.
 func isV2URL(raw string) bool {
@@ -409,7 +433,7 @@ func newV2Carrier(endpoint, token, session string) *v2Carrier {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &v2Carrier{
 		endpoint: endpoint, token: token, session: session,
-		hc:  &http.Client{Timeout: 0},
+		hc:  newExitClient(),
 		ctx: ctx, cancel: cancel,
 		up: newUpQueue(),
 	}
@@ -460,6 +484,7 @@ const (
 	downRotate                    // attached, rotated to acknowledge: re-poll now
 	downGone                      // 410 / offset mismatch: the session is lost
 	downRefused                   // 503/404/403: reported via onStatus
+	downSwitch                    // long-poll stalled, now in short-poll mode: re-poll now
 )
 
 func (h *v2Carrier) downLoop() {
@@ -482,13 +507,16 @@ func (h *v2Carrier) downLoop() {
 		switch res {
 		case downGone, downRefused:
 			return
-		case downRotate:
+		case downRotate, downSwitch:
 			failing, delay = time.Time{}, v2RetryMin
 			continue
 		case downAgain:
 			failing, delay = time.Time{}, v2RetryMin
 			if err != nil && *flagDebug {
 				log.Printf("of2: down cut at %d (%v); resuming", recv, err)
+			}
+			if err == nil && shortActive.Load() {
+				wait = v2ShortRepoll // short polls end by design: come straight back
 			}
 		case downRetry:
 			if failing.IsZero() {
@@ -526,12 +554,56 @@ func (h *v2Carrier) downOnce(recv *int64, announced *bool) (downResult, error) {
 	defer cancel()
 	wd := time.AfterFunc(v2ReqTimeout, cancel) // no headers / no bytes for that long → dead link
 	defer wd.Stop()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.url("down", "&from="+strconv.FormatInt(*recv, 10)), nil)
+	extra := "&from=" + strconv.FormatInt(*recv, 10)
+	if shortActive.Load() {
+		extra += "&poll=short"
+	}
+	// -shortpoll auto: the preamble must be complete within v2PreambleWait of
+	// the request being written, else a proxy is buffering the response.
+	var (
+		pwMu    sync.Mutex
+		pw      *time.Timer
+		preDone bool
+		stalled atomic.Bool
+	)
+	reqCtx := ctx
+	if !shortActive.Load() && *flagShortPoll == "auto" {
+		reqCtx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			WroteRequest: func(httptrace.WroteRequestInfo) {
+				pwMu.Lock()
+				defer pwMu.Unlock()
+				if pw == nil && !preDone {
+					pw = time.AfterFunc(v2PreambleWait, func() { stalled.Store(true); cancel() })
+				}
+			},
+		})
+	}
+	stopPW := func() bool { // true = the stall timer fired
+		pwMu.Lock()
+		defer pwMu.Unlock()
+		preDone = true
+		if pw != nil {
+			pw.Stop()
+		}
+		return stalled.Load()
+	}
+	defer stopPW()
+	isStall := func() bool {
+		if stalled.Load() && h.ctx.Err() == nil {
+			switchToShortPoll(fmt.Sprintf("down preamble not received within %v", v2PreambleWait))
+			return true
+		}
+		return false
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, h.url("down", extra), nil)
 	if err != nil {
 		return downGone, err
 	}
 	resp, err := h.hc.Do(req)
 	if err != nil {
+		if isStall() {
+			return downSwitch, nil
+		}
 		return downRetry, redact(err)
 	}
 	defer resp.Body.Close()
@@ -552,7 +624,13 @@ func (h *v2Carrier) downOnce(recv *int64, announced *bool) (downResult, error) {
 	}
 	pre := make([]byte, v2PreambleLen)
 	if _, err := io.ReadFull(resp.Body, pre); err != nil {
+		if isStall() {
+			return downSwitch, nil
+		}
 		return downRetry, fmt.Errorf("preamble: %w", redact(err))
+	}
+	if stopPW() && isStall() { // fired just as the preamble completed; the body is cancelled
+		return downSwitch, nil
 	}
 	n, ok := parsePreamble(pre)
 	if !ok || n != *recv {
@@ -1011,8 +1089,35 @@ func probe(u, token string) {
 
 func main() {
 	flagProbe := flag.Bool("probe", false, "do one raw down-poll and print the host's answer, then exit")
+	flagDiag := flag.Bool("diag", false, "run network diagnostics against the exit, print one \"OFDIAG <json>\" line, exit 0")
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	exitDial.cachePath = *flagIPCache
+	if *flagIP != "" {
+		ip := net.ParseIP(*flagIP)
+		if ip == nil || ip.To4() == nil {
+			fmt.Fprintln(os.Stderr, "-ip must be an IPv4 address")
+			os.Exit(2)
+		}
+		exitDial.override = ip.To4().String()
+	}
+	switch *flagShortPoll {
+	case "auto", "off":
+	case "on":
+		shortActive.Store(true)
+	default:
+		fmt.Fprintln(os.Stderr, "-shortpoll must be auto, on or off")
+		os.Exit(2)
+	}
+	if *flagDiag {
+		if *flagURL == "" || *flagToken == "" {
+			fmt.Fprintln(os.Stderr, "usage: ofbridge -diag -url URL -token SECRET [-client ID -ipcache FILE -ip IPV4]")
+			os.Exit(2)
+		}
+		b, _ := json.Marshal(runDiag(*flagURL, *flagToken, *flagClient))
+		fmt.Printf("OFDIAG %s\n", b)
+		return
+	}
 	if *flagProbe {
 		probe(*flagURL, *flagToken)
 		return

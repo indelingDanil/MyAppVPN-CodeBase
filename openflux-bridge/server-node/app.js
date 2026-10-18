@@ -45,6 +45,8 @@ const MAX_FRAME = 4 * MiB;                        // larger client frame = proto
 const RETAIN_CAP = envInt('OF_RETAIN_CAP', 8 * MiB);
 const RUN_MS = envInt('OF_RUN_MS', 100000);       // end a down response after this
 const IDLE_MS = envInt('OF_IDLE_MS', 60000);      // session GC
+const SHORT_RUN_MS = envInt('OF_SHORT_RUN_MS', 15000);   // poll=short: max response life
+const SHORT_IDLE_MS = envInt('OF_SHORT_IDLE_MS', 250);   // poll=short: end this long after a burst
 const KEEPALIVE_MS = 5000;
 const DIAL_MS = 6000;
 const DNS_TTL_MS = 5 * 60000;
@@ -346,6 +348,13 @@ class Session {
         ok = d.res.write(pad);
       }
       d.lastWrite = Date.now();
+      // Short-poll mode (for carriers whose HTTP proxy buffers whole responses): finish the
+      // response shortly after a burst so the client gets it now and re-polls.
+      if (d.short) {
+        if (d.burstTimer) clearTimeout(d.burstTimer);
+        d.burstTimer = setTimeout(() => this.endDown(d), SHORT_IDLE_MS);
+        d.timers.push(d.burstTimer);
+      }
     }
     if (!ok) {
       d.waitingDrain = true;
@@ -357,12 +366,12 @@ class Session {
     if (d.sentTo === this.produced && this.retained() >= RETAIN_CAP / 2) this.endDown(d);
   }
 
-  attachDown(res, from) {
+  attachDown(res, from, short) {
     if (this.down) this.endDown(this.down);
-    const d = { res, from, sentTo: from, waitingDrain: false, unpadded: false, ended: false, lastWrite: Date.now(), timers: [] };
+    const d = { res, from, sentTo: from, waitingDrain: false, unpadded: false, ended: false, lastWrite: Date.now(), timers: [], short: !!short };
     this.down = d;
     res.write(preamble(from));
-    d.timers.push(setTimeout(() => this.endDown(d), RUN_MS));
+    d.timers.push(setTimeout(() => this.endDown(d), short ? SHORT_RUN_MS : RUN_MS));
     d.timers.push(setInterval(() => {
       if (d.ended || d.waitingDrain || d.sentTo !== this.produced) return;
       if (Date.now() - d.lastWrite >= KEEPALIVE_MS) { this.produce(padFrame(BLOCK), true); this.flush(); }
@@ -603,7 +612,7 @@ function handleDown(req, res, q, role, s) {
   res.writeHead(200, h);
   if (res.socket) res.socket.setNoDelay(true);
   if (req.method === 'HEAD') return res.end();
-  sess.attachDown(res, from);
+  sess.attachDown(res, from, q.get('poll') === 'short');
 }
 
 function handleUp(req, res, q, role, s) {

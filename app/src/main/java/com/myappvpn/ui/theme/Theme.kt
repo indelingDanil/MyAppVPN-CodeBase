@@ -1,72 +1,89 @@
 package com.myappvpn.ui.theme
 
-import android.app.Activity
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
-private val AetherDarkColorScheme = darkColorScheme(
-    primary = AetherCyan,
-    onPrimary = AetherTextOnPrimary,
-    primaryContainer = AetherCyanGlow,
-    onPrimaryContainer = AetherCyan,
+/** App theme preference (stored in DataStore as its name). */
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-    secondary = AetherPurple,
-    onSecondary = AetherTextPrimary,
-    secondaryContainer = AetherPurpleGlow,
-    onSecondaryContainer = AetherPurpleLight,
+private fun colorSchemeFor(c: AetherColors): ColorScheme {
+    val base = if (c.isDark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = c.accent,
+        onPrimary = c.onAccent,
+        primaryContainer = c.accentSoft,
+        onPrimaryContainer = c.accentText,
 
-    tertiary = AetherConnected,
-    onTertiary = AetherTextOnPrimary,
+        secondary = c.accent,
+        onSecondary = c.onAccent,
+        secondaryContainer = c.accentSoft,
+        onSecondaryContainer = c.accentText,
 
-    background = AetherBackground,
-    onBackground = AetherTextPrimary,
+        tertiary = c.connected,
+        onTertiary = c.onAccent,
 
-    surface = AetherSurface,
-    onSurface = AetherTextPrimary,
-    surfaceVariant = AetherSurfaceVariant,
-    onSurfaceVariant = AetherTextSecondary,
-    surfaceContainer = AetherSurfaceContainer,
-    surfaceContainerHigh = AetherSurfaceVariant,
+        background = c.background,
+        onBackground = c.textPrimary,
 
-    error = AetherDisconnected,
-    onError = AetherTextPrimary,
-    errorContainer = AetherDisconnectedGlow,
-    onErrorContainer = AetherDisconnected,
+        surface = c.surface,
+        onSurface = c.textPrimary,
+        surfaceVariant = c.surfaceVariant,
+        onSurfaceVariant = c.textSecondary,
+        surfaceTint = Color.Transparent,
+        surfaceContainerLowest = c.background,
+        surfaceContainerLow = c.surfaceContainer,
+        surfaceContainer = c.surfaceContainer,
+        surfaceContainerHigh = c.surface,
+        surfaceContainerHighest = c.surfaceVariant,
 
-    outline = AetherBorder,
-    outlineVariant = AetherDivider,
+        error = c.error,
+        onError = Color.White,
+        errorContainer = c.errorSoft,
+        onErrorContainer = c.error,
 
-    inverseSurface = AetherTextPrimary,
-    inverseOnSurface = AetherBackground,
-    inversePrimary = AetherCyanDim,
+        outline = c.border,
+        outlineVariant = c.divider,
 
-    scrim = androidx.compose.ui.graphics.Color(0xCC000000)
-)
+        inverseSurface = c.textPrimary,
+        inverseOnSurface = c.background,
+        inversePrimary = c.accentStrong,
 
-@Composable
-fun MyAppVPNTheme(content: @Composable () -> Unit) {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as Activity).window
-            window.statusBarColor = AetherBackground.toArgb()
-            window.navigationBarColor = AetherBackground.toArgb()
-            WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = false
-                isAppearanceLightNavigationBars = false
-            }
-        }
-    }
-
-    MaterialTheme(
-        colorScheme = AetherDarkColorScheme,
-        typography = AetherTypography,
-        content = content
+        scrim = Color(0x99000000),
     )
 }
 
+private val AetherShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+/**
+ * System bar colours/icons are handled by `enableEdgeToEdge` in MainActivity (bars are transparent,
+ * content draws behind them).
+ */
+@Composable
+fun MyAppVPNTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
+    val colors = if (darkTheme) DarkAetherColors else LightAetherColors
+    val scheme = remember(colors) { colorSchemeFor(colors) }
+    val typography = remember(colors) { aetherTypography(colors) }
+    CompositionLocalProvider(LocalAetherColors provides colors) {
+        MaterialTheme(
+            colorScheme = scheme,
+            typography = typography,
+            shapes = AetherShapes,
+            content = content
+        )
+    }
+}
