@@ -20,10 +20,12 @@ with its offset.
 
 | file | purpose |
 |---|---|
-| `app.js` | the server |
+| `app.js` | the server (HTTP v2 + optional Mail.ru channel + `?r=ping`) |
+| `mailru.js` | the Mail.ru Docs channel (WebSocket client, stream mux, ported from upstream OpenFlux, GPL-3.0) |
 | `config.example.json` | copy to `config.json` (same folder) and put real tokens in it |
 | `data/` | `state.json` (trial start / bytes per install, bytes per UTC day) — created automatically |
-| `test/server.test.js` | self-contained tests (spawns the server on random ports) |
+| `test/server.test.js` | self-contained v2 tests (spawns the server on random ports) |
+| `test/mailru.test.js` | Mail.ru channel tests (framing, mux, mocked WebSocket) |
 
 ## Config
 
@@ -40,8 +42,55 @@ with its offset.
 - `demo` (optional): one public token with limits — `max` concurrent installs, `seconds` of trial
   (wall-clock from first admission of an install), `userMb` per install, `dailyMb` for all demo
   traffic per UTC day, `until` = unix time when the demo ends (`0` = never).
+- `mailru` (optional): a Mail.ru Docs channel to the exit (see below). The token tables are re-read
+  on `SIGHUP` and every 60 s; **the `mailru` section is read once at startup**, so a change to it
+  needs a process restart (`touch tmp/restart.txt` on Beget).
 - The file is re-read on `SIGHUP` and checked every 60 s (reloaded when its mtime changes). Tokens
   and request URLs are never logged.
+
+## Mail.ru Docs channel (optional)
+
+Besides answering HTTP v2 directly, the exit can reach a client **through a shared Mail.ru Cloud
+document** (`docs.datacloudmail.ru`, the R7 co-editing backend) — useful where the client can reach
+`mail.ru` but not this host. The exit joins the document over an outbound WebSocket at startup, keeps
+it alive, and serves the upstream OpenFlux *stream mode* (no encryption of the tunnel itself; HTTPS
+sites stay end-to-end encrypted). The client side is the upstream Go bridge
+(`streamproxy` + the `mailru` carrier, same 0.13.0 release): point it at the same public document
+with `--mode=stream --transport=mailru --url <public doc link>`.
+
+```json
+{
+  "mailru": {
+    "enable": true,
+    "link": "https://cloud.mail.ru/public/XXXX/YYYY"
+  }
+}
+```
+
+- `link` — a **public Mail.ru Cloud document link with edit rights** (create the document in your own
+  Mail.ru Cloud, share it public-with-editing, paste the link here).
+- `enable` — set to `false` (or omit the section) to turn the channel off. With no link it stays off.
+- **One document ≈ one client** (upstream limit): give each friend their own document.
+- Optional tuning keys (numbers; sane defaults, nothing needs setting): `msgIntervalMs`, `rotateMs`,
+  `rotateMsgs`, `maxMessageBytes`, `streamWindow`, `totalWindow`, `outStreamMax`, `outAllMax`.
+- Destination policy is the same as v2 (TCP 80/443, IPv4 only, private ranges refused).
+- The channel's state appears on the private stats page (`?r=stats`) and in `X-OF-Mailru` on `?r=ping`.
+- Node only, no npm dependencies: a small built-in WebSocket client (Node 20's global `WebSocket`
+  needs a flag and does not do the `permessage-deflate` that Mail.ru's edge requires, so a tiny
+  dependency-free client is included). Beget's `ofnode/bin/node` is Node 20 — fine.
+- `mailru.js` ports logic from upstream OpenFlux (GPL-3.0); see the file header for the exact sources.
+
+### Keep the process alive (`?r=ping`)
+
+Passenger stops an idle app, which would drop the Mail.ru session. Have an external cron hit the
+liveness endpoint every 1–2 min so the process (and the channel) stay up — no token required:
+
+```
+*/1 * * * * curl -fsS "https://your-site/n/?r=ping" >/dev/null
+```
+
+(Beget control-panel cron, or a GitHub Actions schedule in `MyAppVPN-subs`.) The response is `ok`
+with an `X-OF-Mailru` header showing the channel status.
 
 ## Run locally
 
@@ -145,8 +194,10 @@ including other personal tokens and the demo token — gets the same `404 no` as
 
 The page shows counts only (no tokens, no install ids, no destinations): open sessions per
 personal token, last activity, traffic today / 7 days, total sessions; for the demo — slots in use,
-devices in their trial now, trials started today / total, demo traffic today vs the daily cap.
-The URL contains your token: don't share it.
+devices in their trial now, trials started today / total, demo traffic today vs the daily cap; and,
+when the Mail.ru channel is on, its state (connected / reconnecting, uptime, live streams,
+reconnects / rotations, messages sent / received, last error). The URL contains your token: don't
+share it.
 
 Страница статистики: `http://ваш-сайт/n/?r=stats&k=<ваш токен>` — только для токенов из `admin`
 (по умолчанию `p1`), остальным — `404 no`. Только цифры, без токенов и адресов. Ссылку не передавайте:

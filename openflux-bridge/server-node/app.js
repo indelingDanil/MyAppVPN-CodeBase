@@ -13,6 +13,11 @@
  * Frame: type(1) | stream_id(4 BE) | len(4 BE) | payload
  *   1 OPEN "host:port"  2 DATA  3 CLOSE  4 OPEN_OK  5 OPEN_ERR reason  6 ACK (ignored)
  *
+ * Besides HTTP v2, an optional Mail.ru Docs channel (config "mailru" section, see mailru.js and the
+ * README) can reach a client through a shared Mail.ru document; it reuses this file's destination
+ * policy and dialing (parseOpenTarget / dialTarget). A no-token "?r=ping" keeps Passenger from
+ * idling the process so that channel stays up between clients.
+ *
  * Test-only env knobs (never set them in production):
  *   OF_ALLOW_PRIVATE=1   allow private/loopback targets
  *   OF_ALLOW_PORTS=a,b   extra allowed destination ports (besides 80/443)
@@ -33,6 +38,7 @@ const dns = require('node:dns');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const mailru = require('./mailru.js');   // Mail.ru Docs channel (optional, config "mailru" section)
 
 // ── constants / env ──────────────────────────────────────────────────────────
 
@@ -269,6 +275,79 @@ function dialError(e) {
   }
 }
 
+/**
+ * OPEN payload "host:port" (optionally "\0caps", e.g. "\0fc") → { host, port, caps[] } or
+ * { err: OPEN_ERR reason } when the target is not allowed. Shared by the HTTP v2 sessions and the
+ * Mail.ru channel (mailru.js).
+ */
+function parseOpenTarget(payload) {
+  let txt = payload.toString('latin1');
+  let caps = [];
+  const z = txt.indexOf('\0');
+  if (z >= 0) { caps = txt.slice(z + 1).split(','); txt = txt.slice(0, z); }   // "\0fc" suffix
+  const cut = txt.lastIndexOf(':');
+  const host = cut > 0 ? txt.slice(0, cut) : '';
+  const portS = cut > 0 ? txt.slice(cut + 1) : '';
+  if (host.includes(':') || host.startsWith('[')) return { err: 'ipv6' };
+  const port = /^\d{1,5}$/.test(portS) ? Number(portS) : -1;
+  if (!portAllowed(port)) return { err: 'port' };
+  if (!/^[A-Za-z0-9._-]{1,253}$/.test(host)) return { err: 'dns' };
+  return { host, port, caps };
+}
+
+/**
+ * Resolve host and connect to the first allowed IPv4 address that answers (several A records are
+ * tried in order, DIAL_MS each, DIAL_TOTAL_MS for all). st.sock / st.timer always hold the attempt
+ * in flight (so the owner can abort it), st.state becomes 'connecting'. live() false → the attempt
+ * is dropped silently. done(reason) on failure (an OPEN_ERR reason), done(null, sock) on success
+ * (only while live()).
+ */
+function dialTarget(st, host, port, live, done) {
+  resolve4(host).then((ips) => {
+    if (!live()) return;
+    const cands = ALLOW_PRIVATE ? ips : ips.filter((ip) => !isBlockedIp(ip));
+    if (!cands.length) return done('blocked');
+    st.state = 'connecting';
+    const t0 = Date.now();
+    let lastErr = 'timeout';
+    const attempt = (i) => {
+      if (!live() || st.failed) return;
+      const left = DIAL_TOTAL_MS - (Date.now() - t0);
+      if (i >= cands.length || left <= 0) {
+        if (i > 1) dnsCache.delete(host);
+        return done(lastErr);
+      }
+      const sock = net.connect({ host: cands[i], port });
+      st.sock = sock;
+      let settled = false;
+      const next = (reason) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(st.timer);
+        sock.removeAllListeners();
+        sock.on('error', () => {});
+        sock.destroy();
+        if (st.sock === sock) st.sock = null;
+        lastErr = reason;
+        attempt(i + 1);
+      };
+      st.timer = setTimeout(() => next('timeout'), Math.min(DIAL_MS, left));
+      sock.once('error', (e) => next(dialError(e)));
+      sock.once('close', () => next('refused'));
+      sock.once('connect', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(st.timer);
+        sock.removeAllListeners('error');
+        sock.removeAllListeners('close');
+        if (!live()) { sock.on('error', () => {}); sock.destroy(); return; }
+        done(null, sock);
+      });
+    };
+    attempt(0);
+  }, () => done('dns'));
+}
+
 // ── frames ───────────────────────────────────────────────────────────────────
 
 function frame(type, sid, payload) {
@@ -501,17 +580,9 @@ class Session {
   onOpen(sid, payload) {
     const have = this.streams.get(sid);
     if (have) { if (have.state === 'open') this.emit(T_OPEN_OK, sid); return; }   // never redial
-    let txt = payload.toString('latin1');
-    const z = txt.indexOf('\0');
-    if (z >= 0) txt = txt.slice(0, z);           // "\0fc" suffix
-    const cut = txt.lastIndexOf(':');
-    const host = cut > 0 ? txt.slice(0, cut) : '';
-    const portS = cut > 0 ? txt.slice(cut + 1) : '';
     const err = (r) => this.emit(T_OPEN_ERR, sid, Buffer.from(r));
-    if (host.includes(':') || host.startsWith('[')) return err('ipv6');
-    const port = /^\d{1,5}$/.test(portS) ? Number(portS) : -1;
-    if (!portAllowed(port)) return err('port');
-    if (!/^[A-Za-z0-9._-]{1,253}$/.test(host)) return err('dns');
+    const t = parseOpenTarget(payload);
+    if (t.err) return err(t.err);
 
     const st = { sid, state: 'resolving', sock: null, queue: [], qbytes: 0, timer: null, clientClosed: false, failed: false, lastIo: Date.now() };
     this.streams.set(sid, st);
@@ -523,51 +594,7 @@ class Session {
       if (st.sock) st.sock.destroy();
       if (live()) { this.streams.delete(sid); err(r); }
     };
-
-    resolve4(host).then((ips) => {
-      if (!live()) return;
-      const cands = ALLOW_PRIVATE ? ips : ips.filter((ip) => !isBlockedIp(ip));
-      if (!cands.length) return fail('blocked');
-      st.state = 'connecting';
-      const t0 = Date.now();
-      let lastErr = 'timeout';
-      // Several A records: try them in order (DIAL_MS each, DIAL_TOTAL_MS for all).
-      const attempt = (i) => {
-        if (!live() || st.failed) return;
-        const left = DIAL_TOTAL_MS - (Date.now() - t0);
-        if (i >= cands.length || left <= 0) {
-          if (i > 1) dnsCache.delete(host);
-          return fail(lastErr);
-        }
-        const sock = net.connect({ host: cands[i], port });
-        st.sock = sock;
-        let settled = false;
-        const next = (reason) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(st.timer);
-          sock.removeAllListeners();
-          sock.on('error', () => {});
-          sock.destroy();
-          if (st.sock === sock) st.sock = null;
-          lastErr = reason;
-          attempt(i + 1);
-        };
-        st.timer = setTimeout(() => next('timeout'), Math.min(DIAL_MS, left));
-        sock.once('error', (e) => next(dialError(e)));
-        sock.once('close', () => next('refused'));
-        sock.once('connect', () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(st.timer);
-          sock.removeAllListeners('error');
-          sock.removeAllListeners('close');
-          if (!live()) { sock.on('error', () => {}); sock.destroy(); return; }
-          this.onConnected(st, sock, live);
-        });
-      };
-      attempt(0);
-    }, () => fail('dns'));
+    dialTarget(st, t.host, t.port, live, (reason, sock) => (reason ? fail(reason) : this.onConnected(st, sock, live)));
   }
 
   onConnected(st, sock, live) {
@@ -910,6 +937,7 @@ function statsData() {
       bytesToday: state.days[day] || 0, dailyLimitBytes: d.dailyMb * MiB,
       until: d.until,
     } : null,
+    mailru: mailruHandle ? mailruHandle.snapshot() : null,
   };
 }
 
@@ -945,6 +973,16 @@ function handleStats(res, asJson) {
 <tr><td>Всего устройств пробовало</td><td class="n">${d.triedTotal}</td></tr>
 <tr><td>Трафик демо сегодня</td><td class="n">${mb(d.bytesToday)} из ${mb(d.dailyLimitBytes)}</td></tr>
 <tr><td>Демо работает до</td><td class="n">${d.until ? msk(d.until) : 'без срока'}</td></tr></table>` : '<h2>Демо</h2><p>выключено</p>';
+  const m = s.mailru;
+  const mailruStatus = { connected: 'подключён', connecting: 'подключается', reconnecting: 'переподключается', stopped: 'остановлен', idle: 'ожидает' };
+  const mailruBlock = m ? `<h2>Канал Mail.ru</h2><table>
+<tr><td>Состояние</td><td class="n"><b>${esc(mailruStatus[m.status] || m.status)}</b></td></tr>
+<tr><td>Документ</td><td class="n">${esc(m.weblink)}</td></tr>
+<tr><td>На связи</td><td class="n">${m.status === 'connected' ? Math.floor(m.connectedForSec / 60) + ' мин' : '—'}</td></tr>
+<tr><td>Потоков сейчас</td><td class="n">${m.streams}</td></tr>
+<tr><td>Переподключений / ротаций</td><td class="n">${m.reconnects} / ${m.rotations}</td></tr>
+<tr><td>Сообщений отпр. / получ.</td><td class="n">${m.sends} / ${m.recvs}</td></tr>${m.lastError ? `
+<tr><td>Последняя ошибка</td><td class="n">${esc(m.lastError)}</td></tr>` : ''}</table>` : '';
   const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="30">
 <meta name="robots" content="noindex,nofollow"><title>OpenFlux · статистика</title>
@@ -957,6 +995,7 @@ th{color:#94a3b8;font-weight:500;font-size:13px}.n{text-align:right;font-variant
 <div class="sub">${msk(s.now)} МСК · сервер работает ${Math.floor(s.uptimeSec / 3600)} ч ${Math.floor(s.uptimeSec % 3600 / 60)} мин · всего сессий сейчас: ${s.sessionsTotal} · обновляется каждые 30 с</div>
 <h2>Личные токены</h2><div class="wrap"><table><tr><th>Токен</th><th class="n">Сессий сейчас</th><th>Активность</th><th class="n">Сегодня</th><th class="n">7 дней</th><th class="n">Подключений всего</th><th>Срок</th></tr>${rows || '<tr><td colspan="7">нет</td></tr>'}</table></div>
 ${demoBlock}
+${mailruBlock}
 <p class="sub">«Сессий сейчас» — открытые подключения; сессия живёт ещё ~1 мин после отключения. Учёт по личным токенам ведётся с момента обновления сервера.</p>
 </body></html>`;
   return send(res, 200, html, { 'Content-Type': 'text/html; charset=utf-8', 'X-Robots-Tag': 'noindex' });
@@ -971,6 +1010,9 @@ function onRequest(req, res) {
     const i = req.url.indexOf('?');
     q = new URLSearchParams(i >= 0 ? req.url.slice(i + 1) : '');
   } catch { return send(res, 400, 'bad'); }
+  // Liveness ping (no token): an external cron (Beget panel / GitHub Actions) hits ?r=ping every
+  // 1-2 min so Passenger does not idle the process and the Mail.ru channel stays up between clients.
+  if (q.get('r') === 'ping') { req.resume(); return send(res, 200, 'ok', { 'X-OF-Mailru': mailruHandle ? mailruHandle.snapshot().status : 'off' }); }
   const role = roleFor(q.get('k'));
   if (!role) { req.resume(); return send(res, 404, 'no'); }
   if (q.get('r') === 'stats') {
@@ -993,9 +1035,31 @@ function onRequest(req, res) {
 loadState();
 loadConfig(true);
 
+// ── Mail.ru Docs channel (optional) ────────────────────────────────────────────
+// Reads the "mailru" section from config.json directly (compileConfig keeps only tokens). The
+// channel joins the shared document at startup and serves the stream mux for a client that joined
+// the same document — independent of HTTP requests, so it starts without waiting for one. Destination
+// policy and dialing are app.js's own (parseOpenTarget / dialTarget), shared with v2 sessions.
+let mailruHandle = null;
+function startMailru() {
+  if (mailruHandle) return;
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch { return; }
+  const parsed = mailru.parseMailruConfig(raw);
+  if (!parsed || !parsed.enabled) { if (parsed) log('mailru: configured but disabled or no link'); return; }
+  mailruHandle = mailru.startMailruChannel(raw, {
+    parseTarget: parseOpenTarget,
+    dial: (st, host, port, live, done) => dialTarget(st, host, port, live, done),
+    log: (m) => { if (ENV.OF_DEBUG === '1') log(m); },
+    onState: (snap) => log(`mailru: ${snap.status}${snap.lastError ? ' (' + snap.lastError + ')' : ''}`),
+  }, STREAM_IDLE_MS);
+  if (mailruHandle) log('mailru: channel enabled for document ' + mailruHandle.snapshot().weblink);
+}
+startMailru();
+
 process.on('SIGHUP', () => { log('SIGHUP: reloading config'); loadConfig(true); });
 for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => { saveStateSync(); process.exit(0); });
+  process.on(sig, () => { if (mailruHandle) try { mailruHandle.stop(); } catch {} saveStateSync(); process.exit(0); });
 }
 process.on('uncaughtException', (e) => { log('uncaught:', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e); });
 

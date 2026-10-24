@@ -10,5 +10,9 @@
     "userMb": 2048,
     "dailyMb": 25600,
     "until": 1792011599
+  },
+  "mailru": {
+    "enable": false,
+    "link": "https://cloud.mail.ru/public/CHANGE-ME/public-doc-with-edit-rights"
   }
 }

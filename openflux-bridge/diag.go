@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package main
 
 // -diag: why does the exit not work on this network? Runs a fixed sequence of
@@ -15,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/p1neappleXpress/OpenFlux/transport"
 )
 
 // Diagnostic timings (vars so tests can shrink them).
@@ -76,18 +80,19 @@ type diagUp struct {
 }
 
 type diagReport struct {
-	Host        string      `json:"host"`
-	Port        int         `json:"port"`
-	Scheme      string      `json:"scheme"`
-	Proto       int         `json:"proto"`
-	DNS         diagDNS     `json:"dns_system"`
-	IPCache     *diagCache  `json:"ipcache"`
-	TCP         diagTCP     `json:"tcp"`
-	HTTPProbe   diagHTTP    `json:"http_probe"`
-	StreamLong  *diagStream `json:"stream_long"`
-	StreamShort *diagStream `json:"stream_short"`
-	UpPost      *diagUp     `json:"up_post"`
-	Summary     string      `json:"summary"`
+	Host        string       `json:"host"`
+	Port        int          `json:"port"`
+	Scheme      string       `json:"scheme"`
+	Proto       int          `json:"proto"`
+	DNS         diagDNS      `json:"dns_system"`
+	IPCache     *diagCache   `json:"ipcache"`
+	TCP         diagTCP      `json:"tcp"`
+	HTTPProbe   diagHTTP     `json:"http_probe"`
+	StreamLong  *diagStream  `json:"stream_long"`
+	StreamShort *diagStream  `json:"stream_short"`
+	UpPost      *diagUp      `json:"up_post"`
+	Carrier     *diagCarrier `json:"carrier,omitempty"` // non-v2 transports only
+	Summary     string       `json:"summary"`
 }
 
 func ms(since time.Time) int64 { return time.Since(since).Milliseconds() }
@@ -431,4 +436,153 @@ func diagVerdict(r *diagReport) string {
 		return "ok_via_ipcache"
 	}
 	return "ok"
+}
+
+// ── non-v2 transports (carriers.go) ─────────────────────────────────────────
+
+// diagCarrierWait bounds how long the carrier gets to join its document/room
+// (session: to finish the handshake with the node).
+var diagCarrierWait = 25 * time.Second
+
+type diagCarrier struct {
+	Transport string `json:"transport"`         // mailru | cupsonline | session
+	Started   bool   `json:"started"`           // the carrier was built and started
+	Connected bool   `json:"connected"`         // joined within diagCarrierWait
+	Ms        int64  `json:"ms"`                // until connected (or the wait)
+	Mode      string `json:"mode,omitempty"`    // session: "session" | "classic"
+	Carrier   string `json:"carrier,omitempty"` // session: carrier type in use
+	Captcha   bool   `json:"captcha,omitempty"` // the carrier asked for a browser check
+	Err       string `json:"err,omitempty"`
+}
+
+// runCarrierDiag tests a mailru/cups/session carrier: the service host's DNS
+// and TCP :443 (as the v2 report does for the exit), then whether the carrier
+// connects within diagCarrierWait. Links never appear in the report.
+func runCarrierDiag(transportName, link, secret string) *diagReport {
+	r := &diagReport{Proto: 0}
+	p, err := planCarrier(transportName, link, secret)
+	if err != nil {
+		r.Carrier = &diagCarrier{Transport: normTransport(transportName), Err: clip(err.Error(), 120)}
+		r.Summary = "bad_link"
+		return r
+	}
+	r.Carrier = &diagCarrier{Transport: p.label}
+	r.Host, r.Scheme, r.Port = p.carrierHost(), "https", 443
+	if !p.stream && len(p.cfg.Transports) > 0 && p.cfg.Transports[0].Type == "direct" {
+		if _, port, err := net.SplitHostPort(p.cfg.Transports[0].Dial); err == nil {
+			r.Scheme = "tcp"
+			r.Port, _ = strconv.Atoi(port)
+		}
+	}
+	if r.Host != "" {
+		diagReach(r)
+	}
+
+	ck := newChecks("", io.Discard)
+	c := r.Carrier
+	var connected func() bool
+	var stop func()
+	var sess *transport.Session
+	var types map[string]string
+	if p.stream {
+		raw, err := newRawCarrier(p.typ, p.link, nil)
+		if err == nil {
+			ck.attachRaw(p.typ, p.link, raw)
+			err = raw.Start()
+		}
+		if err != nil {
+			c.Err = clip(err.Error(), 120)
+		} else {
+			connected, stop = raw.IsConnected, func() { _ = raw.Stop() }
+		}
+	} else {
+		var trans transport.Transport
+		trans, sess, types, err = buildSession(p, ck)
+		if err == nil {
+			err = trans.Start()
+		}
+		if err != nil {
+			c.Err = clip(err.Error(), 120)
+		} else {
+			connected, stop = trans.IsConnected, func() { _ = trans.Stop() }
+		}
+	}
+	if connected != nil {
+		c.Started = true
+		t0 := time.Now()
+		for time.Since(t0) < diagCarrierWait && !ck.asked.Load() {
+			if connected() {
+				c.Connected = true
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		c.Ms = ms(t0)
+		c.Captcha = ck.asked.Load()
+		if sess != nil {
+			c.Mode = sess.Mode()
+			if name := sess.ActiveTransport(); types[name] != "" {
+				c.Carrier = types[name]
+			}
+		}
+		stop()
+	}
+	switch {
+	case c.Connected:
+		r.Summary = "ok"
+	case r.Host != "" && r.TCP.Target == "":
+		r.Summary = "dns_failed"
+	case r.Host != "" && r.TCP.Err != "":
+		r.Summary = "tcp_failed"
+	case c.Captcha:
+		r.Summary = "captcha_required"
+	case !c.Started:
+		r.Summary = "carrier_failed"
+	default:
+		r.Summary = "carrier_timeout"
+	}
+	return r
+}
+
+// diagReach fills DNS and TCP for the carrier's service host (plain system
+// DNS and a direct dial; the v2 exit's IP cache/override do not apply).
+func diagReach(r *diagReport) {
+	t0 := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, r.Host)
+	cancel()
+	r.DNS.Ms = ms(t0)
+	var v6 []string
+	r.DNS.IPv4, v6 = splitIPs(addrs)
+	r.DNS.IPv6 = len(v6)
+	if r.DNS.IPv4 == nil {
+		r.DNS.IPv4 = []string{}
+	}
+	if err != nil {
+		r.DNS.Err = errStr(err)
+	}
+	switch {
+	case len(r.DNS.IPv4) > 0:
+		r.TCP.Target, r.TCP.Source = r.DNS.IPv4[0], "dns"
+	case len(v6) > 0:
+		r.TCP.Target, r.TCP.Source = v6[0], "dns6"
+	case net.ParseIP(r.Host) != nil:
+		r.TCP.Target, r.TCP.Source = r.Host, "literal"
+	}
+	if r.TCP.Target == "" {
+		r.TCP.Err, r.TCP.Ms = "no address to dial", -1
+		return
+	}
+	t0 = time.Now()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(r.TCP.Target, strconv.Itoa(r.Port)), diagTCPTimeout)
+	r.TCP.Ms = ms(t0)
+	if err != nil {
+		r.TCP.Err = errStr(err)
+		return
+	}
+	r.TCP.Family = "ipv4"
+	if ta, ok := conn.LocalAddr().(*net.TCPAddr); ok && ta.IP.To4() == nil {
+		r.TCP.Family = "ipv6"
+	}
+	_ = conn.Close()
 }

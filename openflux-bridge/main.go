@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // ofbridge — a tiny local SOCKS5 server whose outbound is an OpenFlux v2 exit
 // (server-node/app.js) reached over plain HTTP(S):
 //
@@ -12,6 +14,10 @@
 // refused, which makes Xray/tun2socks fall back to TCP; DNS is DoH over :443.
 // The legacy v1 PHP exit (phpbox.php) is not supported any more: such a URL is
 // reported as "OFSTATUS unsupported".
+//
+// -transport mailru|cups|session switches to carriers of the OpenFlux core
+// (Mail.ru/cups.online stream mode, openflux:// share links) behind the same
+// SOCKS5; see carriers.go. The default (-transport v2) is the path above.
 package main
 
 import (
@@ -1199,6 +1205,20 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-caps must be on or off")
 		os.Exit(2)
 	}
+	switch normTransport(*flagTransport) {
+	case "v2":
+	case "":
+		fmt.Fprintln(os.Stderr, "-transport must be v2, mailru, cups or session")
+		os.Exit(2)
+	default: // a core carrier (carriers.go)
+		if *flagDiag {
+			b, _ := json.Marshal(runCarrierDiag(*flagTransport, *flagLink, *flagSecret))
+			fmt.Printf("OFDIAG %s\n", b)
+			return
+		}
+		runCarrierMode(*flagListen, *flagUser, *flagPass)
+		return
+	}
 	if *flagDiag {
 		if *flagURL == "" || *flagToken == "" {
 			fmt.Fprintln(os.Stderr, "usage: ofbridge -diag -url URL -token SECRET [-client ID -ipcache FILE -ip IPV4]")
@@ -1213,7 +1233,9 @@ func main() {
 		return
 	}
 	if *flagURL == "" || *flagToken == "" {
-		fmt.Fprintln(os.Stderr, "usage: ofbridge -url https://host/n/ -token SECRET [-listen 127.0.0.1:10818 -user U -pass P -client ID]")
+		fmt.Fprintln(os.Stderr, "usage: ofbridge -url https://host/n/ -token SECRET [-listen 127.0.0.1:10818 -user U -pass P -client ID]\n"+
+			"       ofbridge -transport mailru|cups -link URL [-listen ... -user U -pass P]\n"+
+			"       ofbridge -transport session -link openflux://v1/... [-secret KEY -listen ... -user U -pass P]")
 		os.Exit(2)
 	}
 	ln, err := net.Listen("tcp", *flagListen)

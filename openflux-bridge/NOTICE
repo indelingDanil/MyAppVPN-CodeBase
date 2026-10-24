@@ -1,0 +1,83 @@
+ofbridge (MyAppVPN OpenFlux bridge)
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This program links the OpenFlux core as a Go library:
+  module  github.com/p1neappleXpress/OpenFlux
+  version v0.13.0 (commit 4f9c786cdd1d9fcd0c133e2e0fec0c5a12522610)
+  source  https://github.com/p1neappleXpress/OpenFlux
+  licence GNU General Public License v3.0 or later
+
+carriers.go reimplements the client-side Session assembly of the core's
+mobile bridge (mobile/session.go, mobile/proxy.go of the same repository).
+
+The upstream COPYRIGHT and NOTICE files follow unchanged.
+
+==============================================================================
+OpenFlux COPYRIGHT
+==============================================================================
+OpenFlux
+Copyright (C) 2026 OpenFlux Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+==============================================================================
+OpenFlux NOTICE
+==============================================================================
+Third-Party Licenses
+====================
+
+This project includes or depends on the following third-party software.
+The original copyright notices and licenses are preserved below.
+
+------------------------------------------------------------------------------
+wireguard-go
+https://git.zx2c4.com/wireguard-go/
+Copyright (C) 2017-2025 WireGuard LLC. All Rights Reserved.
+Licensed under the MIT License.
+
+------------------------------------------------------------------------------
+gopacket
+https://github.com/gopacket/gopacket
+Copyright (c) 2012 Google, Inc.
+Licensed under the BSD 3-Clause License.
+
+------------------------------------------------------------------------------
+gVisor
+https://gvisor.dev/
+Copyright 2018 The gVisor Authors.
+Licensed under the Apache License, Version 2.0.
+
+------------------------------------------------------------------------------
+gorilla/websocket
+https://github.com/gorilla/websocket
+Copyright (c) 2013 The Gorilla WebSocket Authors.
+Licensed under the BSD 2-Clause License.
+
+------------------------------------------------------------------------------
+pion/webrtc
+https://github.com/pion/webrtc
+Copyright (c) 2018 The Pion Authors.
+Licensed under the MIT License.
+
+------------------------------------------------------------------------------
+golang.org/x/sys
+https://pkg.go.dev/golang.org/x/sys
+Copyright 2009 The Go Authors.
+Licensed under the BSD 3-Clause License.
+
+------------------------------------------------------------------------------
+pierrec/lz4
+https://github.com/pierrec/lz4
+Copyright (c) 2015, Pierre Curto.
+Licensed under the BSD 2-Clause License.

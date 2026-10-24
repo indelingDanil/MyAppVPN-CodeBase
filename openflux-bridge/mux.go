@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package main
 
 // Stream multiplexer of the OpenFlux v2 exit protocol (see PROTOCOL-v2.md).
