@@ -50,6 +50,12 @@ class AppPreferences @Inject constructor(
         val KEY_OPENFLUX_TOKEN = stringPreferencesKey("openflux_token")
         // true = use the author's public demo exit (URL/token are constants, never stored).
         val KEY_OPENFLUX_DEMO = booleanPreferencesKey("openflux_demo")
+        // Channel to the own exit (OpenFluxChannel.key) + per-channel links and the share-link key.
+        val KEY_OPENFLUX_CHANNEL = stringPreferencesKey("openflux_channel")
+        val KEY_OPENFLUX_LINK_MAILRU = stringPreferencesKey("openflux_link_mailru")
+        val KEY_OPENFLUX_LINK_CUPS = stringPreferencesKey("openflux_link_cups")
+        val KEY_OPENFLUX_LINK_SHARE = stringPreferencesKey("openflux_link_share")
+        val KEY_OPENFLUX_SECRET = stringPreferencesKey("openflux_secret")
         // Random per-install id (see installId()).
         val KEY_INSTALL_ID = stringPreferencesKey("install_id")
         // Custom subscriptions: JSON array of {name,url,enabled}. Built-in sources that the user
@@ -342,6 +348,34 @@ class AppPreferences @Inject constructor(
 
     suspend fun setOpenfluxDemo(v: Boolean) {
         dataStore.edit { it[KEY_OPENFLUX_DEMO] = v }
+    }
+
+    private fun stringPref(key: Preferences.Key<String>): Flow<String> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[key] ?: "" }
+
+    /** Channel to the own exit: "direct" (default) | "mailru" | "cups" | "link" (OpenFluxChannel). */
+    val openfluxChannel: Flow<String> = stringPref(KEY_OPENFLUX_CHANNEL)
+    /** Mail.ru document public link (channel "mailru"). */
+    val openfluxLinkMailru: Flow<String> = stringPref(KEY_OPENFLUX_LINK_MAILRU)
+    /** cups.online room code (channel "cups"). */
+    val openfluxLinkCups: Flow<String> = stringPref(KEY_OPENFLUX_LINK_CUPS)
+    /** openflux://v1/… share link (channel "link"). */
+    val openfluxLinkShare: Flow<String> = stringPref(KEY_OPENFLUX_LINK_SHARE)
+    /** Optional encryption key for the share link (overrides the link's own). */
+    val openfluxSecret: Flow<String> = stringPref(KEY_OPENFLUX_SECRET)
+
+    /** Writes the channel settings in one edit. */
+    suspend fun setOpenfluxChannelConfig(
+        channel: String, mailru: String, cups: String, share: String, secret: String,
+    ) {
+        dataStore.edit {
+            it[KEY_OPENFLUX_CHANNEL] = channel
+            it[KEY_OPENFLUX_LINK_MAILRU] = mailru
+            it[KEY_OPENFLUX_LINK_CUPS] = cups
+            it[KEY_OPENFLUX_LINK_SHARE] = share
+            it[KEY_OPENFLUX_SECRET] = secret
+        }
     }
 
     /**

@@ -17,7 +17,7 @@
     <string name="openflux_intro">Экспериментальный режим. Трафик идёт не через VLESS-серверы, а через ваш собственный выход — приложение OpenFlux (Node.js) на обычном веб-хостинге. Полезно, когда мобильный оператор пропускает только «белые» сайты, а ваш хостинг среди них. Работает только TCP (порты 80/443), скорость скромная.</string>
     <string name="openflux_enable_title">Использовать OpenFlux</string>
     <string name="openflux_enable_subtitle">Трафик пойдёт через ваш выход вместо VLESS-серверов</string>
-    <string name="openflux_enable_hint_fill">Сначала укажите корректный адрес выхода и токен и сохраните их.</string>
+    <string name="openflux_enable_hint_fill">Сначала настройте подключение к выходу (адрес и токен или ссылку канала) и сохраните.</string>
     <string name="openflux_section_settings">Подключение к выходу</string>
     <string name="openflux_url_label">Адрес выхода</string>
     <string name="openflux_url_placeholder" translatable="false">http://example.com/n/</string>
@@ -32,7 +32,7 @@
     <string name="openflux_saved">Сохранено</string>
     <string name="openflux_unsaved">Есть несохранённые изменения</string>
     <string name="openflux_http_warning">Без HTTPS провайдер видит токен и адреса сайтов. Содержимое HTTPS-сайтов остаётся зашифрованным.</string>
-    <string name="openflux_reconnect_note">VPN сейчас подключён — изменения адреса и токена применятся при переподключении.</string>
+    <string name="openflux_reconnect_note">VPN сейчас подключён — изменения настроек выхода применятся при переподключении.</string>
     <string name="openflux_howto_title">Как поднять свой выход</string>
     <string name="openflux_howto_step1">1. Возьмите Node.js-выход (app.js) из ветки openflux-exit (кнопка ниже) — там же пошаговая инструкция для Beget.</string>
     <string name="openflux_howto_step2">2. Впишите в config.json свой длинный случайный токен.</string>
@@ -85,4 +85,60 @@
     <string name="openflux_diag_close">Закрыть</string>
     <string name="openflux_diag_copied">Отчёт скопирован</string>
     <string name="openflux_diag_share_title">Отправить отчёт</string>
+
+    <!-- Channel to the own exit (Mail.ru / Cups / openflux:// link) -->
+    <string name="openflux_channel_title">Канал до выхода</string>
+    <string name="openflux_channel_direct">Напрямую</string>
+    <string name="openflux_channel_direct_desc">Обычное подключение к вашему выходу по адресу и токену. Самый быстрый вариант.</string>
+    <string name="openflux_channel_mailru">Через документ Mail.ru</string>
+    <string name="openflux_channel_mailru_desc">Трафик идёт через документ в Облаке Mail.ru. Помогает, когда оператор пропускает только сайты из белого списка. Канал не шифруется (HTTPS-сайты остаются зашифрованными) и медленнее, чем напрямую.</string>
+    <string name="openflux_channel_cups">Через комнаты Cups</string>
+    <string name="openflux_channel_cups_desc">Трафик идёт через комнаты cups.online. Помогает, когда оператор пропускает только сайты из белого списка. Канал не шифруется (HTTPS-сайты остаются зашифрованными) и медленнее, чем напрямую.</string>
+    <string name="openflux_channel_link">Ссылка OpenFlux</string>
+    <string name="openflux_channel_link_desc">Подключение к любой ноде OpenFlux по ссылке openflux://… (свой VPS, нода друга). Канал шифруется, если в ссылке или в поле ниже есть ключ.</string>
+    <string name="openflux_channel_demo_note">Демо-сервер всегда работает напрямую — канал относится только к вашему выходу.</string>
+    <string name="openflux_mailru_label">Ссылка на документ Mail.ru</string>
+    <string name="openflux_mailru_placeholder" translatable="false">https://cloud.mail.ru/public/…</string>
+    <string name="openflux_cups_label">Код комнаты Cups</string>
+    <string name="openflux_share_label">Ссылка openflux://</string>
+    <string name="openflux_share_placeholder" translatable="false">openflux://v1/…</string>
+    <string name="openflux_secret_label">Ключ (если его нет в ссылке)</string>
+    <string name="openflux_secret_show">Показать ключ</string>
+    <string name="openflux_secret_hide">Скрыть ключ</string>
+    <string name="openflux_link_err_http">Нужна ссылка вида https://cloud.mail.ru/public/…</string>
+    <string name="openflux_link_err_openflux_here">Это ссылка openflux:// — выберите канал «Ссылка OpenFlux»</string>
+    <string name="openflux_link_err_not_openflux">Ссылка должна начинаться с openflux://v1/ (регистр букв важен)</string>
+    <string name="openflux_link_err_spaces">Код — без пробелов</string>
+    <string name="openflux_secret_err_short">Ключ — не короче 16 символов</string>
+    <string name="openflux_paste">Вставить из буфера</string>
+    <string name="openflux_paste_empty">В буфере нет текста</string>
+    <string name="openflux_paste_not_link">В буфере нет ссылки openflux://</string>
+
+    <!-- Import of openflux:// links -->
+    <string name="openflux_import_title">Ссылка OpenFlux</string>
+    <string name="openflux_import_text">Открыта ссылка на выход OpenFlux. Она может содержать ключ доступа — принимайте ссылки только от тех, кому доверяете. Подставить её в настройки и выбрать канал «Ссылка OpenFlux»?</string>
+    <string name="openflux_import_ok">Подставить</string>
+    <string name="openflux_import_cancel">Отмена</string>
+
+    <!-- Home: channel / carrier -->
+    <string name="openflux_home_via_carrier">через %1$s</string>
+    <string name="openflux_home_channel">Канал: %1$s</string>
+    <string name="openflux_carrier_direct">напрямую к ноде</string>
+    <string name="openflux_carrier_node">ноду OpenFlux</string>
+    <string name="openflux_carrier_yandex">Яндекс</string>
+    <string name="openflux_carrier_telemost">Телемост</string>
+    <string name="openflux_carrier_bitrix">Битрикс24</string>
+    <string name="openflux_channel_short_link">ссылка OpenFlux</string>
+
+    <!-- Captcha (browser check asked by a carrier) -->
+    <string name="openflux_captcha_channel">Проверки OpenFlux</string>
+    <string name="openflux_captcha_title">Нужна проверка «я не робот»</string>
+    <string name="openflux_captcha_notif_text">Сервис канала OpenFlux просит пройти проверку. Нажмите, чтобы открыть.</string>
+    <string name="openflux_captcha_home_text">Сервис канала просит пройти проверку «я не робот» — без неё канал не подключится.</string>
+    <string name="openflux_captcha_open">Пройти проверку</string>
+    <string name="openflux_captcha_hint">Пройдите проверку на странице и нажмите «Готово».</string>
+    <string name="openflux_captcha_done">Готово</string>
+    <string name="openflux_captcha_sent">Готово — канал переподключается</string>
+    <string name="openflux_captcha_no_cookies">Проверка ещё не пройдена: сайт не выдал cookies</string>
+    <string name="openflux_captcha_not_running">OpenFlux сейчас не запущен</string>
 </resources>

@@ -74,6 +74,10 @@ fun HomeScreen(
     val openFluxStatus by viewModel.openFluxStatus.collectAsStateWithLifecycle()
     val demoLeftSec by viewModel.openFluxDemoLeftSec.collectAsStateWithLifecycle()
     val demoLeftMb by viewModel.openFluxDemoLeftMb.collectAsStateWithLifecycle()
+    val openfluxChannel by viewModel.openfluxChannel.collectAsStateWithLifecycle()
+    val openFluxCarrier by viewModel.openFluxCarrier.collectAsStateWithLifecycle()
+    val openFluxCaptcha by viewModel.openFluxCaptcha.collectAsStateWithLifecycle()
+    val homeContext = androidx.compose.ui.platform.LocalContext.current
     val openFluxStatusRes = OpenFluxConfig.statusMessageRes(openFluxStatus)
     val connectedViaOpenFlux = vpnState == VpnState.CONNECTED &&
         activeServer?.id == OpenFluxConfig.SYNTHETIC_SERVER_ID
@@ -227,6 +231,8 @@ fun HomeScreen(
                     openfluxEnabled = openfluxEnabled,
                     openfluxHost = openfluxHost,
                     openfluxIsDemo = openfluxIsDemo,
+                    openfluxChannel = openfluxChannel,
+                    openfluxCarrier = openFluxCarrier,
                     demoLeftText = demoLeftText,
                     onDisableOpenFlux = { viewModel.disableOpenFlux() },
                     onSelectAuto = { viewModel.setAuto() },
@@ -254,6 +260,24 @@ fun HomeScreen(
                             onRegularServers = { viewModel.disableOpenFlux() },
                             onHowTo = onNavigateToOpenFlux
                         )
+                    }
+                }
+
+                // OpenFlux carrier asks for a browser check (captcha): open it in-app.
+                AnimatedVisibility(
+                    visible = openFluxCaptcha != null,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    var lastUrl by remember { mutableStateOf(openFluxCaptcha.orEmpty()) }
+                    if (openFluxCaptcha != null && openFluxCaptcha != lastUrl) lastUrl = openFluxCaptcha!!
+                    Column {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OpenFluxCaptchaCard(onOpen = {
+                            if (lastUrl.isNotEmpty()) {
+                                homeContext.startActivity(com.myappvpn.ui.CaptchaActivity.intent(homeContext, lastUrl))
+                            }
+                        })
                     }
                 }
 
@@ -376,6 +400,8 @@ private fun ModeCard(
     openfluxEnabled: Boolean,
     openfluxHost: String,
     openfluxIsDemo: Boolean,
+    openfluxChannel: com.myappvpn.domain.OpenFluxChannel,
+    openfluxCarrier: String?,
     demoLeftText: String?,
     onDisableOpenFlux: () -> Unit,
     onSelectAuto: () -> Unit,
@@ -395,6 +421,8 @@ private fun ModeCard(
                 OpenFluxModeContent(
                     host = openfluxHost,
                     isDemo = openfluxIsDemo,
+                    channel = openfluxChannel,
+                    carrier = openfluxCarrier,
                     connectedViaOpenFlux = vpnState == VpnState.CONNECTED &&
                         activeServer?.id == OpenFluxConfig.SYNTHETIC_SERVER_ID,
                     demoLeftText = demoLeftText,
@@ -597,11 +625,22 @@ private fun ColumnScope.ModeCardContent(
 private fun OpenFluxModeContent(
     host: String,
     isDemo: Boolean,
+    channel: com.myappvpn.domain.OpenFluxChannel,
+    carrier: String?,
     connectedViaOpenFlux: Boolean,
     demoLeftText: String?,
     switching: Boolean,
     onDisable: () -> Unit
 ) {
+    val direct = channel == com.myappvpn.domain.OpenFluxChannel.DIRECT
+    // Live carrier ("через Mail.ru"); before it is reported — the configured channel.
+    val carrierName = carrier?.let { openFluxCarrierName(it) }
+    val channelName = when (channel) {
+        com.myappvpn.domain.OpenFluxChannel.MAILRU -> "Mail.ru"
+        com.myappvpn.domain.OpenFluxChannel.CUPS -> "Cups"
+        com.myappvpn.domain.OpenFluxChannel.LINK -> stringResource(R.string.openflux_channel_short_link)
+        com.myappvpn.domain.OpenFluxChannel.DIRECT -> ""
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -634,6 +673,11 @@ private fun OpenFluxModeContent(
                     // Demo exit: never show its host.
                     isDemo && connectedViaOpenFlux -> stringResource(R.string.openflux_home_via_demo)
                     isDemo -> stringResource(R.string.openflux_home_demo)
+                    connectedViaOpenFlux && carrierName != null ->
+                        stringResource(R.string.openflux_home_via_carrier, carrierName)
+                    connectedViaOpenFlux && !direct ->
+                        stringResource(R.string.openflux_home_via_carrier, channelName)
+                    !direct -> stringResource(R.string.openflux_home_channel, channelName)
                     connectedViaOpenFlux -> stringResource(R.string.openflux_home_via) +
                         if (host.isNotEmpty()) " · $host" else ""
                     host.isNotEmpty() -> host
@@ -666,6 +710,64 @@ private fun OpenFluxModeContent(
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
+        }
+    }
+}
+
+/** Display name of a bridge carrier type ("OFNOTE transport/carrier"). */
+@Composable
+private fun openFluxCarrierName(type: String): String = when (type) {
+    "mailru" -> "Mail.ru"
+    "cupsonline", "cups" -> "Cups"
+    "yandex", "vyandex" -> stringResource(R.string.openflux_carrier_yandex)
+    "telemost" -> stringResource(R.string.openflux_carrier_telemost)
+    "oneme" -> "MAX"
+    "avito" -> "Avito"
+    "bitrix24" -> stringResource(R.string.openflux_carrier_bitrix)
+    "direct" -> stringResource(R.string.openflux_carrier_direct)
+    "session" -> stringResource(R.string.openflux_carrier_node)
+    else -> type
+}
+
+/** A carrier of the OpenFlux channel waits for a browser check: explain + open it. */
+@Composable
+private fun OpenFluxCaptchaCard(onOpen: () -> Unit) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+        borderColor = AetherConnecting.copy(alpha = 0.5f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                stringResource(R.string.openflux_captcha_title),
+                color = AetherConnecting,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                stringResource(R.string.openflux_captcha_home_text),
+                color = AetherTextSecondary,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Button(
+                onClick = onOpen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AetherCyan,
+                    contentColor = AetherBackground
+                )
+            ) {
+                Text(stringResource(R.string.openflux_captcha_open), fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }

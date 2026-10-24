@@ -71,16 +71,22 @@ class ConnectVpnUseCase @Inject constructor(
         // Demo flag → demo constants; else the user's own URL/token (OpenFluxEndpoint decides).
         val endpoint = OpenFluxEndpoint.resolve(preferences)
         if (!endpoint.complete) {
-            throw IllegalStateException("Укажите адрес и токен OpenFlux")
+            throw IllegalStateException(
+                if (endpoint.channel == com.myappvpn.domain.OpenFluxChannel.DIRECT) "Укажите адрес и токен OpenFlux"
+                else "Укажите ссылку для канала OpenFlux"
+            )
         }
         val hotspotSharing = preferences.hotspotSharing.first()
-        Log.i(TAG, "Connecting (OpenFlux)")   // never log the URL/token
+        Log.i(TAG, "Connecting (OpenFlux, channel ${endpoint.channel.key})")   // never log the URL/token/link
         val intent = Intent(context, MyVpnService::class.java).apply {
             action = MyVpnService.ACTION_CONNECT
             putExtra(MyVpnService.EXTRA_OPENFLUX, true)
             putExtra(MyVpnService.EXTRA_OPENFLUX_URL, endpoint.url)
             putExtra(MyVpnService.EXTRA_OPENFLUX_TOKEN, endpoint.token)
             putExtra(MyVpnService.EXTRA_OPENFLUX_DEMO, endpoint.demo)
+            putExtra(MyVpnService.EXTRA_OPENFLUX_TRANSPORT, endpoint.channel.transport)
+            putExtra(MyVpnService.EXTRA_OPENFLUX_LINK, endpoint.link)
+            putExtra(MyVpnService.EXTRA_OPENFLUX_SECRET, endpoint.secret)
             putExtra(MyVpnService.EXTRA_SERVER_NAME, "OpenFlux (Beta)")
             putExtra(MyVpnService.EXTRA_HOTSPOT_SHARING, hotspotSharing)
             putExtra(MyVpnService.EXTRA_BALANCER_MODE, false)

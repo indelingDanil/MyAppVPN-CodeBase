@@ -16,7 +16,7 @@
     <string name="openflux_intro">Experimental mode. Traffic goes not through VLESS servers but through your own exit: the OpenFlux app (Node.js) on ordinary web hosting. Useful when your mobile carrier only lets \"whitelisted\" sites through and your hosting is one of them. TCP only (ports 80/443), speed is modest.</string>
     <string name="openflux_enable_title">Use OpenFlux</string>
     <string name="openflux_enable_subtitle">Traffic goes through your exit instead of VLESS servers</string>
-    <string name="openflux_enable_hint_fill">First enter a valid exit address and token, then save them.</string>
+    <string name="openflux_enable_hint_fill">First set up the connection to the exit (address and token, or the channel link), then save.</string>
     <string name="openflux_section_settings">Exit connection</string>
     <string name="openflux_url_label">Exit address</string>
     <string name="openflux_url_err_invalid">Invalid address</string>
@@ -30,7 +30,7 @@
     <string name="openflux_saved">Saved</string>
     <string name="openflux_unsaved">You have unsaved changes</string>
     <string name="openflux_http_warning">Without HTTPS your provider can see the token and the site addresses. The content of HTTPS sites stays encrypted.</string>
-    <string name="openflux_reconnect_note">The VPN is connected: address and token changes apply on reconnect.</string>
+    <string name="openflux_reconnect_note">The VPN is connected: exit settings changes apply on reconnect.</string>
     <string name="openflux_howto_title">How to set up your own exit</string>
     <string name="openflux_howto_step1">1. Get the Node.js exit (app.js) from the openflux-exit branch (button below) — it also has a step-by-step Beget guide.</string>
     <string name="openflux_howto_step2">2. Put your own long random token into config.json.</string>
@@ -83,4 +83,58 @@
     <string name="openflux_diag_close">Close</string>
     <string name="openflux_diag_copied">Report copied</string>
     <string name="openflux_diag_share_title">Send report</string>
+
+    <!-- Channel to the own exit (Mail.ru / Cups / openflux:// link) -->
+    <string name="openflux_channel_title">Channel to the exit</string>
+    <string name="openflux_channel_direct">Direct</string>
+    <string name="openflux_channel_direct_desc">Plain connection to your exit by address and token. The fastest option.</string>
+    <string name="openflux_channel_mailru">Via a Mail.ru document</string>
+    <string name="openflux_channel_mailru_desc">Traffic goes through a document in Mail.ru Cloud. Helps when the carrier only lets whitelisted sites through. The channel is not encrypted (HTTPS sites stay encrypted) and is slower than direct.</string>
+    <string name="openflux_channel_cups">Via Cups rooms</string>
+    <string name="openflux_channel_cups_desc">Traffic goes through cups.online rooms. Helps when the carrier only lets whitelisted sites through. The channel is not encrypted (HTTPS sites stay encrypted) and is slower than direct.</string>
+    <string name="openflux_channel_link">OpenFlux link</string>
+    <string name="openflux_channel_link_desc">Connect to any OpenFlux node by an openflux://… link (your VPS, a friend\'s node). The channel is encrypted when the link or the field below has a key.</string>
+    <string name="openflux_channel_demo_note">The demo server always works directly; the channel applies to your own exit only.</string>
+    <string name="openflux_mailru_label">Mail.ru document link</string>
+    <string name="openflux_cups_label">Cups room code</string>
+    <string name="openflux_share_label">openflux:// link</string>
+    <string name="openflux_secret_label">Key (if the link has none)</string>
+    <string name="openflux_secret_show">Show key</string>
+    <string name="openflux_secret_hide">Hide key</string>
+    <string name="openflux_link_err_http">Needs a link like https://cloud.mail.ru/public/…</string>
+    <string name="openflux_link_err_openflux_here">This is an openflux:// link: pick the «OpenFlux link» channel</string>
+    <string name="openflux_link_err_not_openflux">The link must start with openflux://v1/ (case matters)</string>
+    <string name="openflux_link_err_spaces">The code has no spaces</string>
+    <string name="openflux_secret_err_short">The key must be at least 16 characters</string>
+    <string name="openflux_paste">Paste from clipboard</string>
+    <string name="openflux_paste_empty">The clipboard has no text</string>
+    <string name="openflux_paste_not_link">The clipboard has no openflux:// link</string>
+
+    <!-- Import of openflux:// links -->
+    <string name="openflux_import_title">OpenFlux link</string>
+    <string name="openflux_import_text">An OpenFlux exit link was opened. It may contain an access key, so only accept links from people you trust. Put it into the settings and switch to the «OpenFlux link» channel?</string>
+    <string name="openflux_import_ok">Use it</string>
+    <string name="openflux_import_cancel">Cancel</string>
+
+    <!-- Home: channel / carrier -->
+    <string name="openflux_home_via_carrier">via %1$s</string>
+    <string name="openflux_home_channel">Channel: %1$s</string>
+    <string name="openflux_carrier_direct">direct to the node</string>
+    <string name="openflux_carrier_node">an OpenFlux node</string>
+    <string name="openflux_carrier_yandex">Yandex</string>
+    <string name="openflux_carrier_telemost">Telemost</string>
+    <string name="openflux_carrier_bitrix">Bitrix24</string>
+    <string name="openflux_channel_short_link">OpenFlux link</string>
+
+    <!-- Captcha (browser check asked by a carrier) -->
+    <string name="openflux_captcha_channel">OpenFlux checks</string>
+    <string name="openflux_captcha_title">A \"not a robot\" check is needed</string>
+    <string name="openflux_captcha_notif_text">The OpenFlux channel\'s service asks for a check. Tap to open it.</string>
+    <string name="openflux_captcha_home_text">The channel\'s service asks for a \"not a robot\" check; the channel won\'t connect without it.</string>
+    <string name="openflux_captcha_open">Open the check</string>
+    <string name="openflux_captcha_hint">Pass the check on the page, then tap «Done».</string>
+    <string name="openflux_captcha_done">Done</string>
+    <string name="openflux_captcha_sent">Done: the channel is reconnecting</string>
+    <string name="openflux_captcha_no_cookies">The check isn\'t passed yet: the site set no cookies</string>
+    <string name="openflux_captcha_not_running">OpenFlux isn\'t running right now</string>
 </resources>

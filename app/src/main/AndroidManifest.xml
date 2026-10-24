@@ -38,12 +38,26 @@
             android:name=".ui.MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize"
+            android:launchMode="singleTask"
             android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- OpenFlux share links (openflux://v1/…): open the OpenFlux screen prefilled. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="openflux" />
+            </intent-filter>
         </activity>
+
+        <!-- OpenFlux carrier captcha (WebView) -->
+        <activity
+            android:name=".ui.CaptchaActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- VPN Service -->
         <service

@@ -73,10 +73,21 @@ class MyVpnService : VpnService() {
         const val EXTRA_OPENFLUX_TOKEN = "openflux_token"
         /** true = the URL/token are the author's demo exit → never show/log its host. */
         const val EXTRA_OPENFLUX_DEMO = "openflux_demo"
+        /** Bridge `-transport`: "v2" (default, URL/token) | "mailru" | "cups" | "session" (link). */
+        const val EXTRA_OPENFLUX_TRANSPORT = "openflux_transport"
+        /** Carrier channels: document link / room code / openflux:// share link. */
+        const val EXTRA_OPENFLUX_LINK = "openflux_link"
+        /** Share links: optional encryption key. */
+        const val EXTRA_OPENFLUX_SECRET = "openflux_secret"
         /** [connectedServer] id of an OpenFlux session (synthetic profile, not in Room). */
         const val OPENFLUX_SERVER_ID = "__openflux__"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "vpn_service"
+        // OpenFlux carrier asks for a browser check (captcha) → separate, audible notification.
+        private const val CAPTCHA_NOTIFICATION_ID = 1002
+        private const val CAPTCHA_CHANNEL_ID = "openflux_check"
+        // Carrier channels: after "connecting", wait this long for "connected" before going CONNECTED.
+        private const val OPENFLUX_CARRIER_CONNECT_WAIT_MS = 20_000L
         // Sticky balancer: only re-check the active route's Telegram reachability this often.
         private const val BALANCER_PROBE_INTERVAL_MS = 5 * 60_000L
         // "Too slow / dead" = couldn't FULLY load Telegram within this budget (one probe).
@@ -123,6 +134,25 @@ class MyVpnService : VpnService() {
         private val _openFluxDemoLeftMb = MutableStateFlow<Int?>(null)
         val openFluxDemoLeftMb: StateFlow<Int?> = _openFluxDemoLeftMb.asStateFlow()
 
+        // OpenFlux carrier channels: the carrier traffic currently rides ("mailru", "cupsonline",
+        // "session", or a session link's active carrier like "yandex"). null = direct / no session.
+        private val _openFluxCarrier = MutableStateFlow<String?>(null)
+        val openFluxCarrier: StateFlow<String?> = _openFluxCarrier.asStateFlow()
+
+        // A carrier waits for a browser check at this URL (CaptchaActivity). null = none.
+        private val _openFluxCaptcha = MutableStateFlow<String?>(null)
+        val openFluxCaptcha: StateFlow<String?> = _openFluxCaptcha.asStateFlow()
+
+        // Bridge of the live service instance (for cookies from CaptchaActivity).
+        @Volatile private var liveOpenFluxManager: OpenFluxManager? = null
+
+        /**
+         * Cookies ("a=1; b=2") from a solved browser check → the running bridge's stdin.
+         * false = no OpenFlux bridge running / not delivered.
+         */
+        fun submitOpenFluxCookies(header: String): Boolean =
+            liveOpenFluxManager?.sendCookies(header) == true
+
         // True while a hot-switch (to a server or back to Auto) is being applied.
         private val _switching = MutableStateFlow(false)
         val switching: StateFlow<Boolean> = _switching.asStateFlow()
@@ -158,8 +188,12 @@ class MyVpnService : VpnService() {
     private lateinit var openFluxManager: OpenFluxManager
 
     /** OpenFlux (Beta) session parameters (URL/token from the connect intent). */
-    private class OpenFluxTarget(val url: String, val token: String, val demo: Boolean) {
-        override fun toString(): String = "OpenFluxTarget(demo=$demo)"   // never leak URL/token
+    private class OpenFluxTarget(
+        val url: String, val token: String, val demo: Boolean,
+        val transport: String = "v2", val link: String = "", val secret: String = "",
+    ) {
+        val direct: Boolean get() = transport == "v2"
+        override fun toString(): String = "OpenFluxTarget(demo=$demo, transport=$transport)"   // never leak URL/token/link
     }
 
     // OpenFlux session: Xray's "proxy" outbound → local bridge (libofbridge) → user's PHP exit.
@@ -254,6 +288,7 @@ class MyVpnService : VpnService() {
         xrayManager = XrayManager(this)
         tun2SocksManager = Tun2SocksManager(this)
         openFluxManager = OpenFluxManager(this)
+        liveOpenFluxManager = openFluxManager
         createNotificationChannel()
         // Bridge exit status while in OpenFlux mode: a refusal (busy / expired / ended / quota /
         // noclient / badtoken) is published and ends the session. Outside OpenFlux mode the
@@ -282,6 +317,51 @@ class MyVpnService : VpnService() {
         serviceScope.launch {
             openFluxManager.leftMb.collect { _openFluxDemoLeftMb.value = if (openFluxMode) it else null }
         }
+        serviceScope.launch {
+            openFluxManager.carrier.collect { _openFluxCarrier.value = if (openFluxMode) it else null }
+        }
+        // Carrier captcha: publish for the in-app prompt + a notification opening CaptchaActivity.
+        serviceScope.launch {
+            openFluxManager.captchaUrl.collect { url ->
+                val shown = if (openFluxMode) url else null
+                _openFluxCaptcha.value = shown
+                if (shown != null) showCaptchaNotification(shown) else cancelCaptchaNotification()
+            }
+        }
+    }
+
+    private fun showCaptchaNotification(url: String) {
+        try {
+            val nm = getSystemService(NotificationManager::class.java) ?: return
+            if (nm.getNotificationChannel(CAPTCHA_CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CAPTCHA_CHANNEL_ID, getString(R.string.openflux_captcha_channel),
+                        NotificationManager.IMPORTANCE_HIGH
+                    )
+                )
+            }
+            val open = PendingIntent.getActivity(
+                this, 2,
+                com.myappvpn.ui.CaptchaActivity.intent(this, url),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val n = NotificationCompat.Builder(this, CAPTCHA_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_vpn_key)
+                .setContentTitle(getString(R.string.openflux_captcha_title))
+                .setContentText(getString(R.string.openflux_captcha_notif_text))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+            nm.notify(CAPTCHA_NOTIFICATION_ID, n)
+        } catch (e: Exception) {
+            Log.w(TAG, "Captcha notification failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private fun cancelCaptchaNotification() {
+        runCatching { getSystemService(NotificationManager::class.java)?.cancel(CAPTCHA_NOTIFICATION_ID) }
     }
 
     /**
@@ -338,12 +418,20 @@ class MyVpnService : VpnService() {
                 val ofTarget = if (intent.getBooleanExtra(EXTRA_OPENFLUX, false)) {
                     val url = intent.getStringExtra(EXTRA_OPENFLUX_URL)?.trim().orEmpty()
                     val token = intent.getStringExtra(EXTRA_OPENFLUX_TOKEN)?.trim().orEmpty()
-                    if (url.isEmpty() || token.isEmpty()) {
-                        Log.w(TAG, "OpenFlux CONNECT without URL/token — ignored")
+                    val transport = intent.getStringExtra(EXTRA_OPENFLUX_TRANSPORT)?.trim()
+                        ?.takeIf { it.isNotEmpty() } ?: "v2"
+                    val link = intent.getStringExtra(EXTRA_OPENFLUX_LINK)?.trim().orEmpty()
+                    val secret = intent.getStringExtra(EXTRA_OPENFLUX_SECRET)?.trim().orEmpty()
+                    val usable = if (transport == "v2") url.isNotEmpty() && token.isNotEmpty() else link.isNotEmpty()
+                    if (!usable) {
+                        Log.w(TAG, "OpenFlux CONNECT without URL/token/link — ignored")
                         stopIfIdle(startId)
                         return START_NOT_STICKY
                     }
-                    OpenFluxTarget(url, token, intent.getBooleanExtra(EXTRA_OPENFLUX_DEMO, false))
+                    OpenFluxTarget(
+                        url, token, intent.getBooleanExtra(EXTRA_OPENFLUX_DEMO, false),
+                        transport = transport, link = link, secret = secret,
+                    )
                 } else null
                 // OpenFlux: the service builds the chain config itself (needs the session ports).
                 val xrayConfig = if (ofTarget != null) "" else intent.getStringExtra(EXTRA_XRAY_CONFIG)
@@ -637,6 +725,16 @@ class MyVpnService : VpnService() {
                     return
                 }
                 if (first == null) Log.w(TAG, "OpenFlux: no exit answer within ${OPENFLUX_FIRST_STATUS_TIMEOUT_MS / 1000} s — continuing")
+                // Carrier channels report "connecting" at once: give the carrier a moment to join
+                // its document/room (or the node's handshake). A captcha or "error" → go on (the
+                // in-app prompt / watchdog take over); so does a timeout.
+                if (first == "connecting") {
+                    val joined = withTimeoutOrNull(OPENFLUX_CARRIER_CONNECT_WAIT_MS) {
+                        combine(openFluxManager.status, openFluxManager.captchaUrl) { s, c -> s != "connecting" || c != null }
+                            .first { it }
+                    }
+                    Log.i(TAG, "OpenFlux carrier: ${if (joined == null) "still connecting — continuing" else openFluxManager.status.value}")
+                }
             }
             activeSocksPort = currentSocksPort   // expose for in-tunnel subscription refresh
 
@@ -706,6 +804,13 @@ class MyVpnService : VpnService() {
         val target = openFlux
         val label = if (target?.demo == true) {
             "демо"
+        } else if (target != null && !target.direct) {
+            // Carrier channels: no exit host in the settings — name the channel (never the link).
+            when (target.transport) {
+                "mailru" -> "Mail.ru"
+                "cups" -> "Cups"
+                else -> "ссылка"
+            }
         } else {
             target?.url?.let { u -> runCatching { java.net.URI(u).host }.getOrNull() }
                 ?.takeIf { it.isNotBlank() } ?: "?"
@@ -725,7 +830,10 @@ class MyVpnService : VpnService() {
         val target = openFlux ?: return false
         // Stable per install → cached; the first call happens inside connect()'s try.
         val clientId = installIdCache ?: preferences.installId().also { installIdCache = it }
-        return openFluxManager.start(target.url, target.token, clientId, bridgePort, bridgeUser, bridgePass, target.demo)
+        return openFluxManager.start(
+            target.url, target.token, clientId, bridgePort, bridgeUser, bridgePass, target.demo,
+            transport = target.transport, link = target.link, secret = target.secret,
+        )
     }
 
     /**
@@ -1566,7 +1674,18 @@ class MyVpnService : VpnService() {
                     break
                 }
 
-                val internetOk = withContext(Dispatchers.IO) { isInternetReachableViaSocks(currentSocksPort) }
+                // A carrier waits for the user's browser check: a restart would only lose it.
+                if (openFluxManager.captchaUrl.value != null) {
+                    Log.i(TAG, "OpenFlux carrier waits for a browser check — skipping health check")
+                    failStreak = 0
+                    continue
+                }
+
+                // Carrier channels say "error" when the carrier stays disconnected for a minute:
+                // a failed check without probing (→ the usual one-shot restart, then kill-switch).
+                val internetOk = if (bridgeState == "error" && openFlux?.direct == false) {
+                    false
+                } else withContext(Dispatchers.IO) { isInternetReachableViaSocks(currentSocksPort) }
                 if (!stillCurrent()) break
                 if (internetOk) {
                     failStreak = 0
@@ -2411,6 +2530,8 @@ class MyVpnService : VpnService() {
         xrayManager.deleteConfigs()   // no session credentials / server secrets left on disk
         openFluxManager.stop()        // after Xray: nothing dials the bridge any more
         openFluxMode = false
+        _openFluxCarrier.value = null
+        _openFluxCaptcha.value = null
         // _openFluxStatus is NOT cleared here: a refusal reason must outlive the teardown (the
         // next connect clears it).
         _openFluxDemoLeftSec.value = null
@@ -2451,6 +2572,10 @@ class MyVpnService : VpnService() {
         // has to explain why. The next connect clears it.
         _openFluxDemoLeftSec.value = null
         _openFluxDemoLeftMb.value = null
+        _openFluxCarrier.value = null
+        _openFluxCaptcha.value = null
+        cancelCaptchaNotification()
+        if (liveOpenFluxManager === openFluxManager) liveOpenFluxManager = null
         _vpnState.value = VpnState.DISCONNECTED
     }
 

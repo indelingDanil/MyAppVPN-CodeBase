@@ -11,6 +11,8 @@ import com.myappvpn.ui.theme.ThemeMode
 import javax.inject.Inject
 import android.os.Build
 import android.os.Bundle
+import android.content.Intent
+import com.myappvpn.ui.viewmodel.OpenFluxImport
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -80,6 +82,19 @@ class MainActivity : ComponentActivity() {
                 MainContent()
             }
         }
+        // Launched by an openflux:// link (not on recreation — the link was handled already).
+        if (savedInstanceState == null) handleViewIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleViewIntent(intent)
+    }
+
+    /** openflux:// share link → OpenFlux screen, prefilled after the user confirms there. */
+    private fun handleViewIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        OpenFluxImport.offer(intent.dataString)
     }
 }
 
@@ -88,6 +103,14 @@ fun MainContent() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+    // An imported openflux:// link waits for confirmation on the OpenFlux screen.
+    val pendingImport by OpenFluxImport.pending.collectAsState()
+    LaunchedEffect(pendingImport) {
+        if (pendingImport != null && navController.currentDestination?.route != Screen.OpenFlux.route) {
+            navController.navigate(Screen.OpenFlux.route) { launchSingleTop = true }
+        }
+    }
 
     // Routes that show the bottom nav bar
     val bottomNavRoutes = setOf(

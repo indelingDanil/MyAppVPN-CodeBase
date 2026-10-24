@@ -14,10 +14,26 @@ import kotlinx.coroutines.sync.withLock
  */
 object OpenFluxEndpoint {
 
-    /** Effective OpenFlux config. [complete] = usable for a connect. */
-    class Resolved(val url: String, val token: String, val demo: Boolean) {
-        val complete: Boolean get() = url.isNotBlank() && token.isNotBlank()
-        override fun toString(): String = "OpenFluxEndpoint.Resolved(demo=$demo, complete=$complete)"
+    /**
+     * Effective OpenFlux config. [complete] = usable for a connect.
+     * [channel] = how the bridge reaches the exit: DIRECT uses [url]/[token] (our v2 exit); the
+     * other channels use [link] (Mail.ru document / cups room / openflux:// share link) and, for
+     * LINK, an optional [secret]. The demo is always DIRECT.
+     */
+    class Resolved(
+        val url: String,
+        val token: String,
+        val demo: Boolean,
+        val channel: OpenFluxChannel = OpenFluxChannel.DIRECT,
+        val link: String = "",
+        val secret: String = "",
+    ) {
+        val complete: Boolean get() = when (channel) {
+            OpenFluxChannel.DIRECT -> url.isNotBlank() && token.isNotBlank()
+            else -> link.isNotBlank()
+        }
+        override fun toString(): String =
+            "OpenFluxEndpoint.Resolved(demo=$demo, channel=${channel.key}, complete=$complete)"
     }
 
     // ── Demo exit constants (obfuscated) ─────────────────────────────────────────────────────
@@ -90,11 +106,41 @@ object OpenFluxEndpoint {
         return if (preferences.openfluxDemo.first()) {
             Resolved(demoUrl, demoToken, demo = true)
         } else {
+            val channel = OpenFluxChannel.of(preferences.openfluxChannel.first())
+            val link = when (channel) {
+                OpenFluxChannel.DIRECT -> ""
+                OpenFluxChannel.MAILRU -> preferences.openfluxLinkMailru.first()
+                OpenFluxChannel.CUPS -> preferences.openfluxLinkCups.first()
+                OpenFluxChannel.LINK -> preferences.openfluxLinkShare.first()
+            }.trim()
             Resolved(
                 preferences.openfluxUrl.first().trim(),
                 preferences.openfluxToken.first().trim(),
                 demo = false,
+                channel = channel,
+                link = link,
+                secret = if (channel == OpenFluxChannel.LINK) preferences.openfluxSecret.first().trim() else "",
             )
         }
+    }
+}
+
+/**
+ * Channel from the bridge to the user's own exit ("Канал до выхода").
+ * [key] = stored pref value; [transport] = the bridge's `-transport` flag.
+ */
+enum class OpenFluxChannel(val key: String, val transport: String) {
+    /** Our v2 exit over plain HTTP(S) (URL + token). */
+    DIRECT("direct", "v2"),
+    /** Stream mode through a Mail.ru document (link = the document's public link). */
+    MAILRU("mailru", "mailru"),
+    /** Stream mode through cups.online rooms (link = the exit's room code). */
+    CUPS("cups", "cups"),
+    /** An openflux://v1/… share link to any OpenFlux node (+ optional key). */
+    LINK("link", "session");
+
+    companion object {
+        fun of(key: String?): OpenFluxChannel = entries.firstOrNull { it.key == key } ?: DIRECT
+        fun ofTransport(t: String?): OpenFluxChannel = entries.firstOrNull { it.transport == t } ?: DIRECT
     }
 }

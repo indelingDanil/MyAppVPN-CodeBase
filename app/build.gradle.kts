@@ -17,8 +17,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // Per-ABI APKs get versionCode * 10 + 1 (armeabi-v7a) / + 2 (arm64-v8a), see androidComponents.
-        versionCode = 14
-        versionName = "2.1.3"
+        versionCode = 15
+        versionName = "2.2.0-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

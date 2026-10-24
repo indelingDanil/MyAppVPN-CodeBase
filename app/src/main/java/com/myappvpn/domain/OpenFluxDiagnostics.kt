@@ -111,14 +111,22 @@ object OpenFluxDiagnostics {
             restrictStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED
         val whitelisted = restrictStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED
 
-        val host = runCatching { URI(endpoint.url).host }.getOrNull()?.takeIf { it.isNotBlank() }
+        val direct = endpoint.channel == OpenFluxChannel.DIRECT
+        val host = if (!direct) null
+        else runCatching { URI(endpoint.url).host }.getOrNull()?.takeIf { it.isNotBlank() }
         val demoLabel = L("демо-сервер", "demo server")
+        val channelLabel = when (endpoint.channel) {
+            OpenFluxChannel.DIRECT -> L("напрямую", "direct")
+            OpenFluxChannel.MAILRU -> L("через Mail.ru", "via Mail.ru")
+            OpenFluxChannel.CUPS -> L("через Cups", "via Cups")
+            OpenFluxChannel.LINK -> L("ссылка OpenFlux", "OpenFlux link")
+        }
 
         // ── Bridge network tests + service reachability probes, concurrently ──
         // Probes go OUTSIDE the tunnel: our own package is always excluded from the VPN
         // (MyVpnService: addDisallowedApplication(packageName), or simply not in the INCLUDE allow-list),
         // and additionally every probe socket + DNS lookup is bound to the underlying non-VPN network.
-        val exitProbe: Probe? = if (endpoint.complete) {
+        val exitProbe: Probe? = if (endpoint.complete && direct) {
             runCatching {
                 val u = URI(endpoint.url)
                 val scheme = (u.scheme ?: "https").lowercase()
@@ -138,7 +146,11 @@ object OpenFluxDiagnostics {
         // ── Masking ──
         fun sanitize(s: String): String {
             var out = s
-            if (endpoint.token.isNotEmpty()) out = out.replace(endpoint.token, "***")
+            // Longest first: a key may be a substring of the link carrying it.
+            listOf(endpoint.token, endpoint.link, endpoint.secret)
+                .filter { it.isNotEmpty() }
+                .sortedByDescending { it.length }
+                .forEach { out = out.replace(it, "***") }
             if (endpoint.demo) {
                 if (endpoint.url.isNotEmpty()) out = out.replace(endpoint.url, demoLabel)
                 if (host != null) out = out.replace(host, demoLabel)
@@ -161,6 +173,44 @@ object OpenFluxDiagnostics {
                 "Не удалось выполнить проверку сети (${bridge?.error ?: "нет ответа"}). Отправьте этот отчёт разработчику.",
                 "Couldn't run the network test (${bridge?.error ?: "no response"}). Please send this report to the developer."
             )
+            // Carrier channels (Mail.ru / Cups / openflux:// link): the bridge tested the carrier.
+            !direct -> {
+                val svc = bridge?.json?.optString("host").orEmpty().ifBlank { L("сервис канала", "the channel's service") }
+                when (summary) {
+                    "ok" -> L(
+                        "Канал ($channelLabel) подключается. Если VPN всё равно не работает — проверьте, что выход на той стороне запущен, и отправьте этот отчёт разработчику.",
+                        "The channel ($channelLabel) connects. If the VPN still doesn't work, check that the exit on the other side is running and send this report to the developer."
+                    )
+                    "bad_link" -> L(
+                        "Ссылка канала не подходит: ${bridge?.json?.optJSONObject("carrier")?.optString("err").orEmpty()}. Проверьте её и ключ.",
+                        "The channel link is not valid: ${bridge?.json?.optJSONObject("carrier")?.optString("err").orEmpty()}. Check it and the key."
+                    )
+                    "dns_failed" -> L(
+                        "Не удаётся узнать адрес $svc через DNS — канал не заработает в этой сети.",
+                        "Can't resolve $svc via DNS — the channel won't work on this network."
+                    )
+                    "tcp_failed" -> L(
+                        "$svc не принимает соединения — оператор, похоже, его блокирует. Попробуйте другой канал.",
+                        "$svc doesn't accept connections — the carrier seems to block it. Try another channel."
+                    )
+                    "captcha_required" -> L(
+                        "Сервис канала просит пройти проверку «я не робот». Подключитесь — приложение предложит открыть проверку.",
+                        "The channel's service asks for a \"not a robot\" check. Connect — the app will offer to open it."
+                    )
+                    "carrier_failed" -> L(
+                        "Канал не запустился. Проверьте ссылку; если она верна — отправьте этот отчёт разработчику.",
+                        "The channel failed to start. Check the link; if it is right, send this report to the developer."
+                    )
+                    "carrier_timeout" -> L(
+                        "$svc доступен, но канал не подключился за 25 с. Проверьте ссылку и что выход на той стороне запущен.",
+                        "$svc is reachable, but the channel didn't connect within 25 s. Check the link and that the exit on the other side is running."
+                    )
+                    else -> L(
+                        "Обнаружена проблема: $summary. Отправьте этот отчёт разработчику.",
+                        "Problem detected: $summary. Please send this report to the developer."
+                    )
+                }
+            }
             summary == "ok" -> L(
                 "С сетью всё в порядке: сервер доступен, соединение проходит. Если VPN всё равно не работает — отправьте этот отчёт разработчику.",
                 "The network looks fine: the server is reachable and the connection works. If the VPN still doesn't work, send this report to the developer."
@@ -227,7 +277,7 @@ object OpenFluxDiagnostics {
         // Exit reachability as seen by the bridge (Go, not subject to the app's cleartext policy).
         val bridgeProbe = bridge?.json?.optJSONObject("http_probe")
         val bridgeExitOk = bridgeProbe?.optBoolean("x_of_proto") == true
-        val servicesVerdict = probeVerdict(probes, endpoint.complete, bridgeExitOk, ::L)
+        val servicesVerdict = probeVerdict(probes, endpoint.complete && direct, bridgeExitOk, ::L)
 
         // ── Report ──
         val sb = StringBuilder()
@@ -236,7 +286,7 @@ object OpenFluxDiagnostics {
         sb.appendLine(L("Диагностика OpenFlux", "OpenFlux diagnostics"))
         sb.appendLine(SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date()))
         sb.appendLine()
-        sb.appendLine(L("ИТОГ: ", "RESULT: ") + verdict)
+        sb.appendLine(L("ИТОГ: ", "RESULT: ") + sanitize(verdict))
         if (servicesVerdict != null) sb.appendLine(L("СЕРВИСЫ: ", "SERVICES: ") + sanitize(servicesVerdict))
         if (dataSaverOn && !whitelisted) {
             sb.appendLine(L(
@@ -264,6 +314,7 @@ object OpenFluxDiagnostics {
             when {
                 !endpoint.complete -> L("не настроен", "not configured")
                 endpoint.demo -> demoLabel
+                !direct -> L("свой, канал: ", "own, channel: ") + channelLabel
                 else -> L("свой: ", "own: ") + (host ?: "?")
             }
         )
@@ -297,12 +348,12 @@ object OpenFluxDiagnostics {
                 (underlying?.second?.transport?.let { "$it, " + L("с привязкой к сети", "socket-bound") }
                     ?: L("по умолчанию", "default")) + ")"
         )
-        val exitLabelLen = if (exitProbe == null && endpoint.complete) {
+        val exitLabelLen = if (exitProbe == null && endpoint.complete && direct) {
             (if (endpoint.demo) demoLabel else runCatching { URI(endpoint.url).host }.getOrNull() ?: "exit").length
         } else 0
         val labelWidth = maxOf(probes.maxOfOrNull { it.probe.label.length } ?: 0, exitLabelLen) + 2
         probes.forEach { r -> sb.appendLine(sanitize(r.probe.label.padEnd(labelWidth) + r.line())) }
-        if (endpoint.complete && exitProbe == null && bridgeProbe != null) {
+        if (endpoint.complete && direct && exitProbe == null && bridgeProbe != null) {
             val label = if (endpoint.demo) demoLabel else (runCatching { URI(endpoint.url).host }.getOrNull() ?: "exit")
             val st = bridgeProbe.optInt("status", 0)
             val line = if (bridgeExitOk) "OK $st  ${bridgeProbe.optLong("ms")} ms  " + L("(по тесту моста)", "(bridge test)")
@@ -370,15 +421,21 @@ object OpenFluxDiagnostics {
     private suspend fun runBridge(
         context: Context, endpoint: OpenFluxEndpoint.Resolved, clientId: String,
     ): BridgeResult {
-        val cmd = mutableListOf(
-            BinaryInstaller.getOpenFluxBridgePath(context),
-            "-url", endpoint.url,
-            "-token", endpoint.token,
-            "-ipcache", OpenFluxManager.ipCachePath(context),
-            "-shortpoll", "auto",
-            "-diag",
-        )
-        if (clientId.isNotEmpty()) { cmd += "-client"; cmd += clientId }
+        val cmd = mutableListOf(BinaryInstaller.getOpenFluxBridgePath(context))
+        if (endpoint.channel == OpenFluxChannel.DIRECT) {
+            cmd += listOf(
+                "-url", endpoint.url,
+                "-token", endpoint.token,
+                "-ipcache", OpenFluxManager.ipCachePath(context),
+                "-shortpoll", "auto",
+            )
+            if (clientId.isNotEmpty()) { cmd += "-client"; cmd += clientId }
+        } else {
+            // Carrier channel: the bridge tests the service host + whether the carrier joins.
+            cmd += listOf("-transport", endpoint.channel.transport, "-link", endpoint.link)
+            if (endpoint.secret.isNotEmpty()) { cmd += "-secret"; cmd += endpoint.secret }
+        }
+        cmd += "-diag"
 
         val proc = try {
             ProcessBuilder(cmd).redirectErrorStream(true).start()

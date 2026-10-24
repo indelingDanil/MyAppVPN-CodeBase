@@ -69,6 +69,18 @@ class HomeViewModel @Inject constructor(
         demo   // the flag only: an own exit may use the same URL as the demo (different token)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    /** Channel to the own exit (the demo is always direct). */
+    val openfluxChannel: StateFlow<com.myappvpn.domain.OpenFluxChannel> =
+        combine(preferences.openfluxChannel, preferences.openfluxDemo) { ch, demo ->
+            if (demo) com.myappvpn.domain.OpenFluxChannel.DIRECT else com.myappvpn.domain.OpenFluxChannel.of(ch)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, com.myappvpn.domain.OpenFluxChannel.DIRECT)
+
+    /** Carrier the live OpenFlux session rides (mailru / cupsonline / session / yandex …) or null. */
+    val openFluxCarrier: StateFlow<String?> = MyVpnService.openFluxCarrier
+
+    /** A carrier waits for a browser check at this URL (in-app prompt) or null. */
+    val openFluxCaptcha: StateFlow<String?> = MyVpnService.openFluxCaptcha
+
     /** Last OpenFlux refusal (busy / expired / ended / quota / noclient / badtoken) or null. */
     val openFluxStatus: StateFlow<String?> = MyVpnService.openFluxStatus
 

@@ -8,7 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.domain.ConnectionController
 import com.myappvpn.domain.OpenFluxDiagnostics
+import com.myappvpn.domain.OpenFluxChannel
 import com.myappvpn.domain.OpenFluxEndpoint
+import kotlinx.coroutines.flow.combine
 import com.myappvpn.service.MyVpnService
 import com.myappvpn.service.VpnState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,6 +44,8 @@ object OpenFluxConfig {
     const val DEMO_MAX_USERS = 8
     const val DEMO_TRIAL_MINUTES = 60
     const val DEMO_TRIAL_GB = 2
+    /** Demo campaign end (14.10.2026 23:59:59 MSK); the demo card is hidden after it. */
+    const val DEMO_UNTIL_SEC = 1792011599L
 
     /** User-facing explanation of an OpenFlux refusal ([MyVpnService.openFluxStatus]); null = none. */
     @StringRes
@@ -85,6 +89,94 @@ object OpenFluxConfig {
     /** URL valid and token non-blank → the mode can be turned on. */
     fun isComplete(url: String, token: String): Boolean =
         validateUrl(url) == null && token.isNotBlank()
+
+    // ── Channels (Mail.ru / Cups / openflux:// link) ──
+
+    /** Prefix of OpenFlux share links (case-sensitive, like the link body). */
+    const val SHARE_PREFIX = "openflux://v1/"
+    /** Minimum key length the bridge accepts (OpenFlux core utils.MinSecretChars). */
+    const val SECRET_MIN_CHARS = 16
+
+    enum class LinkError { EMPTY, NOT_HTTP, OPENFLUX_HERE, NOT_OPENFLUX, SPACES }
+
+    /** null = a usable link for [channel] (DIRECT has none → always null). */
+    fun validateLink(channel: OpenFluxChannel, raw: String): LinkError? {
+        val t = raw.trim()
+        if (channel == OpenFluxChannel.DIRECT) return null
+        if (t.isEmpty()) return LinkError.EMPTY
+        return when (channel) {
+            OpenFluxChannel.MAILRU -> {
+                if (t.startsWith("openflux://", ignoreCase = true)) return LinkError.OPENFLUX_HERE
+                val uri = try { URI(t) } catch (e: Exception) { return LinkError.NOT_HTTP }
+                val scheme = uri.scheme?.lowercase()
+                if ((scheme != "http" && scheme != "https") || uri.host.isNullOrBlank()) LinkError.NOT_HTTP else null
+            }
+            OpenFluxChannel.CUPS -> when {
+                t.startsWith("openflux://", ignoreCase = true) -> LinkError.OPENFLUX_HERE
+                t.any { it.isWhitespace() } -> LinkError.SPACES
+                else -> null
+            }
+            OpenFluxChannel.LINK ->
+                if (!t.startsWith(SHARE_PREFIX) || t.length <= SHARE_PREFIX.length) LinkError.NOT_OPENFLUX else null
+            OpenFluxChannel.DIRECT -> null
+        }
+    }
+
+    /** The optional share-link key is set but shorter than the bridge accepts. */
+    fun secretTooShort(raw: String): Boolean {
+        val t = raw.trim()
+        return t.isNotEmpty() && t.codePointCount(0, t.length) < SECRET_MIN_CHARS
+    }
+
+    /** The own-exit settings form usable for a connect (per channel). */
+    fun isComplete(e: OwnExit): Boolean = when (e.channel) {
+        OpenFluxChannel.DIRECT -> isComplete(e.url, e.token)
+        OpenFluxChannel.LINK -> validateLink(e.channel, e.share) == null && !secretTooShort(e.secret)
+        else -> validateLink(e.channel, e.linkFor(e.channel)) == null
+    }
+}
+
+/** The user's own exit settings: direct URL/token + channel and the per-channel links. */
+data class OwnExit(
+    val url: String = "",
+    val token: String = "",
+    val channel: OpenFluxChannel = OpenFluxChannel.DIRECT,
+    val mailru: String = "",
+    val cups: String = "",
+    val share: String = "",
+    val secret: String = "",
+) {
+    fun linkFor(ch: OpenFluxChannel): String = when (ch) {
+        OpenFluxChannel.DIRECT -> ""
+        OpenFluxChannel.MAILRU -> mailru
+        OpenFluxChannel.CUPS -> cups
+        OpenFluxChannel.LINK -> share
+    }
+
+    fun trimmed() = OwnExit(
+        url.trim(), token.trim(), channel, mailru.trim(), cups.trim(), share.trim(), secret.trim(),
+    )
+
+    override fun toString(): String = "OwnExit(channel=${channel.key})"   // never leak secrets
+}
+
+/**
+ * openflux:// links opened from other apps (MainActivity intent-filter) → prefilled on the
+ * OpenFlux screen after the user confirms. Process-wide; consumed by the screen.
+ */
+object OpenFluxImport {
+    private val _pending = MutableStateFlow<String?>(null)
+    val pending: StateFlow<String?> = _pending.asStateFlow()
+
+    /** Accepts an openflux:// link (true) — e.g. an ACTION_VIEW intent's data. */
+    fun offer(link: String?): Boolean {
+        val t = link?.trim() ?: return false
+        if (!t.startsWith("openflux://", ignoreCase = true)) return false
+        _pending.value = t
+        return true
+    }
+
+    fun consume() { _pending.value = null }
 }
 
 @HiltViewModel
@@ -146,6 +238,28 @@ class OpenFluxViewModel @Inject constructor(
         .map<String, String?> { if (OpenFluxEndpoint.isDemoToken(it)) "" else it }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    /** The user's own exit settings incl. channel + links; null until loaded. */
+    val saved: StateFlow<OwnExit?> = combine(
+        listOf(
+            preferences.openfluxUrl,
+            preferences.openfluxToken.map { if (OpenFluxEndpoint.isDemoToken(it)) "" else it },
+            preferences.openfluxChannel,
+            preferences.openfluxLinkMailru,
+            preferences.openfluxLinkCups,
+            preferences.openfluxLinkShare,
+            preferences.openfluxSecret,
+        )
+    ) { a ->
+        OwnExit(a[0], a[1], OpenFluxChannel.of(a[2]), a[3], a[4], a[5], a[6])
+    }
+        .map<OwnExit, OwnExit?> { it }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** openflux:// link opened from another app, waiting for the user's confirmation. */
+    val pendingImport: StateFlow<String?> = OpenFluxImport.pending
+
+    fun consumeImport() = OpenFluxImport.consume()
+
     /** The author's demo exit is selected (`openfluxDemo` pref); null until loaded. */
     val demo: StateFlow<Boolean?> = preferences.openfluxDemo
         .map<Boolean, Boolean?> { it }
@@ -185,16 +299,16 @@ class OpenFluxViewModel @Inject constructor(
      * be cancelled. If the saved config is no longer usable while the mode is on, the mode is
      * turned off (through the controller, so a live session follows).
      */
-    fun save(url: String, token: String) {
-        val u = url.trim()
-        val t = token.trim()
+    fun save(exit: OwnExit) {
+        val e = exit.trimmed()
         viewModelScope.launch(NonCancellable) {
             writeMutex.withLock {
                 OpenFluxEndpoint.migrateOnce(preferences)   // before writing, so it can't clear our values
-                preferences.setOpenfluxUrl(u)
-                preferences.setOpenfluxToken(t)
+                preferences.setOpenfluxUrl(e.url)
+                preferences.setOpenfluxToken(e.token)
+                preferences.setOpenfluxChannelConfig(e.channel.key, e.mailru, e.cups, e.share, e.secret)
                 preferences.setOpenfluxDemo(false)
-                if (!OpenFluxConfig.isComplete(u, t) && preferences.openfluxEnabled.first()) {
+                if (!OpenFluxConfig.isComplete(e) && preferences.openfluxEnabled.first()) {
                     controller.setOpenFluxEnabled(false)
                 }
             }

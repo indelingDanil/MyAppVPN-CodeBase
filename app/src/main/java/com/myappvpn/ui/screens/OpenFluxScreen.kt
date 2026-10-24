@@ -55,6 +55,11 @@ import com.myappvpn.ui.components.GlassCard
 import com.myappvpn.ui.theme.*
 import com.myappvpn.ui.viewmodel.OpenFluxConfig
 import com.myappvpn.ui.viewmodel.OpenFluxViewModel
+import com.myappvpn.ui.viewmodel.OwnExit
+import com.myappvpn.domain.OpenFluxChannel
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material.icons.filled.ContentPaste
 
 private const val OPENFLUX_REPO_URL = "https://github.com/indelingDanil/MyAppVPN/tree/openflux-exit"   // Beget guide
 
@@ -65,8 +70,8 @@ fun OpenFluxScreen(
     onBack: () -> Unit
 ) {
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
-    val savedUrlOrNull by viewModel.url.collectAsStateWithLifecycle()
-    val savedTokenOrNull by viewModel.token.collectAsStateWithLifecycle()
+    val savedOrNull by viewModel.saved.collectAsStateWithLifecycle()
+    val pendingImport by viewModel.pendingImport.collectAsStateWithLifecycle()
     val demoOrNull by viewModel.demo.collectAsStateWithLifecycle()
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
     val openFluxStatus by viewModel.openFluxStatus.collectAsStateWithLifecycle()
@@ -78,43 +83,71 @@ fun OpenFluxScreen(
     // Drafts: edited locally, written to DataStore only on Save / Done / focus loss / leaving.
     var urlDraft by rememberSaveable { mutableStateOf("") }
     var tokenDraft by rememberSaveable { mutableStateOf("") }
+    var channelKey by rememberSaveable { mutableStateOf(OpenFluxChannel.DIRECT.key) }
+    var mailruDraft by rememberSaveable { mutableStateOf("") }
+    var cupsDraft by rememberSaveable { mutableStateOf("") }
+    var shareDraft by rememberSaveable { mutableStateOf("") }
+    var secretDraft by rememberSaveable { mutableStateOf("") }
     var draftsLoaded by rememberSaveable { mutableStateOf(false) }
     var tokenVisible by rememberSaveable { mutableStateOf(false) }
+    var secretVisible by rememberSaveable { mutableStateOf(false) }
     var howToExpanded by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(savedUrlOrNull, savedTokenOrNull) {
-        val u = savedUrlOrNull
-        val t = savedTokenOrNull
-        if (!draftsLoaded && u != null && t != null) {
-            urlDraft = u
-            tokenDraft = t
+    fun loadDrafts(e: OwnExit) {
+        urlDraft = e.url
+        tokenDraft = e.token
+        channelKey = e.channel.key
+        mailruDraft = e.mailru
+        cupsDraft = e.cups
+        shareDraft = e.share
+        secretDraft = e.secret
+    }
+
+    LaunchedEffect(savedOrNull) {
+        val s = savedOrNull
+        if (!draftsLoaded && s != null) {
+            loadDrafts(s)
             draftsLoaded = true
         }
     }
 
-    val savedUrl = savedUrlOrNull.orEmpty()
-    val savedToken = savedTokenOrNull.orEmpty()
+    val saved = savedOrNull ?: OwnExit()
+    val savedUrl = saved.url
+    val savedToken = saved.token
+    val channel = OpenFluxChannel.of(channelKey)
+    val draft = OwnExit(urlDraft, tokenDraft, channel, mailruDraft, cupsDraft, shareDraft, secretDraft)
     val urlError = remember(urlDraft) { OpenFluxConfig.validateUrl(urlDraft) }
-    val shownUrlError = urlError?.takeIf { it != OpenFluxConfig.UrlError.EMPTY }
-    val dirty = draftsLoaded &&
-        (urlDraft.trim() != savedUrl || tokenDraft.trim() != savedToken)
-    // An empty URL may be saved (clearing the config); a non-empty one must be valid.
-    val canSave = dirty && shownUrlError == null
+    // Errors are shown (and block saving) only for the fields of the selected channel.
+    val shownUrlError = urlError?.takeIf { it != OpenFluxConfig.UrlError.EMPTY && channel == OpenFluxChannel.DIRECT }
+    val linkError = remember(channel, draft.linkFor(channel)) {
+        OpenFluxConfig.validateLink(channel, draft.linkFor(channel))
+    }
+    val shownLinkError = linkError?.takeIf { it != OpenFluxConfig.LinkError.EMPTY }
+    val secretShort = channel == OpenFluxChannel.LINK && OpenFluxConfig.secretTooShort(secretDraft)
+    val noErrors = shownUrlError == null && shownLinkError == null && !secretShort
+    val draftComplete = OpenFluxConfig.isComplete(draft)
+    val dirty = draftsLoaded && draft.trimmed() != saved
+    // Switching to a channel that isn't filled in yet is saved only together with its link
+    // (else the switch would turn the mode off). An empty URL/link may be saved (clearing it).
+    val canSave = dirty && noErrors && (channel == saved.channel || draftComplete)
+    // Focus loss / leaving the screen: persist edited fields, but keep the saved channel while
+    // the newly picked one is incomplete.
+    val autoDraft = if (channel != saved.channel && !draftComplete) draft.copy(channel = saved.channel) else draft
+    val canAutoSave = draftsLoaded && noErrors && autoDraft.trimmed() != saved
     // The demo exit is chosen via the openfluxDemo pref (its URL/token are never shown here).
     val demoChosen = demoOrNull == true
-    // Effective config usable: the demo counts as complete; else the user's own saved pair.
-    val savedComplete = demoChosen || OpenFluxConfig.isComplete(savedUrl, savedToken)
+    // Effective config usable: the demo counts as complete; else the user's own saved settings.
+    val savedComplete = demoChosen || OpenFluxConfig.isComplete(saved)
     val sessionActive = vpnState == VpnState.CONNECTED ||
         vpnState == VpnState.CONNECTING || vpnState == VpnState.BLOCKED
     // The demo is "selected" when the demo flag is on.
     val demoSelected = demoChosen
-    // Demo selected + a complete own pair in the fields → the Save button switches to the own exit.
-    val switchFromDemo = demoChosen && shownUrlError == null &&
-        OpenFluxConfig.isComplete(urlDraft, tokenDraft)
+    // Demo selected + a complete own config in the fields → the Save button switches to the own exit.
+    val switchFromDemo = demoChosen && noErrors && draftComplete
     val statusRes = OpenFluxConfig.statusMessageRes(openFluxStatus)
 
     val save: () -> Unit = {
-        if (canSave) viewModel.save(urlDraft, tokenDraft)
+        if (canAutoSave) viewModel.save(autoDraft)
     }
     // Leaving the screen counts as focus loss: persist valid pending edits.
     val latestSave by rememberUpdatedState(save)
@@ -168,6 +201,8 @@ fun OpenFluxScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // ── Demo exit (prominent, first) ──
+            // Hidden once the demo campaign is over (unless it is still selected, so the user can see it).
+            if (demoSelected || System.currentTimeMillis() / 1000 < OpenFluxConfig.DEMO_UNTIL_SEC) {
             GlassCard(modifier = Modifier.fillMaxWidth(), borderColor = AetherCyan.copy(alpha = 0.5f)) {
                 Column(
                     modifier = Modifier
@@ -201,8 +236,7 @@ fun OpenFluxScreen(
                             onClick = {
                                 // The URL/token fields keep the user's own values; drop unsaved
                                 // edits so leaving the screen doesn't save them (and unselect the demo).
-                                urlDraft = savedUrl
-                                tokenDraft = savedToken
+                                loadDrafts(saved)
                                 focusManager.clearFocus()
                                 viewModel.useDemo()
                             },
@@ -222,6 +256,7 @@ fun OpenFluxScreen(
                         }
                     }
                 }
+            }
             }
 
             // ── Last exit refusal (the session was stopped) ──
@@ -347,6 +382,19 @@ fun OpenFluxScreen(
                     modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
                 )
 
+                // ── Channel to the exit ──
+                ChannelSelector(
+                    selected = channel,
+                    enabled = draftsLoaded,
+                    demoChosen = demoChosen,
+                    onSelect = {
+                        channelKey = it.key
+                        focusManager.clearFocus()
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+
+                if (channel == OpenFluxChannel.DIRECT) {
                 // Focus-loss save: only after the field actually had focus (onFocusChanged
                 // also fires once with "not focused" on first composition).
                 var urlHadFocus by remember { mutableStateOf(false) }
@@ -455,6 +503,125 @@ fun OpenFluxScreen(
                     }),
                     colors = openFluxFieldColors()
                 )
+                } else {
+                    // ── Carrier channels: the link (+ key for share links) ──
+                    val pasteEmpty = stringResource(R.string.openflux_paste_empty)
+                    val pasteNotLink = stringResource(R.string.openflux_paste_not_link)
+                    val linkErrorRes = when (shownLinkError) {
+                        OpenFluxConfig.LinkError.NOT_HTTP -> R.string.openflux_link_err_http
+                        OpenFluxConfig.LinkError.OPENFLUX_HERE -> R.string.openflux_link_err_openflux_here
+                        OpenFluxConfig.LinkError.NOT_OPENFLUX -> R.string.openflux_link_err_not_openflux
+                        OpenFluxConfig.LinkError.SPACES -> R.string.openflux_link_err_spaces
+                        OpenFluxConfig.LinkError.EMPTY, null -> null
+                    }
+                    val setLink: (String) -> Unit = { v ->
+                        when (channel) {
+                            OpenFluxChannel.MAILRU -> mailruDraft = v
+                            OpenFluxChannel.CUPS -> cupsDraft = v
+                            OpenFluxChannel.LINK -> shareDraft = v
+                            OpenFluxChannel.DIRECT -> Unit
+                        }
+                    }
+                    OpenFluxLinkField(
+                        value = draft.linkFor(channel),
+                        onValueChange = setLink,
+                        label = stringResource(
+                            when (channel) {
+                                OpenFluxChannel.MAILRU -> R.string.openflux_mailru_label
+                                OpenFluxChannel.CUPS -> R.string.openflux_cups_label
+                                else -> R.string.openflux_share_label
+                            }
+                        ),
+                        placeholder = when (channel) {
+                            OpenFluxChannel.MAILRU -> stringResource(R.string.openflux_mailru_placeholder)
+                            OpenFluxChannel.LINK -> stringResource(R.string.openflux_share_placeholder)
+                            else -> null
+                        },
+                        errorRes = linkErrorRes,
+                        enabled = draftsLoaded,
+                        imeAction = if (channel == OpenFluxChannel.LINK) ImeAction.Next else ImeAction.Done,
+                        onFocusLost = save,
+                        onDone = {
+                            save()
+                            focusManager.clearFocus()
+                        }
+                    )
+                    TextButton(
+                        onClick = {
+                            val cm = context.getSystemService(ClipboardManager::class.java)
+                            val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }
+                                ?.getItemAt(0)?.coerceToText(context)?.toString()?.trim().orEmpty()
+                            when {
+                                text.isEmpty() -> Toast.makeText(context, pasteEmpty, Toast.LENGTH_SHORT).show()
+                                channel == OpenFluxChannel.LINK && !text.startsWith("openflux://", ignoreCase = true) ->
+                                    Toast.makeText(context, pasteNotLink, Toast.LENGTH_SHORT).show()
+                                else -> {
+                                    setLink(text)
+                                    focusManager.clearFocus()
+                                }
+                            }
+                        },
+                        enabled = draftsLoaded,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.ContentPaste,
+                            contentDescription = null,
+                            tint = AetherCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.openflux_paste), color = AetherCyan, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    if (channel == OpenFluxChannel.LINK) {
+                        var secretHadFocus by remember { mutableStateOf(false) }
+                        OutlinedTextField(
+                            value = secretDraft,
+                            onValueChange = { secretDraft = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { st ->
+                                    if (st.isFocused) secretHadFocus = true
+                                    else if (secretHadFocus) {
+                                        secretHadFocus = false
+                                        save()
+                                    }
+                                },
+                            enabled = draftsLoaded,
+                            label = { Text(stringResource(R.string.openflux_secret_label)) },
+                            singleLine = true,
+                            isError = secretShort,
+                            supportingText = if (secretShort) {
+                                { Text(stringResource(R.string.openflux_secret_err_short), color = AetherDisconnected) }
+                            } else null,
+                            visualTransformation = if (secretVisible) VisualTransformation.None
+                            else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { secretVisible = !secretVisible }) {
+                                    Icon(
+                                        if (secretVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = stringResource(
+                                            if (secretVisible) R.string.openflux_secret_hide
+                                            else R.string.openflux_secret_show
+                                        ),
+                                        tint = AetherTextTertiary
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(onDone = {
+                                save()
+                                focusManager.clearFocus()
+                            }),
+                            colors = openFluxFieldColors()
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(4.dp))
 
@@ -467,7 +634,8 @@ fun OpenFluxScreen(
                         text = when {
                             !draftsLoaded -> ""
                             dirty -> stringResource(R.string.openflux_unsaved)
-                            savedUrl.isNotEmpty() || savedToken.isNotEmpty() ->
+                            savedUrl.isNotEmpty() || savedToken.isNotEmpty() ||
+                                saved.linkFor(saved.channel).isNotEmpty() ->
                                 stringResource(R.string.openflux_saved)
                             else -> ""
                         },
@@ -481,7 +649,7 @@ fun OpenFluxScreen(
                         onClick = {
                             // Explicit Save also switches FROM the demo to the own exit, even when
                             // the fields are unchanged (auto-save on focus loss must not do that).
-                            if (canSave || switchFromDemo) viewModel.save(urlDraft, tokenDraft)
+                            if (canSave || switchFromDemo) viewModel.save(draft)
                             focusManager.clearFocus()
                         },
                         enabled = canSave || switchFromDemo,
@@ -639,6 +807,173 @@ fun OpenFluxScreen(
     diagReport?.let { report ->
         DiagReportDialog(report = report, onDismiss = { viewModel.dismissDiagReport() })
     }
+
+    // openflux:// link opened from another app: confirm before it lands in the settings.
+    val importLink = pendingImport
+    if (importLink != null && draftsLoaded) {
+        AlertDialog(
+            onDismissRequest = { viewModel.consumeImport() },
+            containerColor = AetherSurface,
+            title = {
+                Text(stringResource(R.string.openflux_import_title), color = AetherTextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    stringResource(R.string.openflux_import_text),
+                    color = AetherTextSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        channelKey = OpenFluxChannel.LINK.key
+                        shareDraft = importLink
+                        viewModel.consumeImport()
+                        val next = draft.copy(channel = OpenFluxChannel.LINK, share = importLink)
+                        // A usable link is saved right away (switching from the demo, too); a
+                        // damaged one stays in the field with its error.
+                        if (OpenFluxConfig.isComplete(next)) viewModel.save(next)
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text(stringResource(R.string.openflux_import_ok), color = AetherCyan, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.consumeImport() }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.openflux_import_cancel), color = AetherTextSecondary)
+                }
+            }
+        )
+    }
+}
+
+/** «Канал до выхода»: Direct / Mail.ru / Cups / openflux:// link, each with a short explanation. */
+@Composable
+private fun ChannelSelector(
+    selected: OpenFluxChannel,
+    enabled: Boolean,
+    demoChosen: Boolean,
+    onSelect: (OpenFluxChannel) -> Unit,
+) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectableGroup()
+                .padding(vertical = 8.dp)
+        ) {
+            Text(
+                stringResource(R.string.openflux_channel_title),
+                color = AetherTextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+            if (demoChosen) {
+                Text(
+                    stringResource(R.string.openflux_channel_demo_note),
+                    color = AetherTextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)
+                )
+            }
+            listOf(
+                Triple(OpenFluxChannel.DIRECT, R.string.openflux_channel_direct, R.string.openflux_channel_direct_desc),
+                Triple(OpenFluxChannel.MAILRU, R.string.openflux_channel_mailru, R.string.openflux_channel_mailru_desc),
+                Triple(OpenFluxChannel.CUPS, R.string.openflux_channel_cups, R.string.openflux_channel_cups_desc),
+                Triple(OpenFluxChannel.LINK, R.string.openflux_channel_link, R.string.openflux_channel_link_desc),
+            ).forEach { (ch, titleRes, descRes) ->
+                val isSelected = ch == selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .selectable(
+                            selected = isSelected,
+                            enabled = enabled,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(ch) }
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    RadioButton(
+                        selected = isSelected,
+                        onClick = null,
+                        enabled = enabled,
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = AetherCyan,
+                            unselectedColor = AetherTextTertiary
+                        )
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(titleRes),
+                            color = if (isSelected) AetherCyan else AetherTextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                        Text(
+                            stringResource(descRes),
+                            color = AetherTextSecondary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Link / room-code field of a carrier channel (focus-loss save like the URL field). */
+@Composable
+private fun OpenFluxLinkField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String?,
+    errorRes: Int?,
+    enabled: Boolean,
+    imeAction: ImeAction,
+    onFocusLost: () -> Unit,
+    onDone: () -> Unit,
+) {
+    var hadFocus by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { st ->
+                if (st.isFocused) hadFocus = true
+                else if (hadFocus) {
+                    hadFocus = false
+                    onFocusLost()
+                }
+            },
+        enabled = enabled,
+        label = { Text(label) },
+        placeholder = placeholder?.let {
+            { Text(it, color = AetherTextTertiary, maxLines = 1) }
+        },
+        singleLine = true,
+        isError = errorRes != null,
+        supportingText = errorRes?.let {
+            { Text(stringResource(it), color = AetherDisconnected) }
+        },
+        shape = RoundedCornerShape(16.dp),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Uri,
+            imeAction = imeAction
+        ),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        colors = openFluxFieldColors()
+    )
 }
 
 @Composable
