@@ -11,13 +11,33 @@ import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.service.OpenFluxManager
 import com.myappvpn.util.BinaryInstaller
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.CookieJar
+import okhttp3.Dns
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.io.EOFException
+import java.net.ConnectException
 import java.net.Inet4Address
 import java.net.Inet6Address
+import java.net.InetAddress
+import java.net.Proxy
+import java.net.SocketTimeoutException
 import java.net.URI
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -91,12 +111,31 @@ object OpenFluxDiagnostics {
             restrictStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED
         val whitelisted = restrictStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED
 
-        // ── Bridge network tests ──
-        val bridge = if (endpoint.complete) runBridge(context, endpoint, clientId) else null
-
-        // ── Masking ──
         val host = runCatching { URI(endpoint.url).host }.getOrNull()?.takeIf { it.isNotBlank() }
         val demoLabel = L("демо-сервер", "demo server")
+
+        // ── Bridge network tests + service reachability probes, concurrently ──
+        // Probes go OUTSIDE the tunnel: our own package is always excluded from the VPN
+        // (MyVpnService: addDisallowedApplication(packageName), or simply not in the INCLUDE allow-list),
+        // and additionally every probe socket + DNS lookup is bound to the underlying non-VPN network.
+        val exitProbe: Probe? = if (endpoint.complete) {
+            runCatching {
+                val u = URI(endpoint.url)
+                val scheme = (u.scheme ?: "https").lowercase()
+                val port = if (u.port > 0) ":${u.port}" else ""
+                // Cleartext http:// is blocked for the app's own OkHttp (targetSdk ≥ 28 default), so an
+                // http exit is judged by the bridge's own probe below instead.
+                if (u.host.isNullOrBlank() || scheme != "https") null
+                else Probe(if (endpoint.demo) demoLabel else u.host, "$scheme://${u.host}$port/", G_EXIT)
+            }.getOrNull()
+        } else null
+        val (bridge, probes) = coroutineScope {
+            val b = async { if (endpoint.complete) runBridge(context, endpoint, clientId) else null }
+            val p = async { runProbes(underlying?.first, PROBES + listOfNotNull(exitProbe)) }
+            b.await() to p.await()
+        }
+
+        // ── Masking ──
         fun sanitize(s: String): String {
             var out = s
             if (endpoint.token.isNotEmpty()) out = out.replace(endpoint.token, "***")
@@ -184,6 +223,12 @@ object OpenFluxDiagnostics {
             )
         }
 
+        // ── Service reachability verdict (appended; doesn't affect the verdict above) ──
+        // Exit reachability as seen by the bridge (Go, not subject to the app's cleartext policy).
+        val bridgeProbe = bridge?.json?.optJSONObject("http_probe")
+        val bridgeExitOk = bridgeProbe?.optBoolean("x_of_proto") == true
+        val servicesVerdict = probeVerdict(probes, endpoint.complete, bridgeExitOk, ::L)
+
         // ── Report ──
         val sb = StringBuilder()
         fun yn(b: Boolean?) = when (b) { true -> L("да", "yes"); false -> L("нет", "no"); null -> "—" }
@@ -192,6 +237,7 @@ object OpenFluxDiagnostics {
         sb.appendLine(SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date()))
         sb.appendLine()
         sb.appendLine(L("ИТОГ: ", "RESULT: ") + verdict)
+        if (servicesVerdict != null) sb.appendLine(L("СЕРВИСЫ: ", "SERVICES: ") + sanitize(servicesVerdict))
         if (dataSaverOn && !whitelisted) {
             sb.appendLine(L(
                 "Также: включена «Экономия трафика», и MyAppVPN не в исключениях — добавьте приложение в исключения, иначе фоновая работа может обрываться.",
@@ -203,7 +249,14 @@ object OpenFluxDiagnostics {
         sb.appendLine(L("— Устройство —", "— Device —"))
         sb.appendLine("${Build.MANUFACTURER} ${Build.MODEL}")
         sb.appendLine("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
-        sb.appendLine("MyAppVPN ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        // Per-ABI APKs carry different version codes; BuildConfig holds only the shared base one.
+        val installedCode = runCatching {
+            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+        }.getOrNull() ?: BuildConfig.VERSION_CODE.toLong()
+        val bits = if (android.os.Process.is64Bit()) "64-bit" else "32-bit"
+        sb.appendLine("MyAppVPN ${BuildConfig.VERSION_NAME} ($installedCode, $bits)")
+        sb.appendLine(L("Архитектуры устройства: ", "Device ABIs: ") + Build.SUPPORTED_ABIS.joinToString())
         sb.appendLine()
 
         sb.appendLine(L("— Выход —", "— Exit —"))
@@ -236,6 +289,27 @@ object OpenFluxDiagnostics {
                 else -> "—"
             }
         )
+        sb.appendLine()
+
+        sb.appendLine(L("— Доступность сервисов —", "— Service reachability —"))
+        sb.appendLine(
+            L("(в обход VPN, сеть: ", "(bypassing the VPN, network: ") +
+                (underlying?.second?.transport?.let { "$it, " + L("с привязкой к сети", "socket-bound") }
+                    ?: L("по умолчанию", "default")) + ")"
+        )
+        val exitLabelLen = if (exitProbe == null && endpoint.complete) {
+            (if (endpoint.demo) demoLabel else runCatching { URI(endpoint.url).host }.getOrNull() ?: "exit").length
+        } else 0
+        val labelWidth = maxOf(probes.maxOfOrNull { it.probe.label.length } ?: 0, exitLabelLen) + 2
+        probes.forEach { r -> sb.appendLine(sanitize(r.probe.label.padEnd(labelWidth) + r.line())) }
+        if (endpoint.complete && exitProbe == null && bridgeProbe != null) {
+            val label = if (endpoint.demo) demoLabel else (runCatching { URI(endpoint.url).host }.getOrNull() ?: "exit")
+            val st = bridgeProbe.optInt("status", 0)
+            val line = if (bridgeExitOk) "OK $st  ${bridgeProbe.optLong("ms")} ms  " + L("(по тесту моста)", "(bridge test)")
+            else (bridgeProbe.optString("err").ifBlank { "HTTP $st" }) + "  " + L("(по тесту моста)", "(bridge test)")
+            sb.appendLine(sanitize(label.padEnd(labelWidth) + line))
+        }
+        servicesVerdict?.let { sb.appendLine(L("Вывод: ", "Conclusion: ") + sanitize(it)) }
         sb.appendLine()
 
         sb.appendLine(L("— Тест моста —", "— Bridge test —"))
@@ -349,6 +423,224 @@ object OpenFluxDiagnostics {
         }
         val json = runCatching { JSONObject(raw) }.getOrNull()
         return BridgeResult(json, raw, if (json == null) "bad JSON" else null)
+    }
+
+    // ── Service reachability probes ──
+
+    private const val G_MAIL = "mail"
+    private const val G_YANDEX = "yandex"
+    private const val G_RU = "ru"
+    private const val G_YA = "ya"
+    private const val G_FOREIGN = "foreign"
+    private const val G_EXIT = "exit"
+
+    private const val PROBE_TIMEOUT_MS = 6_000L
+    private const val PROBES_TOTAL_MS = 15_000L
+    private const val PROBE_UA =
+        "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36"
+
+    private class Probe(val label: String, val url: String, val group: String, val websocket: Boolean = false)
+
+    private class ProbeResult(
+        val probe: Probe,
+        /** "OK" when any HTTP response arrived; else timeout / reset / dns-fail / tls-fail / refused / blocked(…). */
+        val status: String,
+        val code: Int? = null,
+        val ms: Long? = null,
+        /** Cross-host redirect target (host only), if any. */
+        val redirectHost: String? = null,
+    ) {
+        val reachable: Boolean get() = status == "OK"
+        fun line(): String = buildString {
+            append(status)
+            if (code != null) append(' ').append(code)
+            if (ms != null) append("  ").append(ms).append(" ms")
+            if (redirectHost != null) append("  → ").append(redirectHost)
+        }
+    }
+
+    private val PROBES = listOf(
+        Probe("cloud.mail.ru", "https://cloud.mail.ru/", G_MAIL),
+        Probe("docs.datacloudmail.ru", "https://docs.datacloudmail.ru/", G_MAIL),
+        Probe("wss docs.datacloudmail.ru", "wss://docs.datacloudmail.ru/", G_MAIL, websocket = true),
+        Probe("telemost.yandex.ru", "https://telemost.yandex.ru/", G_YANDEX),
+        Probe("cloud-api.yandex.ru", "https://cloud-api.yandex.ru/", G_YANDEX),
+        Probe("docs.yandex.ru", "https://docs.yandex.ru/", G_YANDEX),
+        Probe("disk.yandex.ru", "https://disk.yandex.ru/", G_YANDEX),
+        Probe("code.avito.ru", "https://code.avito.ru/", G_RU),
+        Probe("interview.cups.online", "https://interview.cups.online/", G_RU),
+        Probe("web.max.ru", "https://web.max.ru/", G_RU),
+        Probe("ya.ru", "https://ya.ru/", G_YA),
+        Probe("google.com/generate_204", "https://www.google.com/generate_204", G_FOREIGN),
+    )
+
+    /**
+     * Runs all [probes] in parallel (each ≤ [PROBE_TIMEOUT_MS], all ≤ [PROBES_TOTAL_MS]).
+     * When [net] is given, sockets and DNS are bound to it (the real, non-VPN network).
+     */
+    private suspend fun runProbes(net: Network?, probes: List<Probe>): List<ProbeResult> = coroutineScope {
+        val client = OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
+            .cookieJar(CookieJar.NO_COOKIES)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .connectTimeout(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .callTimeout(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .apply {
+                if (net != null) {
+                    socketFactory(net.socketFactory)
+                    dns(object : Dns {
+                        override fun lookup(hostname: String): List<InetAddress> = net.getAllByName(hostname).toList()
+                    })
+                }
+            }
+            .build()
+
+        val results = arrayOfNulls<ProbeResult>(probes.size)
+        val jobs = probes.mapIndexed { i, p ->
+            async(Dispatchers.IO) { results[i] = if (p.websocket) probeWs(client, p) else probeHttp(client, p) }
+        }
+        val finished = withTimeoutOrNull(PROBES_TOTAL_MS) { jobs.awaitAll() } != null
+        if (!finished) {
+            client.dispatcher.cancelAll()
+            jobs.forEach { it.cancel() }
+        }
+        // Calls are cancelled → the blocking ones return promptly; don't wait on stragglers anyway.
+        val out = probes.mapIndexed { i, p -> results[i] ?: ProbeResult(p, "timeout") }
+        client.dispatcher.executorService.shutdown()
+        client.connectionPool.evictAll()
+        out
+    }
+
+    private suspend fun probeHttp(client: OkHttpClient, p: Probe): ProbeResult {
+        val req = Request.Builder().url(p.url)
+            .header("User-Agent", PROBE_UA)
+            .header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+            .header("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8")
+            .build()
+        val call = client.newCall(req)
+        val t0 = System.nanoTime()
+        return try {
+            runInterruptible { call.execute() }.use { resp ->
+                val ms = (System.nanoTime() - t0) / 1_000_000
+                val loc = if (resp.isRedirect) resp.header("Location") else null
+                val reqHost = req.url.host
+                val locHost = loc?.let { runCatching { req.url.resolve(it)?.host }.getOrNull() }
+                ProbeResult(p, "OK", resp.code, ms, locHost?.takeIf { it != reqHost })
+            }
+        } catch (e: CancellationException) {
+            call.cancel(); throw e
+        } catch (e: Throwable) {
+            ProbeResult(p, classify(e), ms = (System.nanoTime() - t0) / 1_000_000)
+        }
+    }
+
+    /** WebSocket upgrade attempt: any HTTP response (101 or not) counts as reachable. */
+    private suspend fun probeWs(client: OkHttpClient, p: Probe): ProbeResult {
+        val host = runCatching { URI(p.url).host }.getOrNull().orEmpty()
+        val req = Request.Builder().url(p.url)
+            .header("User-Agent", PROBE_UA)
+            .header("Origin", "https://$host")
+            .build()
+        val done = CompletableDeferred<ProbeResult>()
+        val t0 = System.nanoTime()
+        fun ms() = (System.nanoTime() - t0) / 1_000_000
+        val ws = client.newWebSocket(req, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                done.complete(ProbeResult(p, "OK", response.code, ms()))
+                webSocket.cancel()
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                done.complete(
+                    if (response != null) ProbeResult(p, "OK", response.code, ms())
+                    else ProbeResult(p, classify(t), ms = ms())
+                )
+            }
+        })
+        return try {
+            withTimeoutOrNull(PROBE_TIMEOUT_MS + 500) { done.await() } ?: ProbeResult(p, "timeout", ms = ms())
+        } finally {
+            ws.cancel()
+        }
+    }
+
+    private fun classify(t: Throwable): String {
+        val msg = generateSequence(t) { it.cause }.take(4)
+            .joinToString(" ") { it.message.orEmpty() }.lowercase()
+        return when {
+            t is UnknownHostException -> "dns-fail"
+            t is SocketTimeoutException || msg.contains("timeout") || msg.contains("timed out") -> "timeout"
+            msg.contains("reset") || msg.contains("closed by peer") || msg.contains("broken pipe") ||
+                msg.contains("end of stream") || t is EOFException -> "reset"
+            t is SSLException -> "tls-fail"
+            t is ConnectException && msg.contains("refused") -> "refused"
+            msg.contains("unreachable") || msg.contains("permission denied") || msg.contains("eperm") ->
+                "blocked(unreachable)"
+            else -> "blocked(${t.javaClass.simpleName})"
+        }
+    }
+
+    /** One-sentence conclusion about what is reachable; null when there's nothing to say. */
+    private fun probeVerdict(
+        results: List<ProbeResult>,
+        exitConfigured: Boolean,
+        bridgeExitOk: Boolean,
+        L: (String, String) -> String,
+    ): String? {
+        if (results.isEmpty()) return null
+        fun any(g: String) = results.any { it.probe.group == g && it.reachable }
+        val yaOk = any(G_YA)
+        val googleOk = any(G_FOREIGN)
+        val exitOk = any(G_EXIT) || bridgeExitOk
+        val mailOk = any(G_MAIL)
+        val wsOk = results.any { it.probe.websocket && it.reachable }
+        val yandexOk = any(G_YANDEX)
+        val ruOk = results.filter { it.probe.group == G_RU && it.reachable }.map { it.probe.label }
+
+        if (results.none { it.reachable }) return L(
+            "Ничего не открывается, даже ya.ru — интернета нет или сеть блокирует все соединения.",
+            "Nothing is reachable, not even ya.ru — no internet, or the network blocks every connection."
+        )
+        val parts = mutableListOf<String>()
+        if (yaOk && results.none { it.reachable && it.probe.group != G_YA }) {
+            parts += L(
+                "Открывается только ya.ru — похоже на режим белых списков, и проверенные сервисы в него не входят.",
+                "Only ya.ru is reachable — looks like whitelist mode, and none of the tested services are on the list."
+            )
+            return parts.joinToString(" ")
+        }
+        if (yaOk && !googleOk && (!exitConfigured || !exitOk)) parts += L(
+            "ya.ru открывается, а Google${if (exitConfigured) " и ваш выход" else ""} — нет: похоже на режим белых списков.",
+            "ya.ru works but Google${if (exitConfigured) " and your exit" else ""} don't: looks like whitelist mode."
+        )
+        when {
+            exitConfigured && exitOk -> parts += L(
+                "Ваш выход доступен напрямую — обходной транспорт не нужен.",
+                "Your exit is reachable directly — no workaround transport needed."
+            )
+            else -> {
+                val exitWord = if (exitConfigured) L("а ваш выход — нет", "but your exit isn't") else L("выход не настроен", "no exit configured")
+                if (mailOk) parts += L(
+                    "Mail.ru доступен${if (wsOk) " (включая WebSocket)" else ""}, $exitWord: перспективен транспорт через Mail.ru.",
+                    "Mail.ru is reachable${if (wsOk) " (WebSocket included)" else ""}, $exitWord: a transport via Mail.ru looks promising."
+                )
+                if (yandexOk) parts += L(
+                    "Сервисы Яндекса доступны, $exitWord: перспективен транспорт через Яндекс.",
+                    "Yandex services are reachable, $exitWord: a transport via Yandex looks promising."
+                )
+                if (!mailOk && !yandexOk) parts += if (ruOk.isNotEmpty()) L(
+                    "Mail.ru и Яндекс-сервисы не проходят; доступны: ${ruOk.joinToString()}.",
+                    "Mail.ru and Yandex services fail; reachable: ${ruOk.joinToString()}."
+                ) else L(
+                    "Ни Mail.ru, ни сервисы Яндекса не проходят — обход через них не поможет.",
+                    "Neither Mail.ru nor Yandex services get through — tunnelling via them won't help."
+                )
+            }
+        }
+        return parts.joinToString(" ").ifEmpty { null }
     }
 
     private fun isRussian(context: Context): Boolean {

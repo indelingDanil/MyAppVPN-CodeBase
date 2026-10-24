@@ -1,19 +1,17 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// ofbridge — a tiny local SOCKS5 server whose outbound is an OpenFlux v2 exit
+// (server-node/app.js) reached over plain HTTP(S):
 //
-// ofbridge — a tiny local SOCKS5 server whose outbound is an OpenFlux phpbox
-// exit reached over plain HTTPS (transport/phpbox direct-HTTP client).
+//		app traffic → tun2socks → Xray → SOCKS5 (this) → https://host/n/ → internet
 //
-//	app traffic → tun2socks → Xray → SOCKS5 (this) → https://host/phpbox.php → internet
+//	  - SOCKS5 username/password auth (other local apps must not use the proxy),
+//	  - one resumable v2 session (PROTOCOL-v2.md) carrying every connection as a
+//	    stream (mux.go); when the exit drops the session a fresh one is started
+//	    transparently.
 //
-// The upstream OpenFlux CLI only offers the stream mode over document carriers
-// (Yandex / Mail.ru / cups); the direct-HTTP client exists in the library but
-// not on the command line. This bridge exposes exactly that, plus:
-//   - SOCKS5 username/password auth (other local apps must not use the proxy),
-//   - automatic re-session: phpbox caps each down-poll (~140 s) and the mux then
-//     reports ErrSessionClosed — a fresh session is started transparently.
-//
-// Only CONNECT is supported (phpbox carries TCP to :80/:443). UDP ASSOCIATE is
+// Only CONNECT is supported (the exit carries TCP to :80/:443). UDP ASSOCIATE is
 // refused, which makes Xray/tun2socks fall back to TCP; DNS is DoH over :443.
+// The legacy v1 PHP exit (phpbox.php) is not supported any more: such a URL is
+// reported as "OFSTATUS unsupported".
 package main
 
 import (
@@ -38,13 +36,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/p1neappleXpress/OpenFlux/transport/phpbox"
 )
 
 var (
-	flagURL       = flag.String("url", "", "exit URL: https://example.com/phpbox.php (v1), or a v2 base URL not ending in .php, e.g. https://example.com/n/")
-	flagToken     = flag.String("token", "", "phpbox token (PHPBOX_TOKEN on the host)")
+	flagURL       = flag.String("url", "", "exit base URL (OpenFlux v2), e.g. https://example.com/n/")
+	flagToken     = flag.String("token", "", "exit token (config.json on the host)")
 	flagListen    = flag.String("listen", "127.0.0.1:10818", "local SOCKS5 listen address (loopback only)")
 	flagUser      = flag.String("user", "", "SOCKS5 username (empty = no auth; strongly discouraged)")
 	flagPass      = flag.String("pass", "", "SOCKS5 password")
@@ -52,15 +48,16 @@ var (
 	flagClient    = flag.String("client", "", "install id sent to the exit (demo exits grant a one-time trial per id)")
 	flagIPCache   = flag.String("ipcache", "", "JSON file caching the exit host's last resolved IPv4; dialed when DNS fails")
 	flagIP        = flag.String("ip", "", "IPv4 to dial for the exit host (skips DNS; the Host header stays the URL's host)")
-	flagShortPoll = flag.String("shortpoll", "auto", "v2 down polls: auto (long-poll, switch to short if the preamble stalls), on, off")
+	flagShortPoll = flag.String("shortpoll", "auto", "down polls: auto (long-poll, switch to short if the preamble stalls), on, off")
+	flagCaps      = flag.String("caps", "on", "protocol extensions ack+mbb: on (used when the exit offers them), off (plain v2, for A/B tests)")
 )
 
-// ── phpbox session management ───────────────────────────────────────────────
+// ── session management ──────────────────────────────────────────────────────
 
 type upstream struct {
 	url, token string
 	mu         sync.Mutex
-	cur        *phpbox.Mux
+	cur        *mux
 	// set by noteStatus
 	pausedUntil time.Time
 	lastState   string
@@ -75,49 +72,33 @@ func newSessionID() string {
 }
 
 // client returns the current mux and its generation, starting one if needed.
-// (Not phpbox.NewClient: its direct-HTTP carrier feeds phpbox.php's leading
-// whitespace pad into the frame parser, which then waits for a ~0.5 GB
-// "frame" forever. Our carrier strips the pad — see httpCarrier.)
-func (u *upstream) client() (*phpbox.Mux, uint64) {
+func (u *upstream) client() (*mux, uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.cur == nil {
 		u.gen++
 		gen := u.gen
-		var car phpbox.Carrier
-		kind := "phpbox"
-		if isV2URL(u.url) {
-			c := newV2Carrier(u.url, u.token, newSessionID())
-			c.onEnd = func() { u.retire(gen) } // session gone (410 / refused / unreachable)
-			c.onStatus = u.noteStatus
-			car, kind = c, "of2"
-		} else {
-			c := newHTTPCarrier(u.url, u.token, newSessionID())
-			c.onEnd = func() { u.retire(gen) } // down-poll ended → session is dead
-			c.onStatus = u.noteStatus
-			car = c
-		}
-		m := phpbox.NewMux(car)
+		c := newV2Carrier(u.url, u.token, newSessionID())
+		c.onEnd = func() { u.retire(gen) } // session gone (410 / refused / unreachable)
+		c.onStatus = u.noteStatus
+		m := newMux(c)
 		_ = m.Start()
 		u.cur = m
 		n := u.sessions.Add(1)
-		log.Printf("%s: session #%d started", kind, n)
+		log.Printf("of2: session #%d started", n)
 	}
 	return u.cur, u.gen
 }
 
-// ── direct-HTTP carrier (two half-duplex channels, like phpbox.php expects) ──
+// ── up queue ────────────────────────────────────────────────────────────────
 
 const (
 	// upBatchMax caps one up-POST. Every POST costs one full round trip to the
 	// exit (~140 ms, independent of size up to 1 MiB), and they go strictly one
-	// after another (the exit appends bodies to the bus in arrival order), so
-	// upload ≈ batch / RTT: the old 64 KiB cap held it at ~300 KB/s.
+	// after another, so upload ≈ batch / RTT.
 	upBatchMax = 1 << 20
 	// upQueueMax bounds the DATA waiting behind the POST in flight; Send blocks
-	// beyond it, which pushes back to the app's TCP. The old 256-slot channel
-	// held up to ~8 MiB (half a minute at ~300 KB/s) with every other stream's
-	// handshake — and the mux's 4 s OPEN retry — stuck behind it.
+	// beyond it, which pushes back to the app's TCP.
 	upQueueMax = 1 << 20
 	// upLinger lets a burst written back to back (TLS records) join one POST.
 	upLinger = 2 * time.Millisecond
@@ -146,7 +127,7 @@ func newUpQueue() *upQueue {
 func (q *upQueue) put(p []byte) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(p) > 0 && p[0] == phpbox.FrameOpen {
+	if len(p) > 0 && p[0] == frameOpen {
 		q.pri = append(q.pri, p)
 	} else {
 		for q.n >= upQueueMax && !q.closed {
@@ -201,173 +182,28 @@ func (q *upQueue) close() {
 	q.mu.Unlock()
 }
 
-type httpCarrier struct {
-	endpoint, token, session string
-	hc                       *http.Client
-	ctx                      context.Context
-	cancel                   context.CancelFunc
-	up                       *upQueue
-	recv                     func([]byte)
-	onEnd                    func()
-	onStatus                 func(code int, reason string)
-}
-
-func newHTTPCarrier(endpoint, token, session string) *httpCarrier {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &httpCarrier{
-		endpoint: endpoint, token: token, session: session,
-		hc:  newExitClient(),
-		ctx: ctx, cancel: cancel,
-		up: newUpQueue(),
-	}
-}
-
-func (h *httpCarrier) Receive(cb func([]byte)) { h.recv = cb }
-func (h *httpCarrier) Start() error            { go h.downLoop(); go h.upLoop(); return nil }
-func (h *httpCarrier) Stop() error             { h.cancel(); h.up.close(); return nil }
-
-// Send queues one encoded frame (the mux sends exactly one per call). It blocks
-// while the up queue is full, so a bulk upload is paced by the exit.
-func (h *httpCarrier) Send(p []byte) error {
-	h.up.put(append([]byte(nil), p...))
-	return nil
-}
-
-func (h *httpCarrier) url(role string) string {
-	u := h.endpoint + "?k=" + h.token + "&s=" + h.session + "&r=" + role
-	if *flagClient != "" {
-		u += "&c=" + *flagClient // install id: the demo exit's one-time-trial key
-	}
-	return u
-}
-
-// upLoop ships queued frames as POST ?r=up, one at a time (the exit appends
-// each body to the session bus in arrival order — concurrent POSTs could
-// reorder). Whatever queued up during the previous POST goes in the next one.
-func (h *httpCarrier) upLoop() {
-	defer h.up.close()
-	buf := make([]byte, 0, 64<<10)
-	for {
-		var ok bool
-		if buf, ok = h.up.take(buf[:0], upBatchMax, true); !ok {
-			return
-		}
-		if len(buf) < upBatchMax {
-			time.Sleep(upLinger)
-			buf, _ = h.up.take(buf, upBatchMax, false)
-		}
-		t0 := time.Now()
-		if err := h.post(buf); err != nil {
-			if h.ctx.Err() == nil {
-				// The batch may or may not be on the bus: every stream in it is now
-				// corrupt or stalled. End the session so the apps reconnect at once.
-				log.Printf("phpbox: up POST failed (%v); %d bytes lost — restarting the session", err, len(buf))
-				h.cancel()
-			}
-			return
-		}
-		if *flagDebug {
-			log.Printf("up: %d B in %v", len(buf), time.Since(t0).Round(time.Millisecond))
-		}
-	}
-}
-
-// post sends one batch and checks the exit stored all of it ("ok <n>").
-func (h *httpCarrier) post(body []byte) error {
-	req, err := http.NewRequestWithContext(h.ctx, http.MethodPost, h.url("up"), bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := h.hc.Do(req)
-	if err != nil {
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			err = ue.Err // *url.Error quotes the URL, and the URL carries the token
-		}
-		return err
-	}
-	reply, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	if got := string(bytes.TrimSpace(reply)); got != "ok "+strconv.Itoa(len(body)) {
-		return fmt.Errorf("exit answered %q for %d bytes", got[:min(len(got), 40)], len(body))
-	}
-	return nil
-}
-
-func (h *httpCarrier) downLoop() {
-	defer func() {
-		if h.onEnd != nil {
-			h.onEnd()
-		}
-	}()
-	req, err := http.NewRequestWithContext(h.ctx, http.MethodGet, h.url("down"), nil)
-	if err != nil {
-		return
-	}
-	resp, err := h.hc.Do(req)
-	if err != nil {
-		if h.ctx.Err() == nil {
-			log.Printf("phpbox: down poll failed: %v", err)
-		}
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		reason := resp.Header.Get("X-OF-Reason")
-		log.Printf("phpbox: down poll HTTP %d %s", resp.StatusCode, reason)
-		if h.onStatus != nil {
-			h.onStatus(resp.StatusCode, reason)
-		}
-		return
-	}
-	if left := resp.Header.Get("X-OF-Left"); left != "" {
-		fmt.Printf("OFLEFT %s\n", left) // demo trial seconds left (app shows a countdown)
-	}
-	if mb := resp.Header.Get("X-OF-Left-MB"); mb != "" {
-		fmt.Printf("OFLEFTMB %s\n", mb) // demo trial traffic left, MB
-	}
-	if h.onStatus != nil {
-		h.onStatus(http.StatusOK, "")
-	}
-	tmp := make([]byte, 32768)
-	padDone := false
-	for {
-		n, rerr := resp.Body.Read(tmp)
-		chunk := tmp[:n]
-		if !padDone && n > 0 {
-			// phpbox.php opens with a whitespace pad terminated by "\n".
-			if i := bytes.IndexByte(chunk, '\n'); i >= 0 {
-				chunk = chunk[i+1:]
-				padDone = true
-			} else {
-				chunk = nil
-			}
-		}
-		if len(chunk) > 0 && h.recv != nil {
-			h.recv(chunk)
-		}
-		if rerr != nil {
-			return
-		}
-	}
-}
-
 // ── OpenFlux v2 carrier (resumable, offset-sequenced; see PROTOCOL-v2.md) ──
 //
 // The session lives in a persistent server process, not in one HTTP request:
 // both directions are byte-offset sequenced, so a cut request loses nothing.
-//   down: GET ?r=down&from=<recv> → 4096-byte "OF2 <recv>" preamble, then the
+//   down: GET ?r=down&from=<recv> → 4096-byte "OF2 <n>" preamble, then the
 //         down stream from exactly that offset (pad frames included; the mux
 //         drops them — stream 0xFFFFFFFF never exists). Re-polled on any end.
 //   up:   POST ?r=up&off=<off> with the unacknowledged bytes; the exit answers
 //         "ok <upRecv>" and skips a prefix it already has, so a retry after a
 //         lost answer cannot duplicate anything.
+// Extensions (negotiated per down poll: "&caps=ack,mbb" → "X-OF-Caps"):
+//   ack:  the received offset is reported with "&ack=<recv>" on up POSTs and,
+//         while only downloading, by tiny "POST ?r=ack&ack=<recv>" — so the down
+//         poll never has to be rotated to acknowledge, and runs for X-OF-Run-Ms.
+//   mbb:  make-before-break: shortly before the exit ends a poll, the next one is
+//         opened with "&mbb=1"; the old one is read to its clean end and bytes
+//         below the received offset are dropped.
 
 const v2PreambleLen = 4096
+
+// v2Caps is what this client can do (sent as "&caps=").
+const v2Caps = "ack,mbb"
 
 // Timings (vars so tests can shrink them).
 var (
@@ -375,9 +211,10 @@ var (
 	v2RetryMax   = 2 * time.Second        // backoff cap
 	v2GiveUp     = 45 * time.Second       // continuous failure → session end
 	v2ReqTimeout = 20 * time.Second       // one up POST; down: header wait and max silence (exit pads every 5 s)
-	// v2DownRotate: the exit learns what we received only from a new down's
-	// "from" and stops reading destinations once 8 MiB are unacknowledged, so a
-	// long poll would stall a bulk download. Re-poll after this many bytes.
+	// v2DownRotate (no "ack" capability): the exit learns what we received only
+	// from a new down's "from" and stops reading destinations once 8 MiB are
+	// unacknowledged, so a long poll would stall a bulk download. Re-poll after
+	// this many bytes.
 	v2DownRotate int64 = 4 << 20
 	// v2PreambleWait: in -shortpoll auto, a long-poll whose 4096-byte preamble
 	// has not fully arrived this long after the request was sent is taken as a
@@ -385,6 +222,18 @@ var (
 	v2PreambleWait = 8 * time.Second
 	// v2ShortRepoll: re-poll delay after a clean end in short-poll mode.
 	v2ShortRepoll = 20 * time.Millisecond
+
+	// "ack": report the received offset after this many new bytes, or after
+	// v2AckInterval once at least v2AckMin are new, or after v2AckIdle anyway
+	// (idle keepalive pads only). v2AckTick is the check period.
+	v2AckEvery    int64 = 1 << 20
+	v2AckMin      int64 = 64 << 10
+	v2AckInterval       = time.Second
+	v2AckIdle           = 30 * time.Second
+	v2AckTick           = 250 * time.Millisecond
+	v2AckTimeout        = 10 * time.Second
+	// "mbb": open the next poll this long before the exit's announced run end.
+	v2MbbLead = 5 * time.Second
 )
 
 // shortActive: v2 down polls ask for poll=short (the exit ends each response
@@ -398,15 +247,6 @@ func switchToShortPoll(why string) {
 		log.Printf("of2: %s — switching to short polls", why)
 		fmt.Printf("OFNOTE shortpoll\n")
 	}
-}
-
-// isV2URL: .php URLs are the v1 phpbox exit, everything else speaks v2.
-func isV2URL(raw string) bool {
-	p := raw
-	if u, err := url.Parse(raw); err == nil {
-		p = u.Path
-	}
-	return !strings.HasSuffix(strings.ToLower(p), ".php")
 }
 
 // redact strips *url.Error, whose message quotes the URL (and so the token).
@@ -427,25 +267,51 @@ type v2Carrier struct {
 	recv                     func([]byte)
 	onEnd                    func()
 	onStatus                 func(code int, reason string)
+
+	caps      bool         // ask the exit for the extensions (-caps on)
+	dmu       sync.Mutex   // serialises delivery: with mbb two polls overlap
+	recvOff   atomic.Int64 // down bytes delivered to the mux so far
+	announced atomic.Bool  // first poll attached (status 200 reported)
+	capAck    atomic.Bool  // negotiated on the last poll
+	capMbb    atomic.Bool
+	runMs     atomic.Int64 // X-OF-Run-Ms of the last poll (0 = unknown)
+	ackSent   atomic.Int64 // highest down offset the exit was told
+	lastAck   atomic.Int64 // UnixNano of that report
+	ackKick   chan struct{}
+	polls     atomic.Int32 // down polls currently running
+	acks      atomic.Int64 // r=ack requests sent (stats/tests)
 }
 
 func newV2Carrier(endpoint, token, session string) *v2Carrier {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &v2Carrier{
+	h := &v2Carrier{
 		endpoint: endpoint, token: token, session: session,
 		hc:  newExitClient(),
 		ctx: ctx, cancel: cancel,
-		up: newUpQueue(),
+		up:      newUpQueue(),
+		caps:    *flagCaps != "off",
+		ackKick: make(chan struct{}, 1),
 	}
+	h.lastAck.Store(time.Now().UnixNano())
+	return h
 }
 
 func (h *v2Carrier) Receive(cb func([]byte)) { h.recv = cb }
-func (h *v2Carrier) Start() error            { go h.downLoop(); go h.upLoop(); return nil }
-func (h *v2Carrier) Stop() error             { h.end(); return nil }
+func (h *v2Carrier) Start() error {
+	go h.downLoop()
+	go h.upLoop()
+	if h.caps {
+		go h.ackLoop()
+	}
+	return nil
+}
+func (h *v2Carrier) Stop() error { h.end(); return nil }
 
 // Send queues one encoded frame; blocks while the up queue is full.
 func (h *v2Carrier) Send(p []byte) error {
-	h.up.put(append([]byte(nil), p...))
+	if !h.up.put(append([]byte(nil), p...)) {
+		return errSessionClosed
+	}
 	return nil
 }
 
@@ -476,6 +342,48 @@ func (h *v2Carrier) sleep(d time.Duration) bool {
 	}
 }
 
+// noteAcked records that the exit knows we hold every down byte below n.
+func (h *v2Carrier) noteAcked(n int64) {
+	for {
+		cur := h.ackSent.Load()
+		if n <= cur {
+			return
+		}
+		if h.ackSent.CompareAndSwap(cur, n) {
+			h.lastAck.Store(time.Now().UnixNano())
+			return
+		}
+	}
+}
+
+// deliver hands the down bytes [pos, pos+len(b)) to the mux, dropping the part
+// already delivered (an overlapping mbb poll). false = a gap (cannot happen
+// with a correct exit: every poll starts at or below the delivered offset).
+func (h *v2Carrier) deliver(pos int64, b []byte) bool {
+	h.dmu.Lock()
+	defer h.dmu.Unlock()
+	cur := h.recvOff.Load()
+	if pos > cur {
+		return false
+	}
+	end := pos + int64(len(b))
+	if end <= cur {
+		return true
+	}
+	b = b[cur-pos:]
+	if h.recv != nil {
+		h.recv(b)
+	}
+	h.recvOff.Store(end)
+	if h.capAck.Load() && end-h.ackSent.Load() >= v2AckEvery {
+		select {
+		case h.ackKick <- struct{}{}:
+		default:
+		}
+	}
+	return true
+}
+
 type downResult int
 
 const (
@@ -483,9 +391,14 @@ const (
 	downAgain                     // attached, then ended or was cut: re-poll shortly
 	downRotate                    // attached, rotated to acknowledge: re-poll now
 	downGone                      // 410 / offset mismatch: the session is lost
-	downRefused                   // 503/404/403: reported via onStatus
+	downRefused                   // 503/404/403/not an exit: reported via onStatus
 	downSwitch                    // long-poll stalled, now in short-poll mode: re-poll now
 )
+
+type downOutcome struct {
+	res downResult
+	err error
+}
 
 func (h *v2Carrier) downLoop() {
 	defer func() {
@@ -494,12 +407,30 @@ func (h *v2Carrier) downLoop() {
 			h.onEnd()
 		}
 	}()
-	var recv int64
-	announced := false
 	delay := v2RetryMin
 	var failing time.Time
 	for h.ctx.Err() == nil {
-		res, err := h.downOnce(&recv, &announced)
+		// A poll still running (it handed over, mbb) → this one is make-before-break.
+		mbb := h.polls.Load() > 0
+		handoff := make(chan struct{})
+		done := make(chan downOutcome, 1)
+		h.polls.Add(1)
+		go func() {
+			r, err := h.downOnce(mbb, handoff)
+			h.polls.Add(-1)
+			done <- downOutcome{r, err}
+		}()
+		var res downResult
+		var err error
+		select {
+		case o := <-done:
+			res, err = o.res, o.err
+		case <-handoff:
+			// The exit ends this poll in ~v2MbbLead: open the next one now. The
+			// old one keeps reading until the exit ends it cleanly.
+			failing, delay = time.Time{}, v2RetryMin
+			continue
+		}
 		if h.ctx.Err() != nil {
 			return
 		}
@@ -513,10 +444,12 @@ func (h *v2Carrier) downLoop() {
 		case downAgain:
 			failing, delay = time.Time{}, v2RetryMin
 			if err != nil && *flagDebug {
-				log.Printf("of2: down cut at %d (%v); resuming", recv, err)
+				log.Printf("of2: down cut at %d (%v); resuming", h.recvOff.Load(), err)
 			}
-			if err == nil && shortActive.Load() {
-				wait = v2ShortRepoll // short polls end by design: come straight back
+			if err == nil && (shortActive.Load() || h.capAck.Load()) {
+				// short polls end by design; an ack-capable exit ended a healthy
+				// long poll (run time): come straight back
+				wait = v2ShortRepoll
 			}
 		case downRetry:
 			if failing.IsZero() {
@@ -548,15 +481,47 @@ func parsePreamble(p []byte) (int64, bool) {
 	return n, err == nil && n >= 0
 }
 
-// downOnce runs one down poll from *recv, feeding the mux and advancing *recv.
-func (h *v2Carrier) downOnce(recv *int64, announced *bool) (downResult, error) {
+// parseCaps reads an X-OF-Caps header ("ack,mbb").
+func parseCaps(v string) (ack, mbb bool) {
+	for _, c := range strings.Split(v, ",") {
+		switch strings.TrimSpace(c) {
+		case "ack":
+			ack = true
+		case "mbb":
+			mbb = true
+		}
+	}
+	return
+}
+
+// unsupported reports an exit that does not speak v2 (e.g. the old phpbox.php).
+func (h *v2Carrier) unsupported(why string) (downResult, error) {
+	log.Printf("of2: the exit does not speak OpenFlux v2 (%s)", why)
+	if h.onStatus != nil {
+		h.onStatus(0, "unsupported")
+	}
+	return downRefused, nil
+}
+
+// downOnce runs one down poll from the delivered offset, feeding the mux.
+// handoff is closed when the next poll should be opened (mbb) while this one
+// keeps reading until the exit ends it.
+func (h *v2Carrier) downOnce(mbb bool, handoff chan struct{}) (downResult, error) {
 	ctx, cancel := context.WithCancel(h.ctx)
 	defer cancel()
 	wd := time.AfterFunc(v2ReqTimeout, cancel) // no headers / no bytes for that long → dead link
 	defer wd.Stop()
-	extra := "&from=" + strconv.FormatInt(*recv, 10)
-	if shortActive.Load() {
+	from := h.recvOff.Load()
+	short := shortActive.Load()
+	extra := "&from=" + strconv.FormatInt(from, 10)
+	if short {
 		extra += "&poll=short"
+	}
+	if h.caps {
+		extra += "&caps=" + v2Caps
+		if mbb && !short {
+			extra += "&mbb=1"
+		}
 	}
 	// -shortpoll auto: the preamble must be complete within v2PreambleWait of
 	// the request being written, else a proxy is buffering the response.
@@ -567,7 +532,7 @@ func (h *v2Carrier) downOnce(recv *int64, announced *bool) (downResult, error) {
 		stalled atomic.Bool
 	)
 	reqCtx := ctx
-	if !shortActive.Load() && *flagShortPoll == "auto" {
+	if !short && *flagShortPoll == "auto" {
 		reqCtx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 			WroteRequest: func(httptrace.WroteRequestInfo) {
 				pwMu.Lock()
@@ -622,10 +587,24 @@ func (h *v2Carrier) downOnce(recv *int64, announced *bool) (downResult, error) {
 	default:
 		return downRetry, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
+	isV2 := resp.Header.Get("X-OF-Proto") == "2"
+	if h.caps {
+		ack, mb := false, false
+		if v, ok := resp.Header["X-Of-Caps"]; ok && len(v) > 0 {
+			ack, mb = parseCaps(v[0])
+		}
+		h.capAck.Store(ack)
+		h.capMbb.Store(mb)
+		run, _ := strconv.ParseInt(resp.Header.Get("X-OF-Run-Ms"), 10, 64)
+		h.runMs.Store(max(run, 0))
+	}
 	pre := make([]byte, v2PreambleLen)
 	if _, err := io.ReadFull(resp.Body, pre); err != nil {
 		if isStall() {
 			return downSwitch, nil
+		}
+		if !isV2 && !h.announced.Load() {
+			return h.unsupported("no v2 preamble")
 		}
 		return downRetry, fmt.Errorf("preamble: %w", redact(err))
 	}
@@ -633,34 +612,47 @@ func (h *v2Carrier) downOnce(recv *int64, announced *bool) (downResult, error) {
 		return downSwitch, nil
 	}
 	n, ok := parsePreamble(pre)
-	if !ok || n != *recv {
-		log.Printf("of2: bad down preamble (ok=%v, offset %d, want %d) — session lost", ok, n, *recv)
+	if !ok && !isV2 && !h.announced.Load() {
+		return h.unsupported("no v2 preamble")
+	}
+	// The exit starts at our offset — or, with "ack", at its acknowledged
+	// offset when an ack overtook this poll (never beyond what we hold).
+	if cur := h.recvOff.Load(); !ok || n < from || n > cur {
+		log.Printf("of2: bad down preamble (ok=%v, offset %d, want %d..%d) — session lost", ok, n, from, cur)
 		return downGone, nil
 	}
+	h.noteAcked(n)
 	if left := resp.Header.Get("X-OF-Left"); left != "" {
 		fmt.Printf("OFLEFT %s\n", left) // demo trial seconds left (app shows a countdown)
 	}
 	if mb := resp.Header.Get("X-OF-Left-MB"); mb != "" {
 		fmt.Printf("OFLEFTMB %s\n", mb) // demo trial traffic left, MB
 	}
-	if !*announced {
-		*announced = true
-		if h.onStatus != nil {
-			h.onStatus(http.StatusOK, "")
+	if h.announced.CompareAndSwap(false, true) && h.onStatus != nil {
+		h.onStatus(http.StatusOK, "")
+	}
+	// mbb: hand over v2MbbLead before the exit's announced end of this poll.
+	if handoff != nil && h.capMbb.Load() && !short {
+		if run := time.Duration(h.runMs.Load()) * time.Millisecond; run > 2*v2MbbLead {
+			t := time.AfterFunc(run-v2MbbLead, func() { close(handoff) })
+			defer t.Stop()
 		}
 	}
+	ackMode := h.capAck.Load()
 	buf := make([]byte, 32<<10)
+	pos := n
 	var got int64
 	for {
 		wd.Reset(v2ReqTimeout)
 		k, rerr := resp.Body.Read(buf)
 		if k > 0 {
-			if h.recv != nil {
-				h.recv(buf[:k])
+			if !h.deliver(pos, buf[:k]) {
+				log.Printf("of2: down stream gap at %d — session lost", pos)
+				return downGone, nil
 			}
-			*recv += int64(k)
+			pos += int64(k)
 			got += int64(k)
-			if got >= v2DownRotate {
+			if !ackMode && got >= v2DownRotate {
 				return downRotate, nil
 			}
 		}
@@ -673,6 +665,63 @@ func (h *v2Carrier) downOnce(recv *int64, announced *bool) (downResult, error) {
 	}
 }
 
+// ackLoop reports the received offset while the up direction is quiet ("ack").
+func (h *v2Carrier) ackLoop() {
+	t := time.NewTicker(v2AckTick)
+	defer t.Stop()
+	var retryAt time.Time
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-t.C:
+		case <-h.ackKick:
+		}
+		// short polls re-poll (= acknowledge) several times a second anyway
+		if !h.capAck.Load() || shortActive.Load() || time.Now().Before(retryAt) {
+			continue
+		}
+		cur := h.recvOff.Load()
+		un := cur - h.ackSent.Load()
+		if un <= 0 {
+			continue
+		}
+		since := time.Since(time.Unix(0, h.lastAck.Load()))
+		if un < v2AckEvery && (un < v2AckMin || since < v2AckInterval) && since < v2AckIdle {
+			continue
+		}
+		if !h.sendAck(cur) {
+			retryAt = time.Now().Add(v2AckInterval)
+		}
+	}
+}
+
+// sendAck: POST ?r=ack&ack=n (empty body). Failures are harmless: the next ack,
+// up POST or down poll carries a newer offset.
+func (h *v2Carrier) sendAck(n int64) bool {
+	ctx, cancel := context.WithTimeout(h.ctx, v2AckTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url("ack", "&ack="+strconv.FormatInt(n, 10)), http.NoBody)
+	if err != nil {
+		return false
+	}
+	h.acks.Add(1)
+	resp, err := h.hc.Do(req)
+	if err != nil {
+		if *flagDebug && h.ctx.Err() == nil {
+			log.Printf("of2: ack %d failed: %v", n, redact(err))
+		}
+		return false
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 512))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	h.noteAcked(n)
+	return true
+}
+
 // postResult is one up POST's outcome; err != nil = no usable answer.
 type postResult struct {
 	code          int
@@ -683,7 +732,13 @@ type postResult struct {
 func (h *v2Carrier) post(off int64, body []byte) postResult {
 	ctx, cancel := context.WithTimeout(h.ctx, v2ReqTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url("up", "&off="+strconv.FormatInt(off, 10)), bytes.NewReader(body))
+	extra := "&off=" + strconv.FormatInt(off, 10)
+	ack := int64(-1)
+	if h.capAck.Load() {
+		ack = h.recvOff.Load()
+		extra += "&ack=" + strconv.FormatInt(ack, 10)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url("up", extra), bytes.NewReader(body))
 	if err != nil {
 		return postResult{err: err}
 	}
@@ -696,6 +751,9 @@ func (h *v2Carrier) post(off int64, body []byte) postResult {
 	resp.Body.Close()
 	if err != nil {
 		return postResult{err: redact(err)}
+	}
+	if ack >= 0 && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict) {
+		h.noteAcked(ack)
 	}
 	return postResult{code: resp.StatusCode, reply: strings.TrimSpace(string(reply)), reason: resp.Header.Get("X-OF-Reason")}
 }
@@ -821,7 +879,7 @@ func (h *v2Carrier) upLoop() {
 }
 
 // retire drops the mux of generation gen (if still current) so the next call
-// starts a fresh session. Streams already open on it end on their own.
+// starts a fresh session. Streams already open on it end with it.
 func (u *upstream) retire(gen uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -832,12 +890,15 @@ func (u *upstream) retire(gen uint64) {
 }
 
 // noteStatus records how the exit answered a down-poll. A refusal (503 busy /
-// quota, 404 bad token) pauses new sessions so we don't hammer the host, and is
-// printed as a machine-readable "OFSTATUS <state>" line the app parses.
+// quota, 404 bad token, not a v2 exit) pauses new sessions so we don't hammer
+// the host, and is printed as a machine-readable "OFSTATUS <state>" line the
+// app parses.
 func (u *upstream) noteStatus(code int, reason string) {
 	state := "ok"
 	var pause time.Duration
 	switch {
+	case reason == "unsupported":
+		state, pause = "unsupported", time.Hour // not an OpenFlux v2 exit (e.g. old phpbox.php)
 	case code == http.StatusOK:
 	case code == http.StatusServiceUnavailable && reason == "quota":
 		state, pause = "quota", 5*time.Minute
@@ -864,7 +925,7 @@ func (u *upstream) noteStatus(code int, reason string) {
 	}
 }
 
-var errPaused = errors.New("exit refused (busy/quota/token) — paused")
+var errPaused = errors.New("exit refused (busy/quota/token/unsupported) — paused")
 
 func (u *upstream) dial(ctx context.Context, host string, port int) (net.Conn, error) {
 	u.mu.Lock()
@@ -881,8 +942,8 @@ func (u *upstream) dial(ctx context.Context, host string, port int) (net.Conn, e
 			return conn, nil
 		}
 		lastErr = err
-		if errors.Is(err, phpbox.ErrSessionClosed) {
-			u.retire(gen) // the host capped the down-poll — new session, try again
+		if errors.Is(err, errSessionClosed) {
+			u.retire(gen) // the session ended under us — new session, try again
 			continue
 		}
 		// Anything else (the exit refused the target, OPEN timed out) is about
@@ -1014,6 +1075,20 @@ func readRequest(c net.Conn) (host string, port int, err error) {
 	return
 }
 
+// allowedPort: the exit only dials :80/:443 (more with OF_ALLOW_PORTS on a
+// test exit; mirror it here via OFBRIDGE_ALLOW_PORTS for local tests).
+func allowedPort(p int) bool {
+	if p == 80 || p == 443 {
+		return true
+	}
+	for _, s := range strings.Split(os.Getenv("OFBRIDGE_ALLOW_PORTS"), ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n == p {
+			return true
+		}
+	}
+	return false
+}
+
 func serve(c net.Conn, up *upstream, user, pass string) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
@@ -1025,8 +1100,8 @@ func serve(c net.Conn, up *upstream, user, pass string) {
 		return
 	}
 	_ = c.SetDeadline(time.Time{})
-	if port != 80 && port != 443 {
-		// The PHP exit only dials :80/:443 — refuse early instead of a slow timeout.
+	if !allowedPort(port) {
+		// The exit only dials :80/:443 — refuse early instead of a slow timeout.
 		reply(c, repFail)
 		return
 	}
@@ -1052,21 +1127,32 @@ func serve(c net.Conn, up *upstream, user, pass string) {
 	<-done
 }
 
-// probe performs one raw down-poll and prints what the host answers (diagnostics).
+// probe performs one raw v2 down-poll (a new session) and prints what the host
+// answers (diagnostics).
 func probe(u, token string) {
-	q := u + "?k=" + token + "&s=" + newSessionID() + "&r=down"
-	if isV2URL(u) {
-		q += "&v=2&from=0" // v2 exit: a new session; the body starts with the 4 KiB "OF2 0" preamble
+	sep := "?"
+	if strings.Contains(u, "?") {
+		sep = "&"
+	}
+	q := u + sep + "k=" + url.QueryEscape(token) + "&s=" + newSessionID() + "&v=2&r=down&from=0"
+	if *flagClient != "" {
+		q += "&c=" + url.QueryEscape(*flagClient)
+	}
+	if *flagCaps != "off" {
+		q += "&caps=" + v2Caps
 	}
 	t0 := time.Now()
-	resp, err := http.Get(q)
+	resp, err := newExitClient().Get(q)
 	if err != nil {
-		log.Fatalf("probe: %v", err)
+		log.Fatalf("probe: %v", redact(err))
 	}
 	defer resp.Body.Close()
 	log.Printf("probe: HTTP %d after %v", resp.StatusCode, time.Since(t0))
 	for k, v := range resp.Header {
 		log.Printf("  %s: %v", k, v)
+	}
+	if resp.Header.Get("X-OF-Proto") != "2" {
+		log.Printf("probe: no X-OF-Proto: 2 — not an OpenFlux v2 exit?")
 	}
 	buf := make([]byte, 8192)
 	total := 0
@@ -1109,6 +1195,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-shortpoll must be auto, on or off")
 		os.Exit(2)
 	}
+	if *flagCaps != "on" && *flagCaps != "off" {
+		fmt.Fprintln(os.Stderr, "-caps must be on or off")
+		os.Exit(2)
+	}
 	if *flagDiag {
 		if *flagURL == "" || *flagToken == "" {
 			fmt.Fprintln(os.Stderr, "usage: ofbridge -diag -url URL -token SECRET [-client ID -ipcache FILE -ip IPV4]")
@@ -1123,7 +1213,7 @@ func main() {
 		return
 	}
 	if *flagURL == "" || *flagToken == "" {
-		fmt.Fprintln(os.Stderr, "usage: ofbridge -url https://host/phpbox.php -token SECRET [-listen 127.0.0.1:10818 -user U -pass P]")
+		fmt.Fprintln(os.Stderr, "usage: ofbridge -url https://host/n/ -token SECRET [-listen 127.0.0.1:10818 -user U -pass P -client ID]")
 		os.Exit(2)
 	}
 	ln, err := net.Listen("tcp", *flagListen)
@@ -1135,7 +1225,7 @@ func main() {
 	}
 	up := &upstream{url: *flagURL, token: *flagToken}
 	up.client() // warm the first session right away
-	log.Printf("ofbridge: SOCKS5 on %s → phpbox exit", ln.Addr())
+	log.Printf("ofbridge: SOCKS5 on %s → OpenFlux v2 exit (caps %s)", ln.Addr(), *flagCaps)
 	for {
 		c, err := ln.Accept()
 		if err != nil {

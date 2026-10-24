@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 package main
 
 // Dialing the exit host with a DNS fallback.
@@ -56,7 +54,7 @@ func newExitDialer() *exitDialer {
 	return &exitDialer{lookup: net.DefaultResolver.LookupIPAddr, dial: nd.DialContext}
 }
 
-// exitDial / exitTransport carry every request to the exit (v1 and v2). main
+// exitDial / exitTransport carry every request to the exit (v2). main
 // fills cachePath/override from the flags before the first request.
 var (
 	exitDial      = newExitDialer()
@@ -66,6 +64,9 @@ var (
 func newExitTransport(d *exitDialer) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.DialContext = d.DialContext
+	// A session can hold two down polls (make-before-break), an up POST and an
+	// ack at once: keep their connections for reuse instead of closing extras.
+	t.MaxIdleConnsPerHost = 4
 	return t
 }
 

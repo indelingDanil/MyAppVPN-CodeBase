@@ -55,12 +55,39 @@ Smoke check: `curl -i "http://127.0.0.1:3000/n/?k=wrong&s=abcdefgh&r=down&from=0
 with `X-OF-Proto: 2`. Point the bridge at `http://127.0.0.1:3000/n/` (URL must end with `/` and
 not with `.php` so the client uses v2).
 
-Tests: `node --test test/server.test.js` (≈10 s).
+Tests: `node --test test/server.test.js` (≈20 s).
 
-Optional env: `OF_CONFIG` (config path), `OF_DATA_DIR`, `OF_RETAIN_CAP` (bytes, default 8 MiB),
-`OF_RUN_MS` (down response length, default 100000), `OF_IDLE_MS` (session GC, default 60000),
-`OF_MAX_SESSIONS` (default 2000). **Test-only, never in production:** `OF_ALLOW_PRIVATE=1`
-(allow private/loopback targets), `OF_ALLOW_PORTS=a,b` (extra destination ports).
+Optional env (all have sane defaults; nothing needs to be set on Beget):
+
+| env | default | meaning |
+|---|---|---|
+| `OF_CONFIG` / `OF_DATA_DIR` | `./config.json` / `./data` | paths |
+| `OF_RETAIN_CAP` | 8 MiB | unacknowledged down bytes per session before destinations are paused |
+| `OF_RUN_MS` | 100000 | length of a down response (clients without `ack`) |
+| `OF_RUN_ACK_MS` | 300000 | length of a down response for `ack` clients (keep below Beget's ~370 s cut) |
+| `OF_IDLE_MS` | 60000 | session GC (no down attached, no up) |
+| `OF_STREAM_IDLE_MS` | 300000 | a stream with no data either way is closed (`CLOSE` to the client) |
+| `OF_STREAM_PENDING_MAX` | 1 MiB | bytes queued towards one destination before up POSTs are held |
+| `OF_STREAM_STUCK_MS` | 20000 | a destination over that cap that doesn't drain at all is closed |
+| `OF_DIAL_MS` | 8000 | connect timeout per destination address (several A records are tried in order, 16 s total) |
+| `OF_MAX_SESSIONS` | 2000 | |
+
+**Test-only, never in production:** `OF_ALLOW_PRIVATE=1` (allow private/loopback targets),
+`OF_ALLOW_PORTS=a,b` (extra destination ports), `OF_TEST_HOSTS='{"name":["ip",…]}'` (fake DNS).
+
+### Protocol extensions (since the ack/mbb update)
+
+Details in [`../PROTOCOL-v2.md`](../PROTOCOL-v2.md#extensions-capabilities--optional-backward-compatible).
+A client that sends `&caps=ack,mbb` on `down` gets `X-OF-Caps: ack,mbb` and `X-OF-Run-Ms`:
+
+- **ack** — the client reports its received offset with `&ack=N` on up POSTs and
+  `POST ?r=ack&ack=N` (≈ every 1 s / 1 MiB while downloading). The exit frees retained bytes at once,
+  so a download never has to end its poll to acknowledge; `ack` polls run `OF_RUN_ACK_MS`.
+- **mbb** — ~5 s before the poll's end the client opens the next one with `&mbb=1`; the exit
+  attaches it first and then ends the old response cleanly (no gap, connection reused).
+
+Old clients (no `caps`) get exactly the previous behaviour; new clients detect old exits by the
+missing `X-OF-Caps` header and fall back to the previous behaviour too.
 
 ## Deploy on Beget (Phusion Passenger)
 

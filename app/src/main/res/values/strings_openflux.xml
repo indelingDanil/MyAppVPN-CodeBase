@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- OpenFlux (Beta): own exit via a PHP script on ordinary web hosting (Russian = default). -->
+<!-- OpenFlux (Beta): own exit (Node.js app) on ordinary web hosting (Russian = default). -->
 <resources>
 
     <!-- Settings row -->
     <string name="openflux_settings_section">Эксперименты</string>
     <string name="openflux_settings_title">OpenFlux (Beta)</string>
-    <string name="openflux_settings_subtitle">Свой выход через PHP-хостинг</string>
+    <string name="openflux_settings_subtitle">Свой выход на обычном хостинге</string>
     <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
     <string name="openflux_state_on">Включён</string>
     <string name="openflux_state_off">Выключен</string>
@@ -14,7 +14,7 @@
     <string name="openflux_title" translatable="false">OpenFlux</string>
     <string name="openflux_beta">Beta</string>
     <string name="openflux_cd_back">Назад</string>
-    <string name="openflux_intro">Экспериментальный режим. Трафик идёт не через VLESS-серверы, а через ваш собственный выход — PHP-скрипт OpenFlux на обычном веб-хостинге. Полезно, когда мобильный оператор пропускает только «белые» сайты, а ваш хостинг среди них. Работает только TCP (порты 80/443), скорость скромная.</string>
+    <string name="openflux_intro">Экспериментальный режим. Трафик идёт не через VLESS-серверы, а через ваш собственный выход — приложение OpenFlux (Node.js) на обычном веб-хостинге. Полезно, когда мобильный оператор пропускает только «белые» сайты, а ваш хостинг среди них. Работает только TCP (порты 80/443), скорость скромная.</string>
     <string name="openflux_enable_title">Использовать OpenFlux</string>
     <string name="openflux_enable_subtitle">Трафик пойдёт через ваш выход вместо VLESS-серверов</string>
     <string name="openflux_enable_hint_fill">Сначала укажите корректный адрес выхода и токен и сохраните их.</string>
@@ -34,9 +34,9 @@
     <string name="openflux_http_warning">Без HTTPS провайдер видит токен и адреса сайтов. Содержимое HTTPS-сайтов остаётся зашифрованным.</string>
     <string name="openflux_reconnect_note">VPN сейчас подключён — изменения адреса и токена применятся при переподключении.</string>
     <string name="openflux_howto_title">Как поднять свой выход</string>
-    <string name="openflux_howto_step1">1. Скачайте phpbox.php и config.example.php из ветки openflux-exit (кнопка ниже) — там же пошаговая инструкция для Beget.</string>
-    <string name="openflux_howto_step2">2. Впишите в config.php свой длинный случайный токен.</string>
-    <string name="openflux_howto_step3">3. На некоторых хостингах (например Beget) укажите папку шины вне public_html (см. config.example.php).</string>
+    <string name="openflux_howto_step1">1. Возьмите Node.js-выход (app.js) из ветки openflux-exit (кнопка ниже) — там же пошаговая инструкция для Beget.</string>
+    <string name="openflux_howto_step2">2. Впишите в config.json свой длинный случайный токен.</string>
+    <string name="openflux_howto_step3">3. Подключите приложение к хостингу через Passenger (Node.js) — шаги в инструкции.</string>
     <string name="openflux_howto_step4">4. Вставьте сюда адрес выхода и токен.</string>
     <string name="openflux_github">Открыть репозиторий на GitHub</string>
     <string name="openflux_no_browser">Не найдено приложение для открытия ссылки</string>
@@ -61,6 +61,7 @@
     <string name="openflux_status_quota">Демо-сервер исчерпал дневной лимит трафика. Попробуйте завтра.</string>
     <string name="openflux_status_badtoken">Неверный токен или адрес OpenFlux.</string>
     <string name="openflux_status_noclient">Нужно обновить приложение.</string>
+    <string name="openflux_status_unsupported">По этому адресу не выход OpenFlux (Node.js). Проверьте адрес: старые PHP-выходы больше не поддерживаются.</string>
     <string name="openflux_regular_servers">Обычные серверы</string>
     <string name="openflux_howto_button">Инструкция</string>
 

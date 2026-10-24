@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,19 +22,17 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/p1neappleXpress/OpenFlux/transport/phpbox"
 )
 
 func frame(t byte, sid uint32, n int) []byte {
-	return phpbox.Encode(nil, phpbox.Frame{Type: t, StreamID: sid, Payload: bytes.Repeat([]byte{byte(sid)}, n)})
+	return encodeFrame(nil, t, sid, bytes.Repeat([]byte{byte(sid)}, n))
 }
 
 func TestUpQueueOrderAndOpenPriority(t *testing.T) {
 	q := newUpQueue()
-	d1 := frame(phpbox.FrameData, 1, 100)
-	c1 := frame(phpbox.FrameClose, 1, 0)
-	o2 := frame(phpbox.FrameOpen, 2, 10)
+	d1 := frame(frameData, 1, 100)
+	c1 := frame(frameClose, 1, 0)
+	o2 := frame(frameOpen, 2, 10)
 	for _, f := range [][]byte{d1, c1, o2} {
 		if !q.put(f) {
 			t.Fatal("put on open queue failed")
@@ -51,7 +50,7 @@ func TestUpQueueOrderAndOpenPriority(t *testing.T) {
 
 func TestUpQueueBatchCapKeepsWholeFrames(t *testing.T) {
 	q := newUpQueue()
-	f := frame(phpbox.FrameData, 1, 40000)
+	f := frame(frameData, 1, 40000)
 	for i := 0; i < 3; i++ {
 		q.put(f)
 	}
@@ -67,17 +66,17 @@ func TestUpQueueBatchCapKeepsWholeFrames(t *testing.T) {
 
 func TestUpQueueBackpressureAndClose(t *testing.T) {
 	q := newUpQueue()
-	big := frame(phpbox.FrameData, 1, upQueueMax) // fills the queue on its own
+	big := frame(frameData, 1, upQueueMax) // fills the queue on its own
 	q.put(big)
 	done := make(chan bool, 1)
-	go func() { done <- q.put(frame(phpbox.FrameData, 1, 10)) }()
+	go func() { done <- q.put(frame(frameData, 1, 10)) }()
 	select {
 	case <-done:
 		t.Fatal("put did not block on a full queue")
 	case <-time.After(50 * time.Millisecond):
 	}
 	// An OPEN is never held back by bulk data.
-	if !q.put(frame(phpbox.FrameOpen, 3, 5)) {
+	if !q.put(frame(frameOpen, 3, 5)) {
 		t.Fatal("OPEN blocked")
 	}
 	if _, ok := q.take(nil, upBatchMax*2, true); !ok {
@@ -115,6 +114,21 @@ type fakeSess struct {
 	upRecv   int64
 	up       []byte // every up byte accepted, in order
 	rx       []byte // echo mode: up bytes not yet parsed into frames
+	capAck   bool   // negotiated "ack"
+	sentTo   int64  // how far the current down has written
+}
+
+// applyAck drops retained bytes below n (never beyond what the current down
+// has written, like the real exit); returns the acknowledged offset.
+func (s *fakeSess) applyAck(n int64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n = min(n, s.sentTo, s.produced)
+	if n > s.acked {
+		s.down = s.down[n-s.acked:]
+		s.acked = n
+	}
+	return s.acked
 }
 
 // produce appends to the sequenced down stream (s.mu held).
@@ -144,6 +158,10 @@ type fakeV2 struct {
 
 	qmu     sync.Mutex
 	queries []string // every down's raw query
+
+	caps  bool         // offer "ack,mbb" (a new exit); false = an old exit that ignores caps
+	acks  atomic.Int32 // r=ack requests seen
+	conns atomic.Int32 // TCP connections accepted
 }
 
 func (f *fakeV2) downQueries() []string {
@@ -154,7 +172,13 @@ func (f *fakeV2) downQueries() []string {
 
 func newFakeV2(t *testing.T) (*fakeV2, *httptest.Server) {
 	f := &fakeV2{sess: map[string]*fakeSess{}, life: 2 * time.Second, token: "tok", shortLife: 100 * time.Millisecond}
-	srv := httptest.NewServer(http.HandlerFunc(f.serve))
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(f.serve))
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateNew {
+			f.conns.Add(1)
+		}
+	}
+	srv.Start()
 	t.Cleanup(srv.Close)
 	return f, srv
 }
@@ -181,6 +205,21 @@ func (f *fakeV2) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveDown(w, r, id)
 	case "up":
 		f.serveUp(w, r, id)
+	case "ack":
+		if !f.caps {
+			http.Error(w, "bad role", http.StatusBadRequest)
+			return
+		}
+		f.acks.Add(1)
+		f.mu.Lock()
+		s := f.sess[id]
+		f.mu.Unlock()
+		if s == nil {
+			http.Error(w, "gone", http.StatusGone)
+			return
+		}
+		n, _ := strconv.ParseInt(q.Get("ack"), 10, 64)
+		fmt.Fprintf(w, "ok %d", s.applyAck(n))
 	default:
 		http.Error(w, "bad", http.StatusBadRequest)
 	}
@@ -217,7 +256,14 @@ func (f *fakeV2) serveDown(w http.ResponseWriter, r *http.Request, id string) {
 		f.sess[id] = s
 	}
 	f.mu.Unlock()
+	q := r.URL.Query()
 	s.mu.Lock()
+	if q.Has("caps") && f.caps {
+		s.capAck = strings.Contains(q.Get("caps"), "ack")
+	}
+	if s.capAck && from < s.acked {
+		from = s.acked // an ack overtook this poll: serve from the acknowledged offset
+	}
 	if from < s.acked || from > s.produced {
 		s.mu.Unlock()
 		http.Error(w, "gone", http.StatusGone)
@@ -226,10 +272,15 @@ func (f *fakeV2) serveDown(w http.ResponseWriter, r *http.Request, id string) {
 	s.down = s.down[from-s.acked:]
 	s.acked = from
 	s.attach++
+	s.sentTo = from
 	my := s.attach
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
+	if f.caps && q.Has("caps") {
+		w.Header().Set("X-OF-Caps", "ack,mbb")
+		w.Header().Set("X-OF-Run-Ms", strconv.FormatInt(f.life.Milliseconds(), 10))
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(preamble(from))
 	fl := w.(http.Flusher)
@@ -249,7 +300,7 @@ func (f *fakeV2) serveDown(w http.ResponseWriter, r *http.Request, id string) {
 		if f.pad > 0 && time.Since(lastWrite) >= f.pad {
 			lastWrite = time.Now()
 			s.mu.Lock()
-			s.produce(phpbox.Encode(nil, phpbox.Frame{Type: phpbox.FrameData, StreamID: 0xFFFFFFFF, Payload: make([]byte, 4087)}))
+			s.produce(encodeFrame(nil, frameData, padStreamID, make([]byte, 4087)))
 			s.mu.Unlock()
 		}
 		s.mu.Lock()
@@ -274,6 +325,11 @@ func (f *fakeV2) serveDown(w http.ResponseWriter, r *http.Request, id string) {
 			lastWrite = time.Now()
 			pos += int64(len(chunk))
 			sent += len(chunk)
+			s.mu.Lock()
+			if s.attach == my {
+				s.sentTo = pos
+			}
+			s.mu.Unlock()
 			if cut > 0 && sent >= cut {
 				if abort {
 					panic(http.ErrAbortHandler)
@@ -310,6 +366,10 @@ func (f *fakeV2) serveUp(w http.ResponseWriter, r *http.Request, id string) {
 		http.Error(w, "gone", http.StatusGone)
 		return
 	}
+	if f.caps && r.URL.Query().Has("ack") {
+		a, _ := strconv.ParseInt(r.URL.Query().Get("ack"), 10, 64)
+		s.applyAck(a)
+	}
 	n := int(f.posts.Add(1))
 	if f.upHook != nil && f.upHook(w, n, s, off, body) {
 		return
@@ -340,17 +400,17 @@ func (f *fakeV2) accept(s *fakeSess, off int64, body []byte) (int64, bool) {
 	if f.echo {
 		s.rx = append(s.rx, nb...)
 		for {
-			fr, rest, ok := phpbox.TakeFrame(s.rx)
+			fr, rest, ok := takeFrame(s.rx)
 			if !ok {
 				break
 			}
 			s.rx = rest
-			s.produce(phpbox.Encode(nil, phpbox.Frame{Type: phpbox.FrameData, StreamID: 0xFFFFFFFF, Payload: make([]byte, 4087)}))
-			switch fr.Type {
-			case phpbox.FrameOpen:
-				s.produce(phpbox.Encode(nil, phpbox.Frame{Type: phpbox.FrameOpenOK, StreamID: fr.StreamID}))
-			case phpbox.FrameData:
-				s.produce(phpbox.Encode(nil, fr))
+			s.produce(encodeFrame(nil, frameData, padStreamID, make([]byte, 4087)))
+			switch fr.typ {
+			case frameOpen:
+				s.produce(encodeFrame(nil, frameOpenOK, fr.id, nil))
+			case frameData:
+				s.produce(encodeFrame(nil, frameData, fr.id, fr.payload))
 			}
 		}
 	}
@@ -383,12 +443,14 @@ func (c *testCarrier) isEnded() bool {
 
 func fastV2(t *testing.T) {
 	a, b, g, r, rot := v2RetryMin, v2RetryMax, v2GiveUp, v2ReqTimeout, v2DownRotate
+	ae, ai, ml, caps := v2AckEvery, v2AckInterval, v2MbbLead, *flagCaps
+	t.Cleanup(func() { v2AckEvery, v2AckInterval, v2MbbLead, *flagCaps = ae, ai, ml, caps })
 	v2RetryMin, v2RetryMax, v2GiveUp, v2ReqTimeout = 5*time.Millisecond, 50*time.Millisecond, 3*time.Second, 2*time.Second
 	t.Cleanup(func() { v2RetryMin, v2RetryMax, v2GiveUp, v2ReqTimeout, v2DownRotate = a, b, g, r, rot })
 }
 
 // startV2 builds a carrier against srv. Unless mux, it is started with a
-// collecting receiver; with mux the caller hands it to phpbox.NewMux.
+// collecting receiver; with mux the caller hands it to newMux.
 func startV2(t *testing.T, srv *httptest.Server, mux bool) *testCarrier {
 	c := &testCarrier{v2Carrier: newV2Carrier(srv.URL+"/n/", "tok", newSessionID()), ended: make(chan struct{})}
 	var once sync.Once
@@ -445,17 +507,7 @@ func produceSlowly(f *fakeV2, data []byte, piece int) {
 	}
 }
 
-func TestV2URLSelectionAndPreamble(t *testing.T) {
-	for u, want := range map[string]bool{
-		"https://h/phpbox.php":     false,
-		"https://h/x/PHPBOX.PHP?a": false,
-		"https://h/n/":             true,
-		"http://h:8080/n":          true,
-	} {
-		if got := isV2URL(u); got != want {
-			t.Errorf("isV2URL(%q) = %v, want %v", u, got, want)
-		}
-	}
+func TestV2Preamble(t *testing.T) {
 	if n, ok := parsePreamble(preamble(42)); !ok || n != 42 {
 		t.Fatalf("valid preamble: %d %v", n, ok)
 	}
@@ -532,7 +584,7 @@ func TestV2DownRotateAcknowledges(t *testing.T) {
 func sendFrames(t *testing.T, c *testCarrier, n int) []byte {
 	var all []byte
 	for i := 0; i < n; i++ {
-		fr := frame(phpbox.FrameData, uint32(i%7+1), 1+(i*7919)%30000)
+		fr := frame(frameData, uint32(i%7+1), 1+(i*7919)%30000)
 		all = append(all, fr...)
 		if err := c.Send(fr); err != nil {
 			t.Fatal(err)
@@ -743,7 +795,7 @@ func TestV2MuxEchoThroughCutsAndPads(t *testing.T) {
 	f.echo = true
 	f.downCut = func(n int) (int, bool) { return 30000 + n*331, n%2 == 1 }
 	c := startV2(t, srv, true)
-	m := phpbox.NewMux(c)
+	m := newMux(c)
 	_ = m.Start()
 	defer m.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1078,5 +1130,309 @@ func TestDiagDNSAndTCPFailures(t *testing.T) {
 	r = runDiag(u, "SECRETTOKEN", "")
 	if r.Summary != "tcp_failed" || r.TCP.Err != "connection refused" {
 		t.Fatalf("closed port: %q %+v", r.Summary, r.TCP)
+	}
+}
+
+// ── frames (test helper) ────────────────────────────────────────────────────
+
+type tframe struct {
+	typ     byte
+	id      uint32
+	payload []byte
+}
+
+func takeFrame(b []byte) (tframe, []byte, bool) {
+	if len(b) < frameHdr {
+		return tframe{}, b, false
+	}
+	n := int(binary.BigEndian.Uint32(b[5:9]))
+	if len(b)-frameHdr < n {
+		return tframe{}, b, false
+	}
+	return tframe{b[0], binary.BigEndian.Uint32(b[1:5]), append([]byte(nil), b[frameHdr:frameHdr+n]...)}, b[frameHdr+n:], true
+}
+
+// ── capabilities: ack / mbb, and compatibility with exits without them ─────
+
+func countIn(qs []string, sub string) int {
+	n := 0
+	for _, q := range qs {
+		if strings.Contains(q, sub) {
+			n++
+		}
+	}
+	return n
+}
+
+// New client ↔ new exit: no rotation, the received offset is reported by
+// r=ack, one long poll carries everything.
+func TestV2CapsAckNoRotation(t *testing.T) {
+	fastV2(t)
+	v2DownRotate = 100000
+	f, srv := newFakeV2(t)
+	f.caps = true
+	f.life = time.Minute
+	c := startV2(t, srv, false)
+	waitFor(t, 2*time.Second, "session", func() bool { return f.only() != nil })
+	want := randBytes(3 << 20)
+	go produceSlowly(f, want, 20000)
+	waitFor(t, 15*time.Second, "all down bytes", func() bool { return len(c.received()) >= len(want) })
+	if !bytes.Equal(c.received(), want) {
+		t.Fatal("down stream corrupted")
+	}
+	if d := f.downs.Load(); d != 1 {
+		t.Fatalf("%d down polls; with ack the first one should carry everything", d)
+	}
+	if !c.capAck.Load() || !c.capMbb.Load() {
+		t.Fatal("caps not negotiated")
+	}
+	s := f.only()
+	waitFor(t, 5*time.Second, "acks up to the end", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.acked >= int64(len(want))
+	})
+	if f.acks.Load() == 0 {
+		t.Fatal("no r=ack requests")
+	}
+	if q := f.downQueries()[0]; countIn([]string{q}, "caps=ack%2Cmbb")+countIn([]string{q}, "caps=ack,mbb") == 0 {
+		t.Fatalf("first down without caps: %s", q)
+	}
+}
+
+// Up POSTs carry &ack= too.
+func TestV2CapsAckOnUp(t *testing.T) {
+	fastV2(t)
+	f, srv := newFakeV2(t)
+	f.caps = true
+	f.life = time.Minute
+	f.echo = true
+	c := startV2(t, srv, false)
+	waitFor(t, 2*time.Second, "session", func() bool { return f.only() != nil })
+	sendFrames(t, c, 5) // echoed: the down stream grows
+	waitFor(t, 5*time.Second, "echo", func() bool { return len(c.received()) > 4096 })
+	sendFrames(t, c, 1) // this POST reports what we received
+	s := f.only()
+	waitFor(t, 5*time.Second, "ack via up", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.acked > 0
+	})
+}
+
+// New client ↔ old exit (no X-OF-Caps): exactly the old behaviour — rotation
+// every v2DownRotate bytes, no r=ack requests, no mbb.
+func TestV2OldExitNoCaps(t *testing.T) {
+	fastV2(t)
+	v2DownRotate = 100000
+	f, srv := newFakeV2(t)
+	f.life = time.Minute
+	c := startV2(t, srv, false)
+	waitFor(t, 2*time.Second, "session", func() bool { return f.only() != nil })
+	want := randBytes(1 << 20)
+	go produceSlowly(f, want, 20000)
+	waitFor(t, 10*time.Second, "all down bytes", func() bool { return len(c.received()) >= len(want) })
+	if !bytes.Equal(c.received(), want) {
+		t.Fatal("down stream corrupted")
+	}
+	if c.capAck.Load() || c.capMbb.Load() {
+		t.Fatal("caps assumed without the exit offering them")
+	}
+	if f.downs.Load() < 8 {
+		t.Fatalf("expected rotations, got %d polls", f.downs.Load())
+	}
+	if f.acks.Load() != 0 || countIn(f.downQueries(), "mbb=1") != 0 {
+		t.Fatal("ack/mbb used against an old exit")
+	}
+}
+
+// -caps off: the requests carry no caps at all, even against a new exit.
+func TestV2CapsOff(t *testing.T) {
+	fastV2(t)
+	*flagCaps = "off"
+	f, srv := newFakeV2(t)
+	f.caps = true
+	f.life = 300 * time.Millisecond
+	c := startV2(t, srv, false)
+	waitFor(t, 5*time.Second, "polls", func() bool { return f.downs.Load() >= 3 })
+	if n := countIn(f.downQueries(), "caps="); n != 0 {
+		t.Fatalf("%d polls carried caps with -caps off", n)
+	}
+	if c.capAck.Load() || f.acks.Load() != 0 {
+		t.Fatal("ack used with -caps off")
+	}
+}
+
+// mbb: the next poll opens before the exit ends the current one; the old one is
+// read to its clean end (connections are reused, not dropped) and the stream
+// stays exact across many overlapping hand-overs.
+func TestV2CapsMbbHandoff(t *testing.T) {
+	fastV2(t)
+	v2MbbLead = 400 * time.Millisecond
+	f, srv := newFakeV2(t)
+	f.caps = true
+	f.life = 1200 * time.Millisecond
+	c := startV2(t, srv, false)
+	waitFor(t, 2*time.Second, "session", func() bool { return f.only() != nil })
+	want := randBytes(4 << 20)
+	go func() {
+		for i := 0; i < len(want); i += 16000 {
+			produceSlowly(f, want[i:min(i+16000, len(want))], 16000)
+			time.Sleep(12 * time.Millisecond) // ~1 MB/s: several poll lifetimes
+		}
+	}()
+	waitFor(t, 30*time.Second, "all down bytes", func() bool { return len(c.received()) >= len(want) })
+	if !bytes.Equal(c.received(), want) {
+		t.Fatal("down stream corrupted across mbb hand-overs")
+	}
+	qs := f.downQueries()
+	if len(qs) < 4 {
+		t.Fatalf("only %d polls", len(qs))
+	}
+	if m := countIn(qs[1:], "mbb=1"); m < len(qs)/2 {
+		t.Fatalf("only %d of %d polls were make-before-break", m, len(qs))
+	}
+	if c.isEnded() {
+		t.Fatal("session ended")
+	}
+	// Ended polls go back to the pool: fewer TCP connections than polls.
+	if n := f.conns.Load(); int(n) >= len(qs) {
+		t.Fatalf("%d TCP connections for %d polls", n, len(qs))
+	}
+}
+
+// A host that answers 200 without being a v2 exit (e.g. the old phpbox.php):
+// "unsupported", the session ends.
+func TestV2NotAnExitUnsupported(t *testing.T) {
+	fastV2(t)
+	f, srv := newFakeV2(t)
+	f.downHook = func(w http.ResponseWriter, n int, from int64) bool {
+		w.Header().Del("X-OF-Proto")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(append(bytes.Repeat([]byte(" "), 8192), '\n'))
+		return true
+	}
+	c := startV2(t, srv, false)
+	waitFor(t, 5*time.Second, "session end", c.isEnded)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.statuses) != 1 || c.statuses[0] != "0 unsupported" {
+		t.Fatalf("statuses %v", c.statuses)
+	}
+}
+
+// ── mux unit tests (scripted carrier) ───────────────────────────────────────
+
+type scriptCarrier struct {
+	mu   sync.Mutex
+	sent [][]byte
+	cb   func([]byte)
+	sig  chan struct{}
+}
+
+func (s *scriptCarrier) Start() error            { return nil }
+func (s *scriptCarrier) Stop() error             { return nil }
+func (s *scriptCarrier) Receive(cb func([]byte)) { s.cb = cb }
+func (s *scriptCarrier) Send(p []byte) error {
+	s.mu.Lock()
+	s.sent = append(s.sent, append([]byte(nil), p...))
+	s.mu.Unlock()
+	select {
+	case s.sig <- struct{}{}:
+	default:
+	}
+	return nil
+}
+func (s *scriptCarrier) frames() []tframe {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []tframe
+	for _, p := range s.sent {
+		f, _, _ := takeFrame(p)
+		out = append(out, f)
+	}
+	return out
+}
+
+func TestMuxOpenDataCloseAndErrors(t *testing.T) {
+	sc := &scriptCarrier{sig: make(chan struct{}, 16)}
+	m := newMux(sc)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	type res struct {
+		c   net.Conn
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() { c, err := m.Dial(ctx, "example.com", 443); ch <- res{c, err} }()
+	<-sc.sig
+	fr := sc.frames()[0]
+	if fr.typ != frameOpen || string(fr.payload) != "example.com:443" {
+		t.Fatalf("open frame %+v", fr)
+	}
+	// split delivery: OPEN_OK + pad + DATA across chunk boundaries
+	down := encodeFrame(nil, frameOpenOK, fr.id, nil)
+	down = encodeFrame(down, frameData, padStreamID, make([]byte, 100))
+	down = encodeFrame(down, frameData, fr.id, []byte("hello"))
+	for i := 0; i < len(down); i += 7 {
+		sc.cb(down[i:min(i+7, len(down))])
+	}
+	r := <-ch
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	buf := make([]byte, 16)
+	n, _ := r.c.Read(buf)
+	if string(buf[:n]) != "hello" {
+		t.Fatalf("read %q", buf[:n])
+	}
+	_, _ = r.c.Write(bytes.Repeat([]byte("x"), maxDataFrame+10))
+	fs := sc.frames()
+	if len(fs) != 3 || fs[1].typ != frameData || len(fs[1].payload) != maxDataFrame || len(fs[2].payload) != 10 {
+		t.Fatalf("write split wrong: %d frames", len(fs))
+	}
+	_ = r.c.SetReadDeadline(time.Now().Add(30 * time.Millisecond))
+	if _, err := r.c.Read(buf); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("deadline: %v", err)
+	}
+	_ = r.c.SetReadDeadline(time.Time{})
+	sc.cb(encodeFrame(nil, frameClose, fr.id, nil)) // remote close → EOF, no CLOSE echoed
+	if _, err := r.c.Read(buf); err != io.EOF {
+		t.Fatalf("after remote close: %v", err)
+	}
+	_ = r.c.Close()
+	if len(sc.frames()) != 3 {
+		t.Fatal("CLOSE sent for a stream the exit closed")
+	}
+
+	// OPEN_ERR → Dial fails
+	go func() { c, err := m.Dial(ctx, "blocked.example", 80); ch <- res{c, err} }()
+	waitFor(t, time.Second, "OPEN", func() bool { return len(sc.frames()) == 4 })
+	fs = sc.frames()
+	id := fs[len(fs)-1].id
+	sc.cb(encodeFrame(nil, frameOpenErr, id, []byte("blocked")))
+	if r := <-ch; r.err == nil || !strings.Contains(r.err.Error(), "blocked") {
+		t.Fatalf("open err: %v", r.err)
+	}
+	// session close fails pending dials and reads of open streams
+	go func() { c, err := m.Dial(ctx, "a.example", 80); ch <- res{c, err} }()
+	waitFor(t, time.Second, "OPEN", func() bool { return len(sc.frames()) == 5 })
+	fs = sc.frames()
+	sc.cb(encodeFrame(nil, frameOpenOK, fs[len(fs)-1].id, nil))
+	r = <-ch
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	go func() { _, err := m.Dial(ctx, "b.example", 80); ch <- res{nil, err} }()
+	waitFor(t, time.Second, "OPEN", func() bool { return len(sc.frames()) == 6 })
+	_ = m.Close()
+	if r2 := <-ch; !errors.Is(r2.err, errSessionClosed) {
+		t.Fatalf("pending dial after session close: %v", r2.err)
+	}
+	if _, err := r.c.Read(buf); !errors.Is(err, errSessionClosed) {
+		t.Fatalf("read after session close: %v", err)
+	}
+	if _, err := m.Dial(ctx, "c.example", 80); !errors.Is(err, errSessionClosed) {
+		t.Fatalf("dial on closed mux: %v", err)
 	}
 }

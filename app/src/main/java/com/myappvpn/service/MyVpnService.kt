@@ -108,7 +108,7 @@ class MyVpnService : VpnService() {
         // clearOpenFluxStatus()). null = no refusal.
         private val _openFluxStatus = MutableStateFlow<String?>(null)
         val openFluxStatus: StateFlow<String?> = _openFluxStatus.asStateFlow()
-        val OPENFLUX_REFUSALS = setOf("busy", "expired", "ended", "quota", "noclient", "badtoken")
+        val OPENFLUX_REFUSALS = setOf("busy", "expired", "ended", "quota", "noclient", "badtoken", "unsupported")
 
         /** Dismiss a stale refusal reason (e.g. the user left OpenFlux mode). */
         fun clearOpenFluxStatus() { _openFluxStatus.value = null }

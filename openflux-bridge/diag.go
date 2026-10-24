@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 package main
 
 // -diag: why does the exit not work on this network? Runs a fixed sequence of
@@ -128,10 +126,7 @@ func proxyHeaders(h http.Header) map[string]string {
 }
 
 func runDiag(rawURL, token, client string) *diagReport {
-	r := &diagReport{Proto: 2}
-	if !isV2URL(rawURL) {
-		r.Proto = 1
-	}
+	r := &diagReport{Proto: 2} // only v2 exits exist now (the field stays for the app)
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {
 		r.Summary = "bad_url"
@@ -431,8 +426,6 @@ func diagVerdict(r *diagReport) string {
 		if up := r.UpPost; up == nil || up.Err != "" || up.Status != http.StatusOK || !strings.HasPrefix(up.Body, "ok ") {
 			return "up_failed"
 		}
-	} else if r.HTTPProbe.Status == 0 {
-		return "http_failed"
 	}
 	if dnsBad && r.TCP.Source == "cache" {
 		return "ok_via_ipcache"

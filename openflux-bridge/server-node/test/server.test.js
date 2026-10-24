@@ -472,3 +472,208 @@ test('down rotation: a newer down takes over (old ends cleanly), acks, and resum
   assert.ok(takeovers >= 5, 'takeovers ' + takeovers);
   assert.ok(cleanEnds >= takeovers - 1, `clean ends ${cleanEnds} / ${takeovers}`);
 });
+
+// ── extensions: caps / ack / mbb (and old clients unaffected) ───────────────
+
+/** A raw down poll that stays open; returns { res, stream (getter), ended, errored, close } once the preamble is in. */
+function openDown(srv, params) {
+  return new Promise((ok, fail) => {
+    const st = { stream: Buffer.alloc(0), pre: Buffer.alloc(0), ended: false, errored: false, listeners: [] };
+    const r = http.request(url(srv, { r: 'down', ...params }), { agent: false }, (res) => {
+      st.res = res;
+      if (res.statusCode !== 200) { res.resume(); return ok(st); }
+      res.on('data', (c) => {
+        if (st.pre.length < 4096) {
+          const k = Math.min(4096 - st.pre.length, c.length);
+          st.pre = Buffer.concat([st.pre, c.subarray(0, k)]);
+          c = c.subarray(k);
+          if (st.pre.length === 4096) ok(st);
+        }
+        if (c.length) { st.stream = Buffer.concat([st.stream, c]); for (const l of st.listeners) l(); }
+      });
+      res.on('end', () => { st.ended = true; for (const l of st.listeners) l(); });
+      res.on('error', () => { st.errored = true; });
+      res.on('aborted', () => { st.errored = true; });
+    });
+    st.close = () => r.destroy();
+    r.on('error', (e) => { st.errored = true; if (!st.res) fail(e); });
+    r.end();
+  });
+}
+
+function until(st, cond, ms = 8000) {
+  return new Promise((ok, fail) => {
+    if (cond()) return ok();
+    const t = setTimeout(() => fail(new Error('timeout')), ms);
+    st.listeners.push(() => { if (cond()) { clearTimeout(t); ok(); } });
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('caps: X-OF-Caps / X-OF-Run-Ms only when asked; unknown caps ignored', async () => {
+  const plain = await down(main, { k: PERSONAL, s: sid(), from: '0' }, () => true);
+  assert.equal(plain.headers['x-of-caps'], undefined);
+  assert.equal(plain.headers['x-of-run-ms'], undefined);
+  const both = await down(main, { k: PERSONAL, s: sid(), from: '0', caps: 'ack,mbb,zstd' }, () => true);
+  assert.equal(both.headers['x-of-caps'], 'ack,mbb');
+  assert.equal(both.headers['x-of-run-ms'], '300000');        // OF_RUN_ACK_MS default
+  const mbbOnly = await down(main, { k: PERSONAL, s: sid(), from: '0', caps: 'mbb' }, () => true);
+  assert.equal(mbbOnly.headers['x-of-caps'], 'mbb');
+  assert.equal(mbbOnly.headers['x-of-run-ms'], '4000');       // OF_RUN_MS of the test server
+  const short = await down(main, { k: PERSONAL, s: sid(), from: '0', caps: 'ack', poll: 'short' }, () => true);
+  assert.equal(short.headers['x-of-run-ms'], '15000');
+  // r=ack: unknown session -> 410; a session without data -> ok 0
+  assert.equal((await req(url(main, { k: PERSONAL, s: sid(), r: 'ack', ack: '5' }), { method: 'POST' })).status, 410);
+});
+
+test('ack: one long poll carries a bulk download far past the retention cap', async () => {
+  const CAP = 65536;
+  const srv = await startServer({ personal: { p1: PERSONAL } },
+    { OF_ALLOW_PRIVATE: '1', OF_ALLOW_PORTS: String(echo.port), OF_RETAIN_CAP: String(CAP), OF_RUN_ACK_MS: '60000' });
+  const s = sid();
+  const d = await openDown(srv, { k: PERSONAL, s, from: '0', caps: 'ack,mbb' });
+  assert.equal(d.res.headers['x-of-caps'], 'ack,mbb');
+  let lastAck = 0, acks = 0;
+  d.listeners.push(() => {
+    if (d.stream.length - lastAck >= 16384) {
+      lastAck = d.stream.length; acks++;
+      req(url(srv, { k: PERSONAL, s, r: 'ack', ack: String(lastAck) }), { method: 'POST' }).catch(() => {});
+    }
+  });
+  const o = frame(1, 1, `127.0.0.1:${echo.port}`);
+  await up(srv, s, 0, o);
+  const payload = crypto.randomBytes(1024 * 1024);
+  let off = o.length;
+  for (let i = 0; i < payload.length; i += 32768) {
+    const f = frame(2, 1, payload.subarray(i, i + 32768));
+    assert.equal((await up(srv, s, off, f)).status, 200);
+    off += f.length;
+  }
+  await until(d, () => dataOf(d.stream, 1).length >= payload.length, 20000);
+  assert.ok(dataOf(d.stream, 1).equals(payload));
+  assert.equal(d.ended, false, 'the poll ended although acks kept coming');
+  assert.ok(acks > 20, 'acks ' + acks);
+  d.close();
+});
+
+test('ack: &ack= on up POSTs; from below the acked offset is served from there (ack session only)', async () => {
+  const s = sid();
+  const d = await openDown(main, { k: PERSONAL, s, from: '0', caps: 'ack' });
+  const o = frame(1, 21, `127.0.0.1:${echo.port}`);
+  await up(main, s, 0, o);
+  await until(d, () => has(4, 21)(d.stream));
+  const got = d.stream.length;
+  const d1 = frame(2, 21, 'ping');
+  const u = await req(url(main, { k: PERSONAL, s, r: 'up', off: String(o.length), ack: String(got) }), { method: 'POST', body: d1 });
+  assert.equal(u.body.toString(), 'ok ' + (o.length + d1.length));
+  const a = await req(url(main, { k: PERSONAL, s, r: 'ack', ack: '0' }), { method: 'POST' });
+  assert.equal(a.body.toString(), 'ok ' + got);                  // the up POST acknowledged it
+  // a poll overtaken by an ack (from=0 < acked) starts at the acked offset instead of 410
+  const again = await down(main, { k: PERSONAL, s, from: '0', caps: 'ack' }, () => true);
+  assert.equal(again.status, 200);
+  assert.ok(again.preamble.toString('latin1').startsWith('OF2 ' + got + ' '));
+  // beyond produced: ignored
+  const big = await req(url(main, { k: PERSONAL, s, r: 'ack', ack: '999999999' }), { method: 'POST' });
+  assert.equal(big.body.toString(), 'ok ' + got);
+  d.close();
+});
+
+test('mbb: the new poll takes over, the old one ends cleanly; data continues exactly', async () => {
+  const s = sid();
+  const a = await openDown(main, { k: PERSONAL, s, from: '0', caps: 'ack,mbb' });
+  const o = frame(1, 31, `127.0.0.1:${echo.port}`);
+  const d1 = frame(2, 31, 'hello');
+  await up(main, s, 0, Buffer.concat([o, d1]));
+  await until(a, () => dataOf(a.stream, 31).toString() === 'hello');
+  const x = a.stream.length;
+  const b = await openDown(main, { k: PERSONAL, s, from: String(x), caps: 'ack,mbb', mbb: '1' });
+  assert.ok(b.pre.toString('latin1').startsWith('OF2 ' + x + ' '));
+  await until(a, () => a.ended, 2000);
+  assert.equal(a.errored, false, 'old poll was cut, not ended');
+  const d2 = frame(2, 31, 'world');
+  await up(main, s, o.length + d1.length, d2);
+  await until(b, () => dataOf(b.stream, 31).toString() === 'world');
+  b.close();
+});
+
+test('stream idle timeout: CLOSE to the client, socket closed', async () => {
+  const srv = await startServer({ personal: { p1: PERSONAL } },
+    { OF_ALLOW_PRIVATE: '1', OF_ALLOW_PORTS: String(echo.port), OF_STREAM_IDLE_MS: '1000' });
+  const s = sid();
+  const d = await openDown(srv, { k: PERSONAL, s, from: '0' });
+  await up(srv, s, 0, frame(1, 41, `127.0.0.1:${echo.port}`));
+  await until(d, () => has(4, 41)(d.stream));
+  const t0 = Date.now();
+  await until(d, () => has(3, 41)(d.stream), 5000);
+  assert.ok(Date.now() - t0 >= 700, 'closed too early');
+  d.close();
+});
+
+test('several A records: a refused first address falls over to the next', async () => {
+  const srv = await startServer({ personal: { p1: PERSONAL } }, {
+    OF_ALLOW_PRIVATE: '1', OF_ALLOW_PORTS: String(echo.port), OF_DIAL_MS: '700',
+    OF_TEST_HOSTS: JSON.stringify({ 'multi.test': ['127.0.0.2', '127.0.0.1'], 'dead.test': ['127.0.0.2', '127.0.0.3'] }),
+  });
+  const s = sid();
+  const d = await openDown(srv, { k: PERSONAL, s, from: '0' });
+  const o = Buffer.concat([frame(1, 51, `multi.test:${echo.port}`), frame(1, 52, `dead.test:${echo.port}`)]);
+  await up(srv, s, 0, o);
+  await until(d, () => has(4, 51)(d.stream) && has(5, 52)(d.stream), 6000);
+  const err = real(d.stream).find((f) => f.type === 5 && f.id === 52);
+  assert.equal(err.payload.toString(), 'refused');
+  const msg = frame(2, 51, 'via second address');
+  await up(srv, s, o.length, msg);
+  await until(d, () => dataOf(d.stream, 51).toString() === 'via second address');
+  d.close();
+});
+
+test('per-stream backpressure: a destination that never reads is closed, the session goes on', async () => {
+  const sinkConns = [];
+  const sink = net.createServer((c) => { c.pause(); c.on('error', () => {}); sinkConns.push(c); });
+  await new Promise((r) => sink.listen(0, '127.0.0.1', r));
+  const port = sink.address().port;
+  const srv = await startServer({ personal: { p1: PERSONAL } }, {
+    OF_ALLOW_PRIVATE: '1', OF_ALLOW_PORTS: `${echo.port},${port}`,
+    OF_STREAM_PENDING_MAX: '65536', OF_STREAM_STUCK_MS: '1500',
+  });
+  const s = sid();
+  const d = await openDown(srv, { k: PERSONAL, s, from: '0' });
+  const o = Buffer.concat([frame(1, 61, `127.0.0.1:${port}`), frame(1, 62, `127.0.0.1:${echo.port}`)]);
+  await up(srv, s, 0, o);
+  await until(d, () => has(4, 61)(d.stream) && has(4, 62)(d.stream));
+  let off = o.length, held = false;
+  const chunk = crypto.randomBytes(256 * 1024);
+  for (let i = 0; i < 256 && !has(3, 61)(d.stream); i++) {
+    const f = frame(2, 61, chunk);
+    const t0 = Date.now();
+    const u = await up(srv, s, off, f);
+    assert.equal(u.status, 200, 'POST answered ' + u.status);
+    if (Date.now() - t0 > 1000) held = true;
+    off += f.length;
+  }
+  await until(d, () => has(3, 61)(d.stream), 5000);
+  assert.ok(held, 'no POST was held back by the full destination');
+  // the other stream still works
+  const m = frame(2, 62, 'still alive');
+  assert.equal((await up(srv, s, off, m)).status, 200);
+  await until(d, () => dataOf(d.stream, 62).toString() === 'still alive');
+  d.close();
+  for (const c of sinkConns) c.destroy();
+  sink.close();
+});
+
+test('session end (demo limit) sends CLOSE for every stream before the down ends', async () => {
+  const srv = await startServer(
+    { demo: { token: DEMO, max: 5, seconds: 3600, userMb: 0.05, dailyMb: 25600, until: 0 } },
+    { OF_ALLOW_PRIVATE: '1', OF_ALLOW_PORTS: String(echo.port) });
+  const s = sid(), c = 'install-' + sid();
+  const d = await openDown(srv, { k: DEMO, s, c, from: '0' });
+  await up(srv, s, 0, Buffer.concat([frame(1, 1, `127.0.0.1:${echo.port}`), frame(1, 2, `127.0.0.1:${echo.port}`)]), DEMO);
+  await until(d, () => has(4, 1)(d.stream) && has(4, 2)(d.stream));
+  const big = frame(2, 1, crypto.randomBytes(100000));
+  const opened = frame(1, 1, `127.0.0.1:${echo.port}`).length + frame(1, 2, `127.0.0.1:${echo.port}`).length;
+  await up(srv, s, opened, big, DEMO);
+  await until(d, () => d.ended, 5000);
+  assert.ok(has(3, 1)(d.stream) && has(3, 2)(d.stream), 'CLOSE frames missing');
+});

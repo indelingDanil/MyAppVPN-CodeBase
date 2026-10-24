@@ -16,7 +16,15 @@
  * Test-only env knobs (never set them in production):
  *   OF_ALLOW_PRIVATE=1   allow private/loopback targets
  *   OF_ALLOW_PORTS=a,b   extra allowed destination ports (besides 80/443)
- * Tuning env: OF_CONFIG, OF_DATA_DIR, OF_RETAIN_CAP (bytes), OF_RUN_MS, OF_IDLE_MS.
+ * Tuning env: OF_CONFIG, OF_DATA_DIR, OF_RETAIN_CAP (bytes), OF_RUN_MS, OF_RUN_ACK_MS, OF_IDLE_MS,
+ *   OF_STREAM_IDLE_MS, OF_STREAM_PENDING_MAX.
+ *
+ * Protocol extensions (negotiated per down poll, see ../PROTOCOL-v2.md): a client sending
+ * `caps=ack,mbb` gets `X-OF-Caps` (the supported subset) and `X-OF-Run-Ms`.
+ *   ack: the client reports its received offset (`r=ack&ack=N`, or `&ack=N` on up POSTs), so a
+ *        down response never has to end to acknowledge; such responses run OF_RUN_ACK_MS.
+ *   mbb: `&mbb=1` on a down: the new response takes over first, the old one ends cleanly after.
+ * Without caps everything behaves exactly as before.
  */
 
 const http = require('node:http');
@@ -44,14 +52,23 @@ const MAX_BODY = 4 * MiB;                         // 413 above
 const MAX_FRAME = 4 * MiB;                        // larger client frame = protocol error
 const RETAIN_CAP = envInt('OF_RETAIN_CAP', 8 * MiB);
 const RUN_MS = envInt('OF_RUN_MS', 100000);       // end a down response after this
+// ack-capable sessions: the response needn't end to acknowledge; stay below Beget's ~370 s cut.
+const RUN_ACK_MS = envInt('OF_RUN_ACK_MS', 300000);
+const ACK_STALE_MS = 5000;                         // ack session: no ack this long → old cap/2 rule applies
+const CAPS = ['ack', 'mbb'];
 const IDLE_MS = envInt('OF_IDLE_MS', 60000);      // session GC
 const SHORT_RUN_MS = envInt('OF_SHORT_RUN_MS', 15000);   // poll=short: max response life
 const SHORT_IDLE_MS = envInt('OF_SHORT_IDLE_MS', 250);   // poll=short: end this long after a burst
 const KEEPALIVE_MS = 5000;
-const DIAL_MS = 6000;
+const DIAL_MS = envInt('OF_DIAL_MS', 8000);         // connect timeout per destination address
+const DIAL_TOTAL_MS = 16000;                      // all addresses of one OPEN (client gives up at 20 s)
+const STREAM_IDLE_MS = envInt('OF_STREAM_IDLE_MS', 300000);   // no data either way → CLOSE
+const STREAM_PENDING_MAX = envInt('OF_STREAM_PENDING_MAX', MiB); // queued towards ONE destination
+const STREAM_STUCK_MS = envInt('OF_STREAM_STUCK_MS', 20000);  // over the cap and not draining → CLOSE
 const DNS_TTL_MS = 5 * 60000;
 const UP_PENDING_MAX = 4 * MiB;                   // queued bytes towards destinations per session
 const UP_WAIT_MS = 25000;
+const UP_POLL_MS = 25;
 const MAX_SESSIONS = envInt('OF_MAX_SESSIONS', 2000);
 const TOMBSTONE_MS = 10 * 60000;
 const ALLOW_PRIVATE = ENV.OF_ALLOW_PRIVATE === '1';
@@ -203,18 +220,25 @@ function demoHeaders(ukey) {
 
 // ── DNS + target policy ──────────────────────────────────────────────────────
 
-const dnsCache = new Map();   // host -> { ip, exp }
+const dnsCache = new Map();   // host -> { ips, exp }
 
+// Test-only: OF_TEST_HOSTS='{"name":["ip",…]}' answers those names without DNS.
+let TEST_HOSTS = {};
+try { TEST_HOSTS = ENV.OF_TEST_HOSTS ? JSON.parse(ENV.OF_TEST_HOSTS) : {}; } catch { TEST_HOSTS = {}; }
+
+/** All IPv4 addresses of host (A records, in resolver order). */
 function resolve4(host) {
-  if (net.isIPv4(host)) return Promise.resolve(host);
+  if (net.isIPv4(host)) return Promise.resolve([host]);
+  if (Array.isArray(TEST_HOSTS[host])) return Promise.resolve(TEST_HOSTS[host].slice());
   const hit = dnsCache.get(host);
-  if (hit && hit.exp > Date.now()) return Promise.resolve(hit.ip);
+  if (hit && hit.exp > Date.now()) return Promise.resolve(hit.ips);
   return new Promise((ok, fail) => {
-    dns.lookup(host, { family: 4 }, (err, ip) => {
-      if (err || !ip) return fail(err || new Error('dns'));
+    dns.lookup(host, { family: 4, all: true }, (err, list) => {
+      const ips = !err && Array.isArray(list) ? [...new Set(list.map((a) => a.address).filter((a) => net.isIPv4(a)))] : [];
+      if (!ips.length) return fail(err || new Error('dns'));
       if (dnsCache.size > 5000) dnsCache.clear();
-      dnsCache.set(host, { ip, exp: Date.now() + DNS_TTL_MS });
-      ok(ip);
+      dnsCache.set(host, { ips, exp: Date.now() + DNS_TTL_MS });
+      ok(ips);
     });
   });
 }
@@ -291,9 +315,15 @@ class Session {
     this.upBusy = 0;
     this.lastActive = Date.now();
     this.dead = false;
+    this.capAck = false;           // negotiated extensions (caps=...)
+    this.capMbb = false;
+    this.lastAckAt = Date.now();   // last acknowledgement (down attach or ack)
   }
 
   retained() { return this.produced - this.acked; }
+
+  /** Down response length for this session. */
+  runMs(short) { return short ? SHORT_RUN_MS : this.capAck ? RUN_ACK_MS : RUN_MS; }
 
   // ---- down stream ----
 
@@ -302,7 +332,7 @@ class Session {
     this.produced += buf.length;
     if (!this.paused && this.retained() > RETAIN_CAP) {
       this.paused = true;
-      for (const st of this.streams.values()) if (st.sock) st.sock.pause();
+      for (const st of this.streams.values()) if (st.sock && st.state === 'open') st.sock.pause();
     }
     if (!viaFlush) this.scheduleFlush();
   }
@@ -326,6 +356,19 @@ class Session {
       this.paused = false;
       for (const st of this.streams.values()) if (st.sock && st.state === 'open') st.sock.resume();
     }
+  }
+
+  /**
+   * "ack" extension: the client holds every down byte below n. Never released beyond what the
+   * current response has written (its byte stream must stay contiguous; with mbb the client may
+   * have got further through the previous response) nor beyond what exists.
+   */
+  applyAck(n) {
+    if (!Number.isSafeInteger(n) || n > this.produced) return;
+    if (this.down && n > this.down.sentTo) n = this.down.sentTo;
+    this.lastAckAt = Date.now();
+    if (n > this.acked) this.ack(n);
+    if (this.down) this.scheduleFlush();
   }
 
   flush() {
@@ -370,21 +413,30 @@ class Session {
       return;
     }
     // Caught up. If a lot is unacknowledged, end this response so the client re-polls (= acks)
-    // instead of hitting the retention cap and stalling until the ~100 s rollover.
-    if (d.sentTo === this.produced && this.retained() >= RETAIN_CAP / 2) this.endDown(d);
+    // instead of hitting the retention cap and stalling until the rollover. An ack-capable client
+    // acknowledges on its own: then this is only a safety net for when its acks have stopped.
+    if (d.sentTo === this.produced && this.retained() >= RETAIN_CAP / 2 &&
+        !(this.capAck && Date.now() - this.lastAckAt < ACK_STALE_MS)) this.endDown(d);
   }
 
-  attachDown(res, from, short) {
-    if (this.down) this.endDown(this.down);
+  /**
+   * mbb (make-before-break): the new response is installed first and the old one ends cleanly
+   * right after; without it the old one ends first (as always). Both end with res.end().
+   */
+  attachDown(res, from, short, mbb) {
+    const old = this.down;
+    if (old && !mbb) this.endDown(old);
     const d = { res, from, sentTo: from, waitingDrain: false, unpadded: false, ended: false, lastWrite: Date.now(), timers: [], short: !!short };
     this.down = d;
+    this.lastAckAt = Date.now();
     res.write(preamble(from));
-    d.timers.push(setTimeout(() => this.endDown(d), short ? SHORT_RUN_MS : RUN_MS));
+    d.timers.push(setTimeout(() => this.endDown(d), this.runMs(short)));
     d.timers.push(setInterval(() => {
       if (d.ended || d.waitingDrain || d.sentTo !== this.produced) return;
       if (Date.now() - d.lastWrite >= KEEPALIVE_MS) { this.produce(padFrame(BLOCK), true); this.flush(); }
     }, 1000));
     res.on('close', () => this.endDown(d));
+    if (old && mbb) this.endDown(old);
     this.flush();
   }
 
@@ -419,6 +471,7 @@ class Session {
     if (type === T_DATA) {
       if (!payload.length) return;
       account(this, payload.length);
+      st.lastIo = Date.now();
       if (st.state === 'open') st.sock.write(payload);
       else { st.queue.push(Buffer.from(payload)); st.qbytes += payload.length; }
     } else if (type === T_CLOSE) {
@@ -433,6 +486,16 @@ class Session {
       }
     }
     // ACK (6) and unknown types: ignored.
+  }
+
+  /** Server-side close of an open stream: tell the client, drop the socket. */
+  closeStream(st, why) {
+    if (this.streams.get(st.sid) !== st) return;
+    this.streams.delete(st.sid);
+    clearTimeout(st.timer);
+    if (st.sock) st.sock.destroy();
+    this.emit(T_CLOSE, st.sid);
+    if (why && ENV.OF_DEBUG === '1') log(`session ${sid6(this.id)}: stream closed (${why})`);
   }
 
   onOpen(sid, payload) {
@@ -450,7 +513,7 @@ class Session {
     if (!portAllowed(port)) return err('port');
     if (!/^[A-Za-z0-9._-]{1,253}$/.test(host)) return err('dns');
 
-    const st = { sid, state: 'resolving', sock: null, queue: [], qbytes: 0, timer: null, clientClosed: false, failed: false };
+    const st = { sid, state: 'resolving', sock: null, queue: [], qbytes: 0, timer: null, clientClosed: false, failed: false, lastIo: Date.now() };
     this.streams.set(sid, st);
     const live = () => !this.dead && this.streams.get(sid) === st;
     const fail = (r) => {
@@ -461,34 +524,71 @@ class Session {
       if (live()) { this.streams.delete(sid); err(r); }
     };
 
-    resolve4(host).then((ip) => {
+    resolve4(host).then((ips) => {
       if (!live()) return;
-      if (!ALLOW_PRIVATE && isBlockedIp(ip)) return fail('blocked');
+      const cands = ALLOW_PRIVATE ? ips : ips.filter((ip) => !isBlockedIp(ip));
+      if (!cands.length) return fail('blocked');
       st.state = 'connecting';
-      const sock = net.connect({ host: ip, port });
-      st.sock = sock;
-      st.timer = setTimeout(() => fail('timeout'), DIAL_MS);
-      sock.once('connect', () => {
-        clearTimeout(st.timer);
-        if (!live()) { sock.destroy(); return; }
-        st.state = 'open';
-        sock.setNoDelay(true);
-        this.emit(T_OPEN_OK, sid);
-        for (const q of st.queue) sock.write(q);
-        st.queue = []; st.qbytes = 0;
-        if (this.paused) sock.pause();
-      });
-      sock.on('data', (chunk) => {
-        if (st.clientClosed || !live()) return;
-        account(this, chunk.length);
-        this.emit(T_DATA, sid, chunk);
-      });
-      sock.on('error', (e) => { if (st.state === 'connecting') fail(dialError(e)); });
-      sock.on('close', () => {
-        if (st.state !== 'open') { fail('refused'); return; }
-        if (!st.clientClosed && live()) { this.streams.delete(sid); this.emit(T_CLOSE, sid); }
-      });
+      const t0 = Date.now();
+      let lastErr = 'timeout';
+      // Several A records: try them in order (DIAL_MS each, DIAL_TOTAL_MS for all).
+      const attempt = (i) => {
+        if (!live() || st.failed) return;
+        const left = DIAL_TOTAL_MS - (Date.now() - t0);
+        if (i >= cands.length || left <= 0) {
+          if (i > 1) dnsCache.delete(host);
+          return fail(lastErr);
+        }
+        const sock = net.connect({ host: cands[i], port });
+        st.sock = sock;
+        let settled = false;
+        const next = (reason) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(st.timer);
+          sock.removeAllListeners();
+          sock.on('error', () => {});
+          sock.destroy();
+          if (st.sock === sock) st.sock = null;
+          lastErr = reason;
+          attempt(i + 1);
+        };
+        st.timer = setTimeout(() => next('timeout'), Math.min(DIAL_MS, left));
+        sock.once('error', (e) => next(dialError(e)));
+        sock.once('close', () => next('refused'));
+        sock.once('connect', () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(st.timer);
+          sock.removeAllListeners('error');
+          sock.removeAllListeners('close');
+          if (!live()) { sock.on('error', () => {}); sock.destroy(); return; }
+          this.onConnected(st, sock, live);
+        });
+      };
+      attempt(0);
     }, () => fail('dns'));
+  }
+
+  onConnected(st, sock, live) {
+    const sid = st.sid;
+    st.state = 'open';
+    st.lastIo = Date.now();
+    sock.setNoDelay(true);
+    this.emit(T_OPEN_OK, sid);
+    for (const q of st.queue) sock.write(q);
+    st.queue = []; st.qbytes = 0;
+    if (this.paused) sock.pause();
+    sock.on('data', (chunk) => {
+      if (st.clientClosed || !live()) return;
+      st.lastIo = Date.now();
+      account(this, chunk.length);
+      this.emit(T_DATA, sid, chunk);
+    });
+    sock.on('error', () => {});
+    sock.on('close', () => {
+      if (!st.clientClosed && live()) { this.streams.delete(sid); this.emit(T_CLOSE, sid); }
+    });
   }
 
   pendingUp() {
@@ -497,8 +597,42 @@ class Session {
     return n;
   }
 
+  /**
+   * Per-stream backpressure: true while some destination holds more than STREAM_PENDING_MAX
+   * unwritten bytes (the up POST then waits, like for the session total). A connected stream
+   * over the cap that has not drained at all for STREAM_STUCK_MS is closed instead, so one dead
+   * destination cannot stall the whole session.
+   */
+  streamOverCap() {
+    const now = Date.now();
+    let over = false;
+    for (const st of [...this.streams.values()]) {
+      const p = st.qbytes + (st.sock ? st.sock.writableLength : 0);
+      if (p <= STREAM_PENDING_MAX) { st.progAt = now; st.progLen = p; continue; }
+      if (st.progAt === undefined || p < st.progLen) st.progAt = now;
+      st.progLen = p;
+      if (st.state === 'open' && now - st.progAt > STREAM_STUCK_MS) { this.closeStream(st, 'destination not reading'); continue; }
+      over = true;
+    }
+    return over;
+  }
+
+  /** Close open streams with no data either way for STREAM_IDLE_MS. */
+  sweepIdle(now) {
+    if (this.dead || this.paused) return;       // paused = our own backpressure, not idleness
+    for (const st of [...this.streams.values()]) {
+      if (st.state !== 'open' || st.qbytes || (st.sock && st.sock.writableLength)) continue;
+      if (now - st.lastIo >= STREAM_IDLE_MS) this.closeStream(st, 'idle');
+    }
+  }
+
   kill(reason, why) {
     if (this.dead) return;
+    // Tell the client every stream is gone while a response can still carry it.
+    if (this.down && this.streams.size) {
+      for (const sid of this.streams.keys()) this.produce(frame(T_CLOSE, sid), true);
+      this.flush();
+    }
     this.dead = true;
     if (sessions.get(this.id) === this) sessions.delete(this.id);
     if (reason) tombstones.set(this.id, { reason, roleKey: this.roleKey, t: Date.now() });
@@ -540,6 +674,11 @@ setInterval(() => {
   for (const [id, t] of tombstones) if (now - t.t > TOMBSTONE_MS) tombstones.delete(id);
 }, 5000);
 setInterval(() => loadConfig(false), 60000);
+// Idle streams (no data either way for STREAM_IDLE_MS) are closed with a CLOSE to the client.
+setInterval(() => {
+  const now = Date.now();
+  for (const s of sessions.values()) s.sweepIdle(now);
+}, Math.max(250, Math.min(5000, Math.floor(STREAM_IDLE_MS / 4))));
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 
@@ -569,7 +708,7 @@ function goneOrReason(res, s, role) {
 
 function handleDown(req, res, q, role, s) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method');
-  const from = parseOffset(q.get('from'));
+  let from = parseOffset(q.get('from'));
   if (from < 0) return send(res, 400, 'bad from');
   let sess = sessions.get(s);
   if (sess && sess.roleKey !== role.key) return send(res, 410, 'gone');
@@ -605,6 +744,14 @@ function handleDown(req, res, q, role, s) {
     const r = demoLimitReason(sess.ukey);
     if (r) { sess.kill(r, 'demo limit'); return refuse(res, r); }
   }
+  if (q.has('caps')) {
+    const want = String(q.get('caps')).split(',');
+    sess.capAck = want.includes('ack');
+    sess.capMbb = want.includes('mbb');
+  }
+  // ack sessions: an ack may overtake this poll (the client sent from=X, then ack=Y>X): serve from
+  // the acknowledged offset; the client accepts any preamble offset in [from, received].
+  if (sess.capAck && from < sess.acked) from = sess.acked;
   if (from < sess.acked || from > sess.produced) {
     sess.kill('', `bad resume offset (${from} not in [${sess.acked}, ${sess.produced}])`);
     return send(res, 410, 'gone');
@@ -617,10 +764,15 @@ function handleDown(req, res, q, role, s) {
     'Cache-Control': 'no-store',
   };
   if (sess.demo) Object.assign(h, demoHeaders(sess.ukey));
+  const short = q.get('poll') === 'short';
+  if (q.has('caps')) {
+    h['X-OF-Caps'] = CAPS.filter((c) => (c === 'ack' ? sess.capAck : sess.capMbb)).join(',');
+    h['X-OF-Run-Ms'] = String(sess.runMs(short));
+  }
   res.writeHead(200, h);
   if (res.socket) res.socket.setNoDelay(true);
   if (req.method === 'HEAD') return res.end();
-  sess.attachDown(res, from, q.get('poll') === 'short');
+  sess.attachDown(res, from, short, sess.capMbb && q.get('mbb') === '1' && !short);
 }
 
 function handleUp(req, res, q, role, s) {
@@ -633,6 +785,10 @@ function handleUp(req, res, q, role, s) {
   if (sess.demo) {
     const r = demoLimitReason(sess.ukey);
     if (r) { req.resume(); sess.kill(r, 'demo limit'); return refuse(res, r); }
+  }
+  if (sess.capAck && q.has('ack')) {
+    const a = parseOffset(q.get('ack'));
+    if (a > 0) sess.applyAck(a);
   }
   const cl = Number(req.headers['content-length']);
   const reject413 = () => {
@@ -672,10 +828,12 @@ function handleUp(req, res, q, role, s) {
     if (done) return;
     const body = parts.length === 1 ? parts[0] : Buffer.concat(parts, size);
     parts.length = 0;
-    // Destination backpressure: don't accept more while a lot is still queued to the targets.
+    // Destination backpressure: don't accept more while a lot is still queued to the targets
+    // (session total, or one destination over its own cap; a stuck one gets closed instead).
     const t0 = Date.now();
-    while (!sess.dead && sess.pendingUp() > UP_PENDING_MAX && Date.now() - t0 < UP_WAIT_MS && !res.destroyed) {
-      await new Promise((r) => setTimeout(r, 100));
+    while (!sess.dead && !res.destroyed && Date.now() - t0 < UP_WAIT_MS &&
+           (sess.pendingUp() > UP_PENDING_MAX || sess.streamOverCap())) {
+      await new Promise((r) => setTimeout(r, UP_POLL_MS));
     }
     if (sess.dead) {
       const t = tombstones.get(s);
@@ -691,6 +849,19 @@ function handleUp(req, res, q, role, s) {
     if (sess.dead) return finish(410, 'gone');
     finish(200, 'ok ' + sess.upRecv);
   });
+}
+
+/** "ack" extension: POST (or GET) ?r=ack&ack=N — the client holds every down byte below N. */
+function handleAck(req, res, q, role, s) {
+  req.resume();
+  if (req.method !== 'POST' && req.method !== 'GET') return send(res, 405, 'method');
+  const n = parseOffset(q.get('ack'));
+  if (n < 0) return send(res, 400, 'bad ack');
+  const sess = sessions.get(s);
+  if (!sess || sess.roleKey !== role.key) return goneOrReason(res, s, role);
+  sess.applyAck(n);
+  sess.lastActive = Date.now();
+  send(res, 200, 'ok ' + sess.acked);
 }
 
 // ── private stats (admin token only) ─────────────────────────────────────────
@@ -812,6 +983,7 @@ function onRequest(req, res) {
   const r = q.get('r');
   if (r === 'down') return handleDown(req, res, q, role, s);
   if (r === 'up') return handleUp(req, res, q, role, s);
+  if (r === 'ack') return handleAck(req, res, q, role, s);
   req.resume();
   send(res, 400, 'bad role');
 }

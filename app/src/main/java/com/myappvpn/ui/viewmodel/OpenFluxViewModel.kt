@@ -52,6 +52,7 @@ object OpenFluxConfig {
         "quota" -> R.string.openflux_status_quota
         "badtoken" -> R.string.openflux_status_badtoken
         "noclient" -> R.string.openflux_status_noclient
+        "unsupported" -> R.string.openflux_status_unsupported
         else -> null
     }
 
