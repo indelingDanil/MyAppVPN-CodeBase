@@ -1,5 +1,6 @@
 package com.myappvpn.domain
 
+import com.myappvpn.BuildConfig
 import com.myappvpn.data.datastore.AppPreferences
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -91,6 +92,7 @@ object OpenFluxEndpoint {
             if (migrated) return
             try {
                 preferences.migrateOpenfluxDemo { u, t -> isDemoPair(u, t) }
+                applyPreset(preferences)
                 migrated = true
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e   // not done — the next caller retries
@@ -98,6 +100,22 @@ object OpenFluxEndpoint {
                 migrated = true   // DataStore I/O error: don't retry on every connect
             }
         }
+    }
+
+    /**
+     * Personal builds (gradle -PofPresetUrl=… -PofPresetToken=…) ship with an own exit: on an install
+     * with no own token yet (or still on the demo) it is written once and OpenFlux is switched on.
+     * Regular builds have empty presets and skip this.
+     */
+    private suspend fun applyPreset(preferences: AppPreferences) {
+        val url = BuildConfig.OF_PRESET_URL.trim()
+        val token = BuildConfig.OF_PRESET_TOKEN.trim()
+        if (url.isEmpty() || token.isEmpty()) return
+        if (preferences.openfluxToken.first().isNotBlank() && !preferences.openfluxDemo.first()) return
+        preferences.setOpenfluxUrl(url)
+        preferences.setOpenfluxToken(token)
+        preferences.setOpenfluxDemo(false)
+        preferences.setOpenfluxEnabled(true)
     }
 
     /** Effective OpenFlux config (demo flag → demo constants; else the user's own prefs). */

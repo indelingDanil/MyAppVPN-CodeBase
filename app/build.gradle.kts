@@ -21,6 +21,9 @@ android {
         versionName = "2.2.0-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Personal tester builds: ./gradlew assembleDebug -PofPresetUrl=… -PofPresetToken=… (empty = none).
+        buildConfigField("String", "OF_PRESET_URL", "\"${(project.findProperty("ofPresetUrl") as String?) ?: ""}\"")
+        buildConfigField("String", "OF_PRESET_TOKEN", "\"${(project.findProperty("ofPresetToken") as String?) ?: ""}\"")
         vectorDrawables {
             useSupportLibrary = true
         }
