@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simplified Chinese translation of values/strings_openflux.xml. -->
+<resources>
+
+    <!-- Settings row -->
+    <string name="openflux_settings_section">实验功能</string>
+    <string name="openflux_settings_title">OpenFlux（测试版）</string>
+    <string name="openflux_settings_subtitle">在普通虚拟主机上搭建自己的出口</string>
+    <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
+    <string name="openflux_state_on">已开启</string>
+    <string name="openflux_state_off">已关闭</string>
+
+    <!-- Screen -->
+    <string name="openflux_beta">测试版</string>
+    <string name="openflux_cd_back">返回</string>
+    <string name="openflux_intro">实验模式。流量不经过 VLESS 服务器，而是经过你自己的出口：部署在普通虚拟主机上的 OpenFlux 应用（Node.js）。适用于移动运营商只放行“白名单”网站、而你的主机恰好在白名单内的情况。仅支持 TCP（端口 80/443），速度一般。</string>
+    <string name="openflux_enable_title">使用 OpenFlux</string>
+    <string name="openflux_enable_subtitle">流量经过你的出口，而不是 VLESS 服务器</string>
+    <string name="openflux_enable_hint_fill">请先设置出口连接（地址和令牌，或通道链接），然后保存。</string>
+    <string name="openflux_section_settings">出口连接</string>
+    <string name="openflux_url_label">出口地址</string>
+    <string name="openflux_url_err_invalid">地址无效</string>
+    <string name="openflux_url_err_scheme">地址必须以 http:// 或 https:// 开头</string>
+    <string name="openflux_url_err_host">地址中缺少域名</string>
+    <string name="openflux_url_err_php">地址必须指向 .php 文件（例如 …/phpbox.php）</string>
+    <string name="openflux_token_label">令牌</string>
+    <string name="openflux_token_show">显示令牌</string>
+    <string name="openflux_token_hide">隐藏令牌</string>
+    <string name="openflux_save">保存</string>
+    <string name="openflux_saved">已保存</string>
+    <string name="openflux_unsaved">有未保存的更改</string>
+    <string name="openflux_http_warning">不使用 HTTPS 时，网络服务商可以看到令牌和网站地址。HTTPS 网站的内容仍然是加密的。</string>
+    <string name="openflux_reconnect_note">VPN 已连接：出口设置的更改将在重新连接后生效。</string>
+    <string name="openflux_howto_title">如何搭建自己的出口</string>
+    <string name="openflux_howto_step1">1. 从 openflux-exit 分支获取 Node.js 出口（app.js）（点击下方按钮），其中还有 Beget 的分步指南。</string>
+    <string name="openflux_howto_step2">2. 在 config.json 中填入你自己设定的长随机令牌。</string>
+    <string name="openflux_howto_step3">3. 在主机上通过 Passenger（Node.js）运行，详见指南。</string>
+    <string name="openflux_howto_step4">4. 在此处粘贴出口地址和令牌。</string>
+    <string name="openflux_github">在 GitHub 上打开代码仓库</string>
+    <string name="openflux_no_browser">未找到可打开链接的应用</string>
+    <string name="openflux_cd_expand">展开</string>
+    <string name="openflux_cd_collapse">收起</string>
+
+    <!-- Home -->
+    <string name="openflux_home_title">OpenFlux（测试版）</string>
+    <string name="openflux_home_via">经由你的 OpenFlux 出口</string>
+    <string name="openflux_home_no_url">未设置地址</string>
+    <string name="openflux_home_demo">MyAppVPN 演示服务器</string>
+    <string name="openflux_home_via_demo">经由 MyAppVPN 演示服务器</string>
+    <string name="openflux_turn_off">关闭</string>
+
+    <!-- Servers -->
+    <string name="openflux_servers_banner">OpenFlux 模式已开启：当前不使用列表中的服务器</string>
+
+    <!-- Exit refusals (session stopped) -->
+    <string name="openflux_status_busy">演示服务器已满：8 个名额均已占用。请稍后再试。</string>
+    <string name="openflux_status_expired">你在演示服务器上的 1 小时（或 2 GB）试用已结束。如需继续使用，请搭建自己的 OpenFlux 出口（点击下方按钮查看说明），或使用普通服务器。</string>
+    <string name="openflux_status_ended">OpenFlux 演示已结束。请搭建自己的出口，说明见代码仓库。</string>
+    <string name="openflux_status_quota">演示服务器今日流量已用完。请明天再试。</string>
+    <string name="openflux_status_badtoken">OpenFlux 令牌或地址错误。</string>
+    <string name="openflux_status_noclient">请更新应用。</string>
+    <string name="openflux_status_unsupported">此地址不是 OpenFlux（Node.js）出口。请检查地址：旧版 PHP 出口已不再支持。</string>
+    <string name="openflux_regular_servers">普通服务器</string>
+    <string name="openflux_howto_button">说明</string>
+
+    <!-- Demo -->
+    <string name="openflux_demo_left">演示：剩余约 %1$d 分钟 · %2$d MB</string>
+    <string name="openflux_demo_left_min">演示：剩余约 %1$d 分钟</string>
+    <string name="openflux_demo_left_mb">演示：剩余 %1$d MB</string>
+    <string name="openflux_demo_title">试用演示服务器</string>
+    <string name="openflux_demo_text">一次性试用作者的出口：从连接时起 1 小时（计时不会暂停）或 2 GB 流量，以先到者为准。最多同时 8 人，截至 10 月 14 日。如果没有空余名额，请稍后再试。</string>
+    <string name="openflux_demo_button">连接演示服务器</string>
+    <string name="openflux_demo_selected">已选择 MyAppVPN 演示服务器</string>
+    <string name="openflux_own_exit_note">自己的出口：不受限制</string>
+
+    <!-- Connection diagnostics -->
+    <string name="openflux_diag_button">连接诊断</string>
+    <string name="openflux_diag_title">连接诊断</string>
+    <string name="openflux_diag_running">正在检测网络…最多需要一分半钟</string>
+    <string name="openflux_diag_note">请在无法使用的网络下（例如移动数据）运行诊断。无需关闭 VPN。</string>
+    <string name="openflux_diag_copy">复制</string>
+    <string name="openflux_diag_share">分享</string>
+    <string name="openflux_diag_close">关闭</string>
+    <string name="openflux_diag_copied">报告已复制</string>
+    <string name="openflux_diag_share_title">发送报告</string>
+
+    <!-- Channel to the own exit (Mail.ru / Cups / openflux:// link) -->
+    <string name="openflux_channel_title">到出口的通道</string>
+    <string name="openflux_channel_direct">直连</string>
+    <string name="openflux_channel_direct_desc">通过地址和令牌直接连接到你的出口。速度最快。</string>
+    <string name="openflux_channel_mailru">经由 Mail.ru 文档</string>
+    <string name="openflux_channel_mailru_desc">流量经过 Mail.ru 云盘中的文档。适用于运营商只放行白名单网站的情况。该通道未加密（HTTPS 网站仍然加密），速度比直连慢。</string>
+    <string name="openflux_channel_cups">经由 Cups 房间</string>
+    <string name="openflux_channel_cups_desc">流量经过 cups.online 房间。适用于运营商只放行白名单网站的情况。该通道未加密（HTTPS 网站仍然加密），速度比直连慢。</string>
+    <string name="openflux_channel_link">OpenFlux 链接</string>
+    <string name="openflux_channel_link_desc">通过 openflux://… 链接连接到任意 OpenFlux 节点（你的 VPS、朋友的节点）。当链接或下方字段中包含密钥时，通道会加密。</string>
+    <string name="openflux_channel_demo_note">演示服务器始终直连；通道设置仅适用于你自己的出口。</string>
+    <string name="openflux_mailru_label">Mail.ru 文档链接</string>
+    <string name="openflux_cups_label">Cups 房间代码</string>
+    <string name="openflux_share_label">openflux:// 链接</string>
+    <string name="openflux_secret_label">密钥（如果链接中没有）</string>
+    <string name="openflux_secret_show">显示密钥</string>
+    <string name="openflux_secret_hide">隐藏密钥</string>
+    <string name="openflux_link_err_http">需要类似 https://cloud.mail.ru/public/… 的链接</string>
+    <string name="openflux_link_err_openflux_here">这是 openflux:// 链接：请选择“OpenFlux 链接”通道</string>
+    <string name="openflux_link_err_not_openflux">链接必须以 openflux://v1/ 开头（区分大小写）</string>
+    <string name="openflux_link_err_spaces">代码中不能有空格</string>
+    <string name="openflux_secret_err_short">密钥至少需要 16 个字符</string>
+    <string name="openflux_paste">从剪贴板粘贴</string>
+    <string name="openflux_paste_empty">剪贴板中没有文本</string>
+    <string name="openflux_paste_not_link">剪贴板中没有 openflux:// 链接</string>
+
+    <!-- Import of openflux:// links -->
+    <string name="openflux_import_title">OpenFlux 链接</string>
+    <string name="openflux_import_text">已打开一个 OpenFlux 出口链接。链接中可能包含访问密钥，请只接受来自可信任的人的链接。是否将其填入设置并切换到“OpenFlux 链接”通道？</string>
+    <string name="openflux_import_ok">使用</string>
+    <string name="openflux_import_cancel">取消</string>
+
+    <!-- Home: channel / carrier -->
+    <string name="openflux_home_via_carrier">经由 %1$s</string>
+    <string name="openflux_home_channel">通道：%1$s</string>
+    <string name="openflux_carrier_direct">直连节点</string>
+    <string name="openflux_carrier_node">OpenFlux 节点</string>
+    <string name="openflux_carrier_yandex">Yandex</string>
+    <string name="openflux_carrier_telemost">Telemost</string>
+    <string name="openflux_carrier_bitrix">Bitrix24</string>
+    <string name="openflux_channel_short_link">OpenFlux 链接</string>
+
+    <!-- Captcha (browser check asked by a carrier) -->
+    <string name="openflux_captcha_channel">OpenFlux 验证</string>
+    <string name="openflux_captcha_title">需要进行“人机验证”</string>
+    <string name="openflux_captcha_notif_text">OpenFlux 通道所用的服务要求进行验证。点按即可打开。</string>
+    <string name="openflux_captcha_home_text">通道所用的服务要求进行“人机验证”，未通过验证时通道无法连接。</string>
+    <string name="openflux_captcha_open">打开验证</string>
+    <string name="openflux_captcha_hint">请在页面上完成验证，然后点按“完成”。</string>
+    <string name="openflux_captcha_done">完成</string>
+    <string name="openflux_captcha_sent">已完成：通道正在重新连接</string>
+    <string name="openflux_captcha_no_cookies">尚未通过验证：网站未设置 Cookie</string>
+    <string name="openflux_captcha_not_running">OpenFlux 当前未运行</string>
+</resources>

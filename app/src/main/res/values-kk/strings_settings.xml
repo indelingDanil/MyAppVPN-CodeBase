@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kazakh translation of values/strings_settings.xml. -->
+<resources>
+
+    <!-- Settings -->
+    <string name="settings_title">Баптаулар</string>
+    <string name="settings_section_connection">Қосылым</string>
+    <string name="settings_section_apps_network">Қолданбалар және желі</string>
+    <string name="settings_section_hotspot">Бөлісу</string>
+    <string name="settings_section_about">Қолданба туралы</string>
+    <string name="settings_applies_next_connect">Келесі қосылғанда қолданылады</string>
+    <string name="settings_subscriptions_title">Жазылымдар</string>
+    <string name="settings_subscriptions_subtitle">Өз сервер көздеріңіз, оларды қосыңыз немесе өшіріңіз</string>
+    <string name="settings_autoconnect_title">Құрылғы қосылғанда қосылу</string>
+    <string name="settings_autoconnect_subtitle">VPN рұқсатын бір рет беру қажет</string>
+    <string name="settings_killswitch_title">Kill switch</string>
+    <string name="settings_killswitch_subtitle">Туннель үзілсе, трафикті бұғаттайды — нақты IP мекенжайыңыз ашылып қалмайды</string>
+    <string name="settings_killswitch_off_warning">⚠ Өшірулі: туннель үзілсе, трафик VPN-ді айналып, тікелей өтуі мүмкін.</string>
+    <string name="settings_tls_fragment_title">DPI айналып өту (TLS фрагменттеу)</string>
+    <string name="settings_tls_fragment_subtitle">Серверге TLS қосылымының басын бөліктерге бөледі, сондықтан қарапайым DPI сервер атауын оқи алмайды. Оператор қосылымдарды бұғаттаса, көмектесуі мүмкін; қосылу баяулауы мүмкін. Әдепкі бойынша өшірулі.</string>
+    <string name="settings_split_title">Трафикті бөлу</string>
+    <string name="settings_split_subtitle">VPN-сіз жұмыс істейтін қолданбаларды таңдаңыз</string>
+    <string name="settings_split_manage_title">Қолданбаларды таңдау</string>
+    <string name="settings_split_manage_subtitle">Қай қолданбалар VPN-ді айналып өтеді немесе тек VPN-ді пайдаланады</string>
+    <string name="settings_dns_title">DNS серверлері</string>
+    <string name="settings_hotspot_title">Хотспот арқылы бөлісу</string>
+    <string name="settings_hotspot_hint">Прокси тек хотспот желіңізде қолжетімді: HTTP құпиясөзсіз, SOCKS5 логин мен құпиясөз арқылы. Нұсқаулық қосылғаннан кейін Басты экранда көрсетіледі.</string>
+    <string name="settings_hotspot_guide_title">Басқа құрылғыны қалай қосуға болады</string>
+    <string name="settings_hotspot_guide_subtitle">Android, iPhone, ДК және Telegram үшін қадамдық нұсқаулық</string>
+    <string name="settings_about_version">Нұсқа</string>
+    <string name="settings_about_sources">Сервер көздері</string>
+    <string name="settings_about_sources_value">zieng2/wl, igareck + өзіңіздікі</string>
+    <string name="settings_about_protocol">Хаттама</string>
+
+    <!-- Split tunneling -->
+    <string name="split_title">Трафикті бөлу</string>
+    <string name="split_subtitle_off">Өшірулі</string>
+    <plurals name="split_apps_via_vpn">
+        <item quantity="one">%d қолданба VPN арқылы</item>
+        <item quantity="other">%d қолданба VPN арқылы</item>
+    </plurals>
+    <plurals name="split_apps_bypass_vpn">
+        <item quantity="one">%d қолданба VPN-ді айналып өтеді</item>
+        <item quantity="other">%d қолданба VPN-ді айналып өтеді</item>
+    </plurals>
+    <string name="split_cd_back">Артқа</string>
+    <string name="split_enable">Трафикті бөлуді қосу</string>
+    <string name="split_mode_exclude">Таңдалғандарды шығару</string>
+    <string name="split_mode_include">Тек таңдалғандар VPN арқылы</string>
+    <string name="split_mode_include_hint">Тек таңдалған қолданбалар VPN-ді пайдаланады, қалғандары тікелей өтеді</string>
+    <string name="split_mode_exclude_hint">Таңдалған қолданбалар VPN-сіз, тікелей өтеді</string>
+    <string name="split_include_empty_warning">Қолданбалар таңдалмаған — VPN барлық қолданбаларға қолданылады</string>
+    <string name="split_search_placeholder">Қолданбаларды іздеу</string>
+    <string name="split_cd_clear_search">Іздеуді тазалау</string>
+    <string name="split_select_all">Барлығын таңдау</string>
+    <string name="split_clear_all">Барлығын алып тастау</string>
+    <string name="split_invert">Кері таңдау</string>
+    <string name="split_bulk_applies_to">Сәйкестерге қолданылады: %1$d</string>
+    <string name="split_no_apps">Қолданбалар табылмады</string>
+    <string name="split_no_search_results">Ештеңе табылмады</string>
+    <string name="split_badge_via_vpn">VPN АРҚЫЛЫ</string>
+    <string name="split_badge_bypass">VPN-СІЗ</string>
+
+    <!-- Subscriptions -->
+    <string name="subs_title">Жазылымдар</string>
+    <string name="subs_enabled_count">Қосулы: %2$d ішінен %1$d</string>
+    <string name="subs_cd_back">Артқа</string>
+    <string name="subs_intro">Өз жазылымдарыңызды қосыңыз (VLESS тізіміне сілтеме, https://). Өшірілген көздер жұмыс істейтін серверлерді іздегенде пайдаланылмайды.</string>
+    <string name="subs_add_button">Жазылым қосу</string>
+    <string name="subs_refreshing">Серверлер жаңартылуда…</string>
+    <string name="subs_refresh_failed">Серверлерді жаңарту мүмкін болмады. Интернет байланысын тексеріңіз.</string>
+    <string name="subs_empty">Әзірге көздер жоқ. Жоғарыда жазылым сілтемесін қосыңыз.</string>
+    <string name="subs_none_enabled">Барлық көздер өшірулі — сервер тізімі жаңартылмайды.</string>
+    <string name="subs_builtin_source">Кірістірілген көз</string>
+    <string name="subs_cd_delete">%1$s жазылымын жою</string>
+    <string name="subs_delete_title">Жазылымды жою керек пе?</string>
+    <string name="subs_delete_confirm">Жою</string>
+    <string name="subs_cancel">Бас тарту</string>
+    <string name="subs_disable_last_title">Соңғы көзді өшіру керек пе?</string>
+    <string name="subs_last_source_warning">Көздер болмаса, сервер тізімі бос қалады.</string>
+    <string name="subs_disable_confirm">Өшіру</string>
+
+    <!-- DNS -->
+    <string name="dns_title">DNS серверлері</string>
+    <string name="dns_cd_back">Артқа</string>
+    <string name="dns_summary_default">Әдепкі (Cloudflare, Google DoH)</string>
+    <string name="dns_intro">Өз DNS серверлеріңіз. Сұраулар VPN туннелі арқылы өтеді. Қосылып тұрғанда өзгерістер бірден қолданылады.</string>
+    <string name="dns_order_hint">Реті маңызды: серверлерге жоғарыдан төменге қарай сұрау жіберіледі. Барлығы ең көбі %1$d, бір уақытта ең көбі %2$d қосулы.</string>
+    <string name="dns_added_disabled">Өшірулі күйде қосылды: бір уақытта ең көбі %1$d қосуға болады</string>
+    <string name="dns_add_button">Сервер қосу</string>
+    <string name="dns_presets_label">Қосу:</string>
+    <string name="dns_preset_already_added">тізімде бар</string>
+    <string name="dns_list_empty">Тізім бос — әдепкі серверлер пайдаланылады (Cloudflare, Google DoH).</string>
+    <string name="dns_all_disabled">Барлық серверлер өшірулі — әдепкі серверлер пайдаланылады (Cloudflare, Google DoH).</string>
+    <string name="dns_ipv6_title">IPv6 жауаптары (AAAA)</string>
+    <string name="dns_ipv6_on">IPv4 және IPv6 мекенжайларын қайтару</string>
+    <string name="dns_ipv6_off">Тек IPv4 (ұсынылады)</string>
+    <string name="dns_reset_button">Әдепкіге қайтару</string>
+    <string name="dns_limitations">Шығарылған қолданбаларға, қатаң режимдегі Android жеке DNS-іне және браузерлердің кірістірілген DNS-іне әсер етпейді.</string>
+    <string name="dns_delete_title">Серверді жою керек пе?</string>
+    <string name="dns_delete_confirm">Жою</string>
+    <string name="dns_cancel">Бас тарту</string>
+    <string name="dns_reset_title">DNS-ті қалпына келтіру керек пе?</string>
+    <string name="dns_reset_message">Тізім тазаланып, әдепкі серверлер (Cloudflare, Google DoH) пайдаланылады. IPv6 жауаптары өшіріледі.</string>
+    <string name="dns_reset_confirm">Қалпына келтіру</string>
+    <string name="dns_cd_move_up">%1$s жоғары жылжыту</string>
+    <string name="dns_cd_move_down">%1$s төмен жылжыту</string>
+    <string name="dns_cd_delete">%1$s жою</string>
+
+    <!-- Hotspot sharing guide -->
+    <string name="hotspot_title">VPN-мен бөлісу</string>
+    <string name="hotspot_cd_back">Артқа</string>
+    <string name="hotspot_back">Артқа</string>
+    <string name="hotspot_host_hint_unknown">Жоғарыдағы блоктағы IP</string>
+    <string name="hotspot_status_connect_first">Алдымен VPN-ге қосылыңыз</string>
+    <string name="hotspot_status_on_but_disabled">Бөлісу белсенді, бірақ Баптауларда өшірілген — қайта қосылғаннан кейін тоқтайды</string>
+    <string name="hotspot_status_working">Бөлісу белсенді</string>
+    <string name="hotspot_status_enable_in_settings">Баптауларда “Хотспот арқылы бөлісу” параметрін қосып, қайта қосылыңыз</string>
+    <string name="hotspot_status_no_hotspot">Хотспот анықталмады. Хотспотты қосып, VPN-ге қайта қосылыңыз</string>
+    <string name="hotspot_params_title">Прокси параметрлері</string>
+    <string name="hotspot_http_proxy">HTTP прокси</string>
+    <string name="hotspot_socks5">SOCKS5</string>
+    <string name="hotspot_auth_note">HTTP проксиде құпиясөз жоқ. Логин мен құпиясөз тек SOCKS5 үшін қажет.</string>
+    <string name="hotspot_login">Логин</string>
+    <string name="hotspot_password">Құпиясөз</string>
+    <string name="hotspot_new_password_pending">Жаңа құпиясөз VPN-ге қайта қосылғаннан кейін қолданылады.</string>
+    <string name="hotspot_change_password">Құпиясөзді өзгерту</string>
+    <string name="hotspot_password_change_note">Құпиясөз өзгерісі VPN-ге қайта қосылғаннан кейін қолданылады.</string>
+    <string name="hotspot_copied">Көшірілді: %1$s</string>
+    <string name="hotspot_cd_copy">Көшіру: %1$s</string>
+    <string name="hotspot_cd_show_password">Құпиясөзді көрсету</string>
+    <string name="hotspot_cd_hide_password">Құпиясөзді жасыру</string>
+    <string name="hotspot_before_title">Бастамас бұрын</string>
+    <string name="hotspot_before_step1">Баптауларда “Хотспот арқылы бөлісу” параметрін қосыңыз</string>
+    <string name="hotspot_before_step2">Осы телефонда хотспотты қосыңыз</string>
+    <string name="hotspot_before_step3">VPN-ге қосылыңыз (хотспотты қосқаннан кейін)</string>
+    <string name="hotspot_before_step4">Басқа құрылғыны хотспотыңызға қосыңыз</string>
+    <string name="hotspot_step_save">“Сақтау” түймесін түртіңіз</string>
+    <string name="hotspot_android_title">Android</string>
+    <string name="hotspot_android_step1">Параметрлер → Wi-Fi</string>
+    <string name="hotspot_android_step2">Хотспот желіңізді басып тұрыңыз → “Өзгерту” (немесе ⚙ белгішесі)</string>
+    <string name="hotspot_android_step3">“Қосымша параметрлер” бөлімін ашыңыз</string>
+    <string name="hotspot_android_step4">Прокси → “Қолмен”</string>
+    <string name="hotspot_android_step5">Хост: %1$s, порт: %2$d</string>
+    <string name="hotspot_ios_title">iPhone / iPad</string>
+    <string name="hotspot_ios_step1">Параметрлер → Wi-Fi</string>
+    <string name="hotspot_ios_step2">Хотспот желіңіздің жанындағы (i) белгісін түртіңіз</string>
+    <string name="hotspot_ios_step3">Төменде: “Проксиді конфигурациялау” → “Қолмен”</string>
+    <string name="hotspot_ios_step4">Сервер: %1$s, порт: %2$d</string>
+    <string name="hotspot_ios_step5">Аутентификация — өшірулі</string>
+    <string name="hotspot_desktop_title">Windows / macOS</string>
+    <string name="hotspot_desktop_windows">Windows: Параметрлер → Желі және интернет → Прокси → “Прокси серверді пайдалану” → мекенжай %1$s, порт %2$d → Сақтау</string>
+    <string name="hotspot_desktop_macos">macOS: Жүйе параметрлері → Wi-Fi → Мәліметтер… → Прокси серверлер → “Веб-прокси (HTTP)” және “Қауіпсіз веб-прокси (HTTPS)” → %1$s : %2$d → OK</string>
+    <string name="hotspot_telegram_title">Telegram (SOCKS5)</string>
+    <string name="hotspot_telegram_step1">Баптаулар → Деректер және жад → Прокси → Прокси қосу</string>
+    <string name="hotspot_telegram_step2">Түрі: SOCKS5</string>
+    <string name="hotspot_telegram_step3">Сервер: %1$s, порт: %2$d</string>
+    <string name="hotspot_telegram_step4">Логин: %1$s, құпиясөз: жоғарыдағы блоктан</string>
+    <string name="hotspot_telegram_step5">Сақтап, проксиді қосыңыз</string>
+    <string name="hotspot_notes_title">Маңызды</string>
+    <string name="hotspot_note_access">Прокси тек хотспотыңызға қосылған құрылғыларға қолжетімді. Ол хотспот құпиясөзімен қорғалған.</string>
+    <string name="hotspot_note_not_all_traffic">Қолданбалардың барлық трафигі жүйелік прокси арқылы өтпейді (кейбір ойындар мен қолданбалар оны елемейді).</string>
+    <string name="hotspot_note_ip_changed">Хотспоттың IP мекенжайы өзгерсе (хотспот өшірілген болса), VPN-ге қайта қосылып, басқа құрылғыдағы параметрлерді жаңартыңыз.</string>
+    <string name="hotspot_verify_title">Тексеру</string>
+    <string name="hotspot_verify_text">Басқа құрылғыда браузерді ашып, 2ip.ru немесе whoer.net сайтында IP мекенжайыңызды тексеріңіз — ол VPN серверінің IP мекенжайымен сәйкес келуі керек.</string>
+    <string name="hotspot_disable_title">Қалай өшіруге болады</string>
+    <string name="hotspot_disable_text">Басқа құрылғыда жоғарыдағы қадамдарды қайталап, “Прокси” мәнін “Жоқ” күйіне қойыңыз (iOS — “Өшірулі”).</string>
+    <!-- Appearance -->
+    <string name="settings_section_appearance">Сыртқы түрі</string>
+    <string name="settings_theme_title">Тақырып</string>
+    <string name="settings_theme_system">Жүйелік</string>
+    <string name="settings_theme_light">Ашық</string>
+    <string name="settings_theme_dark">Қараңғы</string>
+    <!-- In-app language (language names themselves are constants in AppLocale.OPTIONS) -->
+    <string name="settings_language_title">Тіл</string>
+    <string name="settings_language_dialog_title">Қолданба тілі</string>
+    <string name="settings_language_system">Жүйелік</string>
+    <string name="settings_language_cancel">Бас тарту</string>
+</resources>

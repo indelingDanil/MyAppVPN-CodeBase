@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Persian translation of values/strings_settings.xml. -->
+<resources>
+
+    <!-- Settings -->
+    <string name="settings_title">تنظیمات</string>
+    <string name="settings_section_connection">اتصال</string>
+    <string name="settings_section_apps_network">برنامه‌ها و شبکه</string>
+    <string name="settings_section_hotspot">اشتراک‌گذاری</string>
+    <string name="settings_section_about">درباره</string>
+    <string name="settings_applies_next_connect">در اتصال بعدی اعمال می‌شود</string>
+    <string name="settings_subscriptions_title">اشتراک‌ها</string>
+    <string name="settings_subscriptions_subtitle">منابع سرور شخصی شما، فعال یا غیرفعال کردن آن‌ها</string>
+    <string name="settings_autoconnect_title">اتصال هنگام روشن شدن</string>
+    <string name="settings_autoconnect_subtitle">نیاز به یک‌بار دادن مجوز VPN دارد</string>
+    <string name="settings_killswitch_title">کلید قطع اضطراری</string>
+    <string name="settings_killswitch_subtitle">اگر تونل قطع شود ترافیک مسدود می‌شود — IP واقعی شما فاش نمی‌شود</string>
+    <string name="settings_killswitch_off_warning">⚠ خاموش: اگر تونل قطع شود، ترافیک ممکن است مستقیم و بدون VPN عبور کند.</string>
+    <string name="settings_tls_fragment_title">دور زدن DPI (تکه‌تکه کردن TLS)</string>
+    <string name="settings_tls_fragment_subtitle">ابتدای اتصال TLS به سرور را تکه‌تکه می‌کند تا DPI ساده نتواند نام سرور را بخواند. اگر اپراتور شما اتصال‌ها را مسدود می‌کند ممکن است کمک کند؛ اتصال ممکن است کندتر شود. به‌طور پیش‌فرض خاموش است.</string>
+    <string name="settings_split_title">تونل‌زنی تفکیکی</string>
+    <string name="settings_split_subtitle">برنامه‌هایی را انتخاب کنید که بدون VPN کار می‌کنند</string>
+    <string name="settings_split_manage_title">انتخاب برنامه‌ها</string>
+    <string name="settings_split_manage_subtitle">کدام برنامه‌ها VPN را دور بزنند یا فقط از VPN استفاده کنند</string>
+    <string name="settings_dns_title">سرورهای DNS</string>
+    <string name="settings_hotspot_title">اشتراک‌گذاری از طریق نقطه اتصال</string>
+    <string name="settings_hotspot_hint">پروکسی فقط در شبکه نقطه اتصال شما در دسترس است: HTTP بدون رمز عبور، SOCKS5 با نام کاربری و رمز عبور. راهنما پس از اتصال در صفحه خانه نمایش داده می‌شود.</string>
+    <string name="settings_hotspot_guide_title">چگونه دستگاه دیگری را وصل کنیم</string>
+    <string name="settings_hotspot_guide_subtitle">راهنمای گام‌به‌گام برای Android، iPhone، رایانه و Telegram</string>
+    <string name="settings_about_version">نسخه</string>
+    <string name="settings_about_sources">منابع سرور</string>
+    <string name="settings_about_sources_value">zieng2/wl, igareck + سفارشی</string>
+    <string name="settings_about_protocol">پروتکل</string>
+
+    <!-- Split tunneling -->
+    <string name="split_title">تونل‌زنی تفکیکی</string>
+    <string name="split_subtitle_off">خاموش</string>
+    <plurals name="split_apps_via_vpn">
+        <item quantity="one">%d برنامه از طریق VPN</item>
+        <item quantity="other">%d برنامه از طریق VPN</item>
+    </plurals>
+    <plurals name="split_apps_bypass_vpn">
+        <item quantity="one">%d برنامه بدون VPN</item>
+        <item quantity="other">%d برنامه بدون VPN</item>
+    </plurals>
+    <string name="split_cd_back">بازگشت</string>
+    <string name="split_enable">فعال کردن تونل‌زنی تفکیکی</string>
+    <string name="split_mode_exclude">استثنا کردن انتخاب‌شده‌ها</string>
+    <string name="split_mode_include">فقط انتخاب‌شده‌ها از طریق VPN</string>
+    <string name="split_mode_include_hint">فقط برنامه‌های انتخاب‌شده از VPN استفاده می‌کنند، بقیه مستقیم وصل می‌شوند</string>
+    <string name="split_mode_exclude_hint">برنامه‌های انتخاب‌شده مستقیم و بدون VPN وصل می‌شوند</string>
+    <string name="split_include_empty_warning">هیچ برنامه‌ای انتخاب نشده — VPN برای همه برنامه‌ها اعمال می‌شود</string>
+    <string name="split_search_placeholder">جستجوی برنامه‌ها</string>
+    <string name="split_cd_clear_search">پاک کردن جستجو</string>
+    <string name="split_select_all">انتخاب همه</string>
+    <string name="split_clear_all">لغو انتخاب همه</string>
+    <string name="split_invert">وارونه کردن</string>
+    <string name="split_bulk_applies_to">برای موارد یافت‌شده اعمال می‌شود: %1$d</string>
+    <string name="split_no_apps">برنامه‌ای پیدا نشد</string>
+    <string name="split_no_search_results">چیزی پیدا نشد</string>
+    <string name="split_badge_via_vpn">با VPN</string>
+    <string name="split_badge_bypass">بدون VPN</string>
+
+    <!-- Subscriptions -->
+    <string name="subs_title">اشتراک‌ها</string>
+    <string name="subs_enabled_count">فعال: %1$d از %2$d</string>
+    <string name="subs_cd_back">بازگشت</string>
+    <string name="subs_intro">اشتراک‌های خود را اضافه کنید (لینک یک فهرست VLESS، با https://). منابع غیرفعال در جستجوی سرورهای فعال استفاده نمی‌شوند.</string>
+    <string name="subs_add_button">افزودن اشتراک</string>
+    <string name="subs_refreshing">در حال به‌روزرسانی سرورها…</string>
+    <string name="subs_refresh_failed">به‌روزرسانی سرورها ممکن نشد. اتصال اینترنت خود را بررسی کنید.</string>
+    <string name="subs_empty">هنوز منبعی وجود ندارد. لینک اشتراک را در بالا اضافه کنید.</string>
+    <string name="subs_none_enabled">همه منابع غیرفعال هستند — فهرست سرورها به‌روزرسانی نخواهد شد.</string>
+    <string name="subs_builtin_source">منبع داخلی</string>
+    <string name="subs_cd_delete">حذف اشتراک %1$s</string>
+    <string name="subs_delete_title">اشتراک حذف شود؟</string>
+    <string name="subs_delete_confirm">حذف</string>
+    <string name="subs_cancel">لغو</string>
+    <string name="subs_disable_last_title">آخرین منبع غیرفعال شود؟</string>
+    <string name="subs_last_source_warning">بدون منبع، فهرست سرورها خالی می‌شود.</string>
+    <string name="subs_disable_confirm">غیرفعال کردن</string>
+
+    <!-- DNS -->
+    <string name="dns_title">سرورهای DNS</string>
+    <string name="dns_cd_back">بازگشت</string>
+    <string name="dns_summary_default">پیش‌فرض (Cloudflare، Google DoH)</string>
+    <string name="dns_intro">سرورهای DNS دلخواه شما. درخواست‌ها از طریق تونل VPN ارسال می‌شوند. تغییرات در حین اتصال بلافاصله اعمال می‌شوند.</string>
+    <string name="dns_order_hint">ترتیب مهم است: سرورها از بالا به پایین پرسیده می‌شوند. حداکثر %1$d سرور در مجموع، و حداکثر %2$d سرور فعال همزمان.</string>
+    <string name="dns_added_disabled">به‌صورت غیرفعال اضافه شد: حداکثر %1$d سرور می‌توانند همزمان فعال باشند</string>
+    <string name="dns_add_button">افزودن سرور</string>
+    <string name="dns_presets_label">افزودن:</string>
+    <string name="dns_preset_already_added">قبلاً اضافه شده</string>
+    <string name="dns_list_empty">فهرست خالی است — از سرورهای پیش‌فرض استفاده می‌شود (Cloudflare، Google DoH).</string>
+    <string name="dns_all_disabled">همه سرورها غیرفعال هستند — از سرورهای پیش‌فرض استفاده می‌شود (Cloudflare، Google DoH).</string>
+    <string name="dns_ipv6_title">پاسخ‌های IPv6 (AAAA)</string>
+    <string name="dns_ipv6_on">بازگرداندن آدرس‌های IPv4 و IPv6</string>
+    <string name="dns_ipv6_off">فقط IPv4 (توصیه‌شده)</string>
+    <string name="dns_reset_button">بازنشانی به پیش‌فرض</string>
+    <string name="dns_limitations">روی برنامه‌های استثناشده، DNS خصوصی Android در حالت سخت‌گیرانه و DNS داخلی مرورگرها اثری ندارد.</string>
+    <string name="dns_delete_title">سرور حذف شود؟</string>
+    <string name="dns_delete_confirm">حذف</string>
+    <string name="dns_cancel">لغو</string>
+    <string name="dns_reset_title">DNS بازنشانی شود؟</string>
+    <string name="dns_reset_message">فهرست پاک می‌شود و از سرورهای پیش‌فرض (Cloudflare، Google DoH) استفاده خواهد شد. پاسخ‌های IPv6 خاموش می‌شوند.</string>
+    <string name="dns_reset_confirm">بازنشانی</string>
+    <string name="dns_cd_move_up">انتقال %1$s به بالا</string>
+    <string name="dns_cd_move_down">انتقال %1$s به پایین</string>
+    <string name="dns_cd_delete">حذف %1$s</string>
+
+    <!-- Hotspot sharing guide -->
+    <string name="hotspot_title">اشتراک‌گذاری VPN</string>
+    <string name="hotspot_cd_back">بازگشت</string>
+    <string name="hotspot_back">بازگشت</string>
+    <string name="hotspot_host_hint_unknown">IP از بخش بالا</string>
+    <string name="hotspot_status_connect_first">ابتدا VPN را وصل کنید</string>
+    <string name="hotspot_status_on_but_disabled">اشتراک‌گذاری فعال است اما در تنظیمات خاموش شده — پس از اتصال مجدد متوقف می‌شود</string>
+    <string name="hotspot_status_working">اشتراک‌گذاری فعال است</string>
+    <string name="hotspot_status_enable_in_settings">«اشتراک‌گذاری از طریق نقطه اتصال» را در تنظیمات روشن کنید و دوباره وصل شوید</string>
+    <string name="hotspot_status_no_hotspot">نقطه اتصال شناسایی نشد. نقطه اتصال را روشن کنید و VPN را دوباره وصل کنید</string>
+    <string name="hotspot_params_title">تنظیمات پروکسی</string>
+    <string name="hotspot_http_proxy">پروکسی HTTP</string>
+    <string name="hotspot_socks5">SOCKS5</string>
+    <string name="hotspot_auth_note">پروکسی HTTP رمز عبور ندارد. نام کاربری و رمز عبور فقط برای SOCKS5 لازم است.</string>
+    <string name="hotspot_login">نام کاربری</string>
+    <string name="hotspot_password">رمز عبور</string>
+    <string name="hotspot_new_password_pending">رمز عبور جدید پس از اتصال مجدد VPN اعمال می‌شود.</string>
+    <string name="hotspot_change_password">تغییر رمز عبور</string>
+    <string name="hotspot_password_change_note">تغییر رمز عبور پس از اتصال مجدد VPN اعمال می‌شود.</string>
+    <string name="hotspot_copied">کپی شد: %1$s</string>
+    <string name="hotspot_cd_copy">کپی: %1$s</string>
+    <string name="hotspot_cd_show_password">نمایش رمز عبور</string>
+    <string name="hotspot_cd_hide_password">پنهان کردن رمز عبور</string>
+    <string name="hotspot_before_title">پیش از شروع</string>
+    <string name="hotspot_before_step1">«اشتراک‌گذاری از طریق نقطه اتصال» را در تنظیمات روشن کنید</string>
+    <string name="hotspot_before_step2">نقطه اتصال را روی همین گوشی روشن کنید</string>
+    <string name="hotspot_before_step3">VPN را وصل کنید (پس از روشن کردن نقطه اتصال)</string>
+    <string name="hotspot_before_step4">دستگاه دیگر را به نقطه اتصال خود وصل کنید</string>
+    <string name="hotspot_step_save">روی «ذخیره» ضربه بزنید</string>
+    <string name="hotspot_android_title">Android</string>
+    <string name="hotspot_android_step1">تنظیمات → Wi-Fi</string>
+    <string name="hotspot_android_step2">روی شبکه نقطه اتصال خود ضربه طولانی بزنید → «اصلاح شبکه» (یا نماد ⚙)</string>
+    <string name="hotspot_android_step3">«گزینه‌های پیشرفته» را باز کنید</string>
+    <string name="hotspot_android_step4">پروکسی → «دستی»</string>
+    <string name="hotspot_android_step5">میزبان: %1$s، درگاه: %2$d</string>
+    <string name="hotspot_ios_title">iPhone / iPad</string>
+    <string name="hotspot_ios_step1">Settings (تنظیمات) → Wi-Fi</string>
+    <string name="hotspot_ios_step2">روی (i) کنار شبکه نقطه اتصال خود ضربه بزنید</string>
+    <string name="hotspot_ios_step3">در پایین: «Configure Proxy» → «Manual»</string>
+    <string name="hotspot_ios_step4">Server: %1$s، Port: %2$d</string>
+    <string name="hotspot_ios_step5">Authentication — خاموش</string>
+    <string name="hotspot_desktop_title">Windows / macOS</string>
+    <string name="hotspot_desktop_windows">Windows: تنظیمات → شبکه و اینترنت → پروکسی → «استفاده از سرور پروکسی» → آدرس %1$s، درگاه %2$d → ذخیره</string>
+    <string name="hotspot_desktop_macos">macOS: System Settings → Wi-Fi → Details… → Proxies → «Web proxy (HTTP)» و «Secure web proxy (HTTPS)» → %1$s : %2$d → OK</string>
+    <string name="hotspot_telegram_title">Telegram (SOCKS5)</string>
+    <string name="hotspot_telegram_step1">تنظیمات → داده و ذخیره‌سازی → پروکسی → افزودن پروکسی</string>
+    <string name="hotspot_telegram_step2">نوع: SOCKS5</string>
+    <string name="hotspot_telegram_step3">سرور: %1$s، درگاه: %2$d</string>
+    <string name="hotspot_telegram_step4">نام کاربری: %1$s، رمز عبور: از بخش بالا</string>
+    <string name="hotspot_telegram_step5">ذخیره کنید و پروکسی را فعال کنید</string>
+    <string name="hotspot_notes_title">مهم</string>
+    <string name="hotspot_note_access">پروکسی فقط برای دستگاه‌های متصل به نقطه اتصال شما در دسترس است و با رمز عبور نقطه اتصال محافظت می‌شود.</string>
+    <string name="hotspot_note_not_all_traffic">همه ترافیک برنامه‌ها از پروکسی سیستم عبور نمی‌کند (برخی بازی‌ها و برنامه‌ها آن را نادیده می‌گیرند).</string>
+    <string name="hotspot_note_ip_changed">اگر IP نقطه اتصال تغییر کرد (نقطه اتصال خاموش شده بود)، VPN را دوباره وصل کنید و تنظیمات را در دستگاه دیگر به‌روز کنید.</string>
+    <string name="hotspot_verify_title">بررسی</string>
+    <string name="hotspot_verify_text">در دستگاه دیگر مرورگر را باز کنید و IP خود را در 2ip.ru یا whoer.net بررسی کنید — باید با IP سرور VPN یکی باشد.</string>
+    <string name="hotspot_disable_title">چگونه خاموش کنیم</string>
+    <string name="hotspot_disable_text">در دستگاه دیگر، مراحل بالا را تکرار کنید و «پروکسی» را روی «هیچ‌کدام» بگذارید (در iOS: «Off»).</string>
+    <!-- Appearance -->
+    <string name="settings_section_appearance">ظاهر</string>
+    <string name="settings_theme_title">زمینه</string>
+    <string name="settings_theme_system">پیش‌فرض سیستم</string>
+    <string name="settings_theme_light">روشن</string>
+    <string name="settings_theme_dark">تیره</string>
+    <!-- In-app language (language names themselves are constants in AppLocale.OPTIONS) -->
+    <string name="settings_language_title">زبان</string>
+    <string name="settings_language_dialog_title">زبان برنامه</string>
+    <string name="settings_language_system">پیش‌فرض سیستم</string>
+    <string name="settings_language_cancel">لغو</string>
+</resources>

@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Turkish translation of values/strings_settings.xml. -->
+<resources>
+
+    <!-- Settings -->
+    <string name="settings_title">Ayarlar</string>
+    <string name="settings_section_connection">Bağlantı</string>
+    <string name="settings_section_apps_network">Uygulamalar ve ağ</string>
+    <string name="settings_section_hotspot">Paylaşım</string>
+    <string name="settings_section_about">Hakkında</string>
+    <string name="settings_applies_next_connect">Bir sonraki bağlantıda uygulanır</string>
+    <string name="settings_subscriptions_title">Abonelikler</string>
+    <string name="settings_subscriptions_subtitle">Kendi sunucu kaynaklarınız; açın veya kapatın</string>
+    <string name="settings_autoconnect_title">Açılışta bağlan</string>
+    <string name="settings_autoconnect_subtitle">Bir kez VPN izni verilmesini gerektirir</string>
+    <string name="settings_killswitch_title">Kill switch</string>
+    <string name="settings_killswitch_subtitle">Tünel koparsa trafiği engeller — gerçek IP adresiniz sızmaz</string>
+    <string name="settings_killswitch_off_warning">⚠ Kapalı: tünel koparsa trafik VPN\'i atlayarak doğrudan gidebilir.</string>
+    <string name="settings_tls_fragment_title">DPI atlatma (TLS parçalama)</string>
+    <string name="settings_tls_fragment_subtitle">Sunucuya yapılan TLS bağlantısının başlangıcını böler, böylece basit DPI sunucu adını okuyamaz. Operatörünüz bağlantıları engelliyorsa yardımcı olabilir; bağlanma yavaşlayabilir. Varsayılan olarak kapalı.</string>
+    <string name="settings_split_title">Bölünmüş tünel</string>
+    <string name="settings_split_subtitle">VPN olmadan çalışacak uygulamaları seçin</string>
+    <string name="settings_split_manage_title">Uygulamaları seç</string>
+    <string name="settings_split_manage_subtitle">Hangi uygulamalar VPN\'i atlasın veya yalnızca VPN kullansın</string>
+    <string name="settings_dns_title">DNS sunucuları</string>
+    <string name="settings_hotspot_title">Hotspot üzerinden paylaş</string>
+    <string name="settings_hotspot_hint">Proxy yalnızca hotspot ağınızda erişilebilir: HTTP şifresiz, SOCKS5 kullanıcı adı ve şifreyle. Talimatlar bağlandıktan sonra Ana Sayfa ekranındadır.</string>
+    <string name="settings_hotspot_guide_title">Başka bir cihaz nasıl bağlanır</string>
+    <string name="settings_hotspot_guide_subtitle">Android, iPhone, PC ve Telegram için adım adım rehber</string>
+    <string name="settings_about_version">Sürüm</string>
+    <string name="settings_about_sources">Sunucu kaynakları</string>
+    <string name="settings_about_sources_value">zieng2/wl, igareck + özel</string>
+    <string name="settings_about_protocol">Protokol</string>
+
+    <!-- Split tunneling -->
+    <string name="split_title">Bölünmüş tünel</string>
+    <string name="split_subtitle_off">Kapalı</string>
+    <plurals name="split_apps_via_vpn">
+        <item quantity="one">%d uygulama VPN üzerinden</item>
+        <item quantity="other">%d uygulama VPN üzerinden</item>
+    </plurals>
+    <plurals name="split_apps_bypass_vpn">
+        <item quantity="one">%d uygulama VPN\'i atlıyor</item>
+        <item quantity="other">%d uygulama VPN\'i atlıyor</item>
+    </plurals>
+    <string name="split_cd_back">Geri</string>
+    <string name="split_enable">Bölünmüş tüneli etkinleştir</string>
+    <string name="split_mode_exclude">Seçilenleri hariç tut</string>
+    <string name="split_mode_include">Yalnızca seçilenler VPN\'den</string>
+    <string name="split_mode_include_hint">Yalnızca seçilen uygulamalar VPN kullanır, diğerleri doğrudan bağlanır</string>
+    <string name="split_mode_exclude_hint">Seçilen uygulamalar VPN olmadan doğrudan bağlanır</string>
+    <string name="split_include_empty_warning">Hiçbir uygulama seçilmedi — VPN tüm uygulamalara uygulanır</string>
+    <string name="split_search_placeholder">Uygulama ara</string>
+    <string name="split_cd_clear_search">Aramayı temizle</string>
+    <string name="split_select_all">Tümünü seç</string>
+    <string name="split_clear_all">Tümünü temizle</string>
+    <string name="split_invert">Tersine çevir</string>
+    <string name="split_bulk_applies_to">Eşleşenlere uygulanır: %1$d</string>
+    <string name="split_no_apps">Uygulama bulunamadı</string>
+    <string name="split_no_search_results">Hiçbir şey bulunamadı</string>
+    <string name="split_badge_via_vpn">VPN İLE</string>
+    <string name="split_badge_bypass">VPN\'SİZ</string>
+
+    <!-- Subscriptions -->
+    <string name="subs_title">Abonelikler</string>
+    <string name="subs_enabled_count">Açık: %1$d / %2$d</string>
+    <string name="subs_cd_back">Geri</string>
+    <string name="subs_intro">Kendi aboneliklerinizi ekleyin (bir VLESS listesine bağlantı, https://). Kapalı kaynaklar çalışan sunucular aranırken kullanılmaz.</string>
+    <string name="subs_add_button">Abonelik ekle</string>
+    <string name="subs_refreshing">Sunucular güncelleniyor…</string>
+    <string name="subs_refresh_failed">Sunucular güncellenemedi. İnternet bağlantınızı kontrol edin.</string>
+    <string name="subs_empty">Henüz kaynak yok. Yukarıya bir abonelik bağlantısı ekleyin.</string>
+    <string name="subs_none_enabled">Tüm kaynaklar kapalı — sunucu listesi güncellenmeyecek.</string>
+    <string name="subs_builtin_source">Yerleşik kaynak</string>
+    <string name="subs_cd_delete">%1$s aboneliğini sil</string>
+    <string name="subs_delete_title">Abonelik silinsin mi?</string>
+    <string name="subs_delete_confirm">Sil</string>
+    <string name="subs_cancel">İptal</string>
+    <string name="subs_disable_last_title">Son kaynak kapatılsın mı?</string>
+    <string name="subs_last_source_warning">Kaynak olmadan sunucu listesi boş kalacak.</string>
+    <string name="subs_disable_confirm">Kapat</string>
+
+    <!-- DNS -->
+    <string name="dns_title">DNS sunucuları</string>
+    <string name="dns_cd_back">Geri</string>
+    <string name="dns_summary_default">Varsayılan (Cloudflare, Google DoH)</string>
+    <string name="dns_intro">Kendi DNS sunucularınız. Sorgular VPN tünelinden geçer. Değişiklikler bağlıyken hemen uygulanır.</string>
+    <string name="dns_order_hint">Sıra önemlidir: sunucular yukarıdan aşağıya sorgulanır. Toplam en fazla %1$d, aynı anda en fazla %2$d açık.</string>
+    <string name="dns_added_disabled">Kapalı olarak eklendi: aynı anda en fazla %1$d sunucu açık olabilir</string>
+    <string name="dns_add_button">Sunucu ekle</string>
+    <string name="dns_presets_label">Ekle:</string>
+    <string name="dns_preset_already_added">zaten eklendi</string>
+    <string name="dns_list_empty">Liste boş — varsayılan sunucular kullanılıyor (Cloudflare, Google DoH).</string>
+    <string name="dns_all_disabled">Tüm sunucular kapalı — varsayılan sunucular kullanılıyor (Cloudflare, Google DoH).</string>
+    <string name="dns_ipv6_title">IPv6 yanıtları (AAAA)</string>
+    <string name="dns_ipv6_on">IPv4 ve IPv6 adreslerini döndür</string>
+    <string name="dns_ipv6_off">Yalnızca IPv4 (önerilir)</string>
+    <string name="dns_reset_button">Varsayılana sıfırla</string>
+    <string name="dns_limitations">Hariç tutulan uygulamaları, katı moddaki Android Özel DNS\'i ve tarayıcıların yerleşik DNS\'ini etkilemez.</string>
+    <string name="dns_delete_title">Sunucu silinsin mi?</string>
+    <string name="dns_delete_confirm">Sil</string>
+    <string name="dns_cancel">İptal</string>
+    <string name="dns_reset_title">DNS sıfırlansın mı?</string>
+    <string name="dns_reset_message">Liste temizlenecek ve varsayılan sunucular (Cloudflare, Google DoH) kullanılacak. IPv6 yanıtları kapatılacak.</string>
+    <string name="dns_reset_confirm">Sıfırla</string>
+    <string name="dns_cd_move_up">%1$s öğesini yukarı taşı</string>
+    <string name="dns_cd_move_down">%1$s öğesini aşağı taşı</string>
+    <string name="dns_cd_delete">%1$s öğesini sil</string>
+
+    <!-- Hotspot sharing guide -->
+    <string name="hotspot_title">VPN paylaşımı</string>
+    <string name="hotspot_cd_back">Geri</string>
+    <string name="hotspot_back">Geri</string>
+    <string name="hotspot_host_hint_unknown">Yukarıdaki bloktaki IP</string>
+    <string name="hotspot_status_connect_first">Önce VPN\'e bağlanın</string>
+    <string name="hotspot_status_on_but_disabled">Paylaşım etkin ama Ayarlar\'da kapatılmış — yeniden bağlanınca duracak</string>
+    <string name="hotspot_status_working">Paylaşım etkin</string>
+    <string name="hotspot_status_enable_in_settings">Ayarlar\'da “Hotspot üzerinden paylaş” seçeneğini açın ve yeniden bağlanın</string>
+    <string name="hotspot_status_no_hotspot">Hotspot algılanmadı. Hotspot\'u açın ve VPN\'e yeniden bağlanın</string>
+    <string name="hotspot_params_title">Proxy ayarları</string>
+    <string name="hotspot_http_proxy">HTTP proxy</string>
+    <string name="hotspot_socks5">SOCKS5</string>
+    <string name="hotspot_auth_note">HTTP proxy\'nin şifresi yok. Kullanıcı adı ve şifre yalnızca SOCKS5 için gerekir.</string>
+    <string name="hotspot_login">Kullanıcı adı</string>
+    <string name="hotspot_password">Şifre</string>
+    <string name="hotspot_new_password_pending">Yeni şifre VPN\'e yeniden bağlandıktan sonra geçerli olur.</string>
+    <string name="hotspot_change_password">Şifreyi değiştir</string>
+    <string name="hotspot_password_change_note">Şifre değişikliği VPN\'e yeniden bağlandıktan sonra geçerli olur.</string>
+    <string name="hotspot_copied">Kopyalandı: %1$s</string>
+    <string name="hotspot_cd_copy">Kopyala: %1$s</string>
+    <string name="hotspot_cd_show_password">Şifreyi göster</string>
+    <string name="hotspot_cd_hide_password">Şifreyi gizle</string>
+    <string name="hotspot_before_title">Başlamadan önce</string>
+    <string name="hotspot_before_step1">Ayarlar\'da “Hotspot üzerinden paylaş” seçeneğini açın</string>
+    <string name="hotspot_before_step2">Bu telefonda hotspot\'u açın</string>
+    <string name="hotspot_before_step3">VPN\'e bağlanın (hotspot\'u açtıktan sonra)</string>
+    <string name="hotspot_before_step4">Diğer cihazı hotspot\'unuza bağlayın</string>
+    <string name="hotspot_step_save">“Kaydet”e dokunun</string>
+    <string name="hotspot_android_title">Android</string>
+    <string name="hotspot_android_step1">Ayarlar → Wi-Fi</string>
+    <string name="hotspot_android_step2">Hotspot ağınıza uzun basın → “Ağı değiştir” (veya ⚙ simgesi)</string>
+    <string name="hotspot_android_step3">“Gelişmiş seçenekler”i açın</string>
+    <string name="hotspot_android_step4">Proxy → “Manuel”</string>
+    <string name="hotspot_android_step5">Ana makine: %1$s, bağlantı noktası: %2$d</string>
+    <string name="hotspot_ios_title">iPhone / iPad</string>
+    <string name="hotspot_ios_step1">Ayarlar → Wi-Fi</string>
+    <string name="hotspot_ios_step2">Hotspot ağınızın yanındaki (i) simgesine dokunun</string>
+    <string name="hotspot_ios_step3">En altta: “Proxy\'yi Yapılandır” → “Elle”</string>
+    <string name="hotspot_ios_step4">Sunucu: %1$s, kapı: %2$d</string>
+    <string name="hotspot_ios_step5">Kimlik Doğrulama — kapalı</string>
+    <string name="hotspot_desktop_title">Windows / macOS</string>
+    <string name="hotspot_desktop_windows">Windows: Ayarlar → Ağ ve İnternet → Ara sunucu → “Ara sunucu kullan” → adres %1$s, bağlantı noktası %2$d → Kaydet</string>
+    <string name="hotspot_desktop_macos">macOS: Sistem Ayarları → Wi-Fi → Ayrıntılar… → Proxy\'ler → “Web proxy\'si (HTTP)” ve “Güvenli web proxy\'si (HTTPS)” → %1$s : %2$d → Tamam</string>
+    <string name="hotspot_telegram_title">Telegram (SOCKS5)</string>
+    <string name="hotspot_telegram_step1">Ayarlar → Veri ve Depolama → Proxy → Proxy Ekle</string>
+    <string name="hotspot_telegram_step2">Tür: SOCKS5</string>
+    <string name="hotspot_telegram_step3">Sunucu: %1$s, port: %2$d</string>
+    <string name="hotspot_telegram_step4">Kullanıcı adı: %1$s, şifre: yukarıdaki bloktan</string>
+    <string name="hotspot_telegram_step5">Kaydedin ve proxy\'yi etkinleştirin</string>
+    <string name="hotspot_notes_title">Önemli</string>
+    <string name="hotspot_note_access">Proxy yalnızca hotspot\'unuza bağlı cihazlar tarafından kullanılabilir. Hotspot şifresiyle korunur.</string>
+    <string name="hotspot_note_not_all_traffic">Uygulama trafiğinin tamamı sistem proxy\'sinden geçmez (bazı oyunlar ve uygulamalar onu yok sayar).</string>
+    <string name="hotspot_note_ip_changed">Hotspot IP adresi değiştiyse (hotspot kapatıldıysa), VPN\'e yeniden bağlanın ve diğer cihazdaki ayarları güncelleyin.</string>
+    <string name="hotspot_verify_title">Kontrol</string>
+    <string name="hotspot_verify_text">Diğer cihazda bir tarayıcı açın ve IP adresinizi 2ip.ru veya whoer.net üzerinden kontrol edin — VPN sunucusunun IP adresiyle aynı olmalıdır.</string>
+    <string name="hotspot_disable_title">Nasıl kapatılır</string>
+    <string name="hotspot_disable_text">Diğer cihazda yukarıdaki adımları tekrarlayın ve “Proxy”yi “Yok” olarak ayarlayın (iOS\'ta “Kapalı”).</string>
+    <!-- Appearance -->
+    <string name="settings_section_appearance">Görünüm</string>
+    <string name="settings_theme_title">Tema</string>
+    <string name="settings_theme_system">Sistem varsayılanı</string>
+    <string name="settings_theme_light">Açık</string>
+    <string name="settings_theme_dark">Koyu</string>
+    <!-- In-app language (language names themselves are constants in AppLocale.OPTIONS) -->
+    <string name="settings_language_title">Dil</string>
+    <string name="settings_language_dialog_title">Uygulama dili</string>
+    <string name="settings_language_system">Sistem varsayılanı</string>
+    <string name="settings_language_cancel">İptal</string>
+</resources>

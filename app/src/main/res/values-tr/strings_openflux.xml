@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Turkish translation of values/strings_openflux.xml. -->
+<resources>
+
+    <!-- Settings row -->
+    <string name="openflux_settings_section">Deneysel</string>
+    <string name="openflux_settings_title">OpenFlux (Beta)</string>
+    <string name="openflux_settings_subtitle">Sıradan bir hostingde kendi çıkış noktanız</string>
+    <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
+    <string name="openflux_state_on">Açık</string>
+    <string name="openflux_state_off">Kapalı</string>
+
+    <!-- Screen -->
+    <string name="openflux_beta">Beta</string>
+    <string name="openflux_cd_back">Geri</string>
+    <string name="openflux_intro">Deneysel mod. Trafik VLESS sunucuları yerine kendi çıkış noktanızdan geçer: sıradan bir web hostingde çalışan OpenFlux uygulaması (Node.js). Mobil operatörünüz yalnızca \"beyaz listedeki\" sitelere izin veriyorsa ve hostinginiz bunlardan biriyse işe yarar. Yalnızca TCP (80/443 portları), hız mütevazıdır.</string>
+    <string name="openflux_enable_title">OpenFlux\'u kullan</string>
+    <string name="openflux_enable_subtitle">Trafik VLESS sunucuları yerine çıkış noktanızdan geçer</string>
+    <string name="openflux_enable_hint_fill">Önce çıkış noktası bağlantısını ayarlayın (adres ve token ya da kanal bağlantısı), ardından kaydedin.</string>
+    <string name="openflux_section_settings">Çıkış noktası bağlantısı</string>
+    <string name="openflux_url_label">Çıkış noktası adresi</string>
+    <string name="openflux_url_err_invalid">Geçersiz adres</string>
+    <string name="openflux_url_err_scheme">Adres http:// veya https:// ile başlamalıdır</string>
+    <string name="openflux_url_err_host">Adreste alan adı yok</string>
+    <string name="openflux_url_err_php">Adres bir .php dosyasını göstermelidir (ör. …/phpbox.php)</string>
+    <string name="openflux_token_label">Token</string>
+    <string name="openflux_token_show">Token\'ı göster</string>
+    <string name="openflux_token_hide">Token\'ı gizle</string>
+    <string name="openflux_save">Kaydet</string>
+    <string name="openflux_saved">Kaydedildi</string>
+    <string name="openflux_unsaved">Kaydedilmemiş değişiklikler var</string>
+    <string name="openflux_http_warning">HTTPS olmadan sağlayıcınız token\'ı ve site adreslerini görebilir. HTTPS sitelerinin içeriği şifreli kalır.</string>
+    <string name="openflux_reconnect_note">VPN bağlı: çıkış noktası ayarlarındaki değişiklikler yeniden bağlanınca uygulanır.</string>
+    <string name="openflux_howto_title">Kendi çıkış noktanızı nasıl kurarsınız</string>
+    <string name="openflux_howto_step1">1. Node.js çıkış noktasını (app.js) openflux-exit dalından alın (aşağıdaki düğme) — orada adım adım bir Beget rehberi de var.</string>
+    <string name="openflux_howto_step2">2. config.json dosyasına kendi uzun, rastgele token\'ınızı yazın.</string>
+    <string name="openflux_howto_step3">3. Hostingde Passenger (Node.js) ile çalıştırın — rehbere bakın.</string>
+    <string name="openflux_howto_step4">4. Çıkış noktası adresini ve token\'ı buraya yapıştırın.</string>
+    <string name="openflux_github">Depoyu GitHub\'da aç</string>
+    <string name="openflux_no_browser">Bağlantıyı açacak uygulama bulunamadı</string>
+    <string name="openflux_cd_expand">Genişlet</string>
+    <string name="openflux_cd_collapse">Daralt</string>
+
+    <!-- Home -->
+    <string name="openflux_home_title">OpenFlux (Beta)</string>
+    <string name="openflux_home_via">OpenFlux çıkış noktanız üzerinden</string>
+    <string name="openflux_home_no_url">adres ayarlanmadı</string>
+    <string name="openflux_home_demo">MyAppVPN demo sunucusu</string>
+    <string name="openflux_home_via_demo">MyAppVPN demo sunucusu üzerinden</string>
+    <string name="openflux_turn_off">Kapat</string>
+
+    <!-- Servers -->
+    <string name="openflux_servers_banner">OpenFlux modu açık: listedeki sunucular şu anda kullanılmıyor</string>
+
+    <!-- Exit refusals (session stopped) -->
+    <string name="openflux_status_busy">Demo sunucusu dolu: 8 yerin tamamı kullanımda. Lütfen daha sonra tekrar deneyin.</string>
+    <string name="openflux_status_expired">Demo sunucusundaki deneme saatiniz (veya 2 GB) doldu. Devam etmek için kendi OpenFlux çıkış noktanızı kurun (talimatlar aşağıdaki düğmede) ya da normal sunucuları kullanın.</string>
+    <string name="openflux_status_ended">OpenFlux demosu sona erdi. Kendi çıkış noktanızı kurun: talimatlar depoda.</string>
+    <string name="openflux_status_quota">Demo sunucusu günlük trafik sınırını doldurdu. Lütfen yarın tekrar deneyin.</string>
+    <string name="openflux_status_badtoken">OpenFlux token\'ı veya adresi yanlış.</string>
+    <string name="openflux_status_noclient">Lütfen uygulamayı güncelleyin.</string>
+    <string name="openflux_status_unsupported">Bu adres bir OpenFlux (Node.js) çıkış noktası değil. Adresi kontrol edin: eski PHP çıkış noktaları artık desteklenmiyor.</string>
+    <string name="openflux_regular_servers">Normal sunucular</string>
+    <string name="openflux_howto_button">Talimatlar</string>
+
+    <!-- Demo -->
+    <string name="openflux_demo_left">Demo: ~%1$d dk · %2$d MB kaldı</string>
+    <string name="openflux_demo_left_min">Demo: ~%1$d dk kaldı</string>
+    <string name="openflux_demo_left_mb">Demo: %1$d MB kaldı</string>
+    <string name="openflux_demo_title">Demo sunucusunu deneyin</string>
+    <string name="openflux_demo_text">Yazarın çıkış noktasına tek seferlik deneme erişimi: bağlandığınız andan itibaren 1 saat (süre durmadan işler) veya 2 GB trafik, hangisi önce dolarsa. Aynı anda en fazla 8 kişi, 14 Ekim\'e kadar. Boş yer yoksa daha sonra tekrar deneyin.</string>
+    <string name="openflux_demo_button">Demoya bağlan</string>
+    <string name="openflux_demo_selected">MyAppVPN demo sunucusu seçildi</string>
+    <string name="openflux_own_exit_note">Kendi çıkış noktanız: sınır yok</string>
+
+    <!-- Connection diagnostics -->
+    <string name="openflux_diag_button">Bağlantı tanılama</string>
+    <string name="openflux_diag_title">Bağlantı tanılama</string>
+    <string name="openflux_diag_running">Ağ kontrol ediliyor… bir buçuk dakikaya kadar sürebilir</string>
+    <string name="openflux_diag_note">Tanılamayı sorun yaşanan ağda çalıştırın (ör. mobil veri). VPN\'i kapatmanıza gerek yok.</string>
+    <string name="openflux_diag_copy">Kopyala</string>
+    <string name="openflux_diag_share">Paylaş</string>
+    <string name="openflux_diag_close">Kapat</string>
+    <string name="openflux_diag_copied">Rapor kopyalandı</string>
+    <string name="openflux_diag_share_title">Raporu gönder</string>
+
+    <!-- Channel to the own exit (Mail.ru / Cups / openflux:// link) -->
+    <string name="openflux_channel_title">Çıkış noktasına kanal</string>
+    <string name="openflux_channel_direct">Doğrudan</string>
+    <string name="openflux_channel_direct_desc">Adres ve token ile çıkış noktanıza düz bağlantı. En hızlı seçenek.</string>
+    <string name="openflux_channel_mailru">Mail.ru belgesi üzerinden</string>
+    <string name="openflux_channel_mailru_desc">Trafik Mail.ru Cloud\'daki bir belge üzerinden geçer. Operatör yalnızca beyaz listedeki sitelere izin veriyorsa işe yarar. Kanal şifreli değildir (HTTPS siteleri şifreli kalır) ve doğrudan bağlantıdan daha yavaştır.</string>
+    <string name="openflux_channel_cups">Cups odaları üzerinden</string>
+    <string name="openflux_channel_cups_desc">Trafik cups.online odaları üzerinden geçer. Operatör yalnızca beyaz listedeki sitelere izin veriyorsa işe yarar. Kanal şifreli değildir (HTTPS siteleri şifreli kalır) ve doğrudan bağlantıdan daha yavaştır.</string>
+    <string name="openflux_channel_link">OpenFlux bağlantısı</string>
+    <string name="openflux_channel_link_desc">Herhangi bir OpenFlux düğümüne openflux://… bağlantısıyla bağlanın (kendi VPS\'iniz, bir arkadaşınızın düğümü). Bağlantıda veya aşağıdaki alanda anahtar varsa kanal şifrelenir.</string>
+    <string name="openflux_channel_demo_note">Demo sunucusu her zaman doğrudan çalışır; kanal yalnızca kendi çıkış noktanız için geçerlidir.</string>
+    <string name="openflux_mailru_label">Mail.ru belge bağlantısı</string>
+    <string name="openflux_cups_label">Cups oda kodu</string>
+    <string name="openflux_share_label">openflux:// bağlantısı</string>
+    <string name="openflux_secret_label">Anahtar (bağlantıda yoksa)</string>
+    <string name="openflux_secret_show">Anahtarı göster</string>
+    <string name="openflux_secret_hide">Anahtarı gizle</string>
+    <string name="openflux_link_err_http">https://cloud.mail.ru/public/… biçiminde bir bağlantı gerekli</string>
+    <string name="openflux_link_err_openflux_here">Bu bir openflux:// bağlantısı: «OpenFlux bağlantısı» kanalını seçin</string>
+    <string name="openflux_link_err_not_openflux">Bağlantı openflux://v1/ ile başlamalıdır (büyük/küçük harf duyarlı)</string>
+    <string name="openflux_link_err_spaces">Kodda boşluk olmamalıdır</string>
+    <string name="openflux_secret_err_short">Anahtar en az 16 karakter olmalıdır</string>
+    <string name="openflux_paste">Panodan yapıştır</string>
+    <string name="openflux_paste_empty">Panoda metin yok</string>
+    <string name="openflux_paste_not_link">Panoda openflux:// bağlantısı yok</string>
+
+    <!-- Import of openflux:// links -->
+    <string name="openflux_import_title">OpenFlux bağlantısı</string>
+    <string name="openflux_import_text">Bir OpenFlux çıkış noktası bağlantısı açıldı. Erişim anahtarı içerebilir, bu yüzden yalnızca güvendiğiniz kişilerden gelen bağlantıları kabul edin. Ayarlara eklenip «OpenFlux bağlantısı» kanalına geçilsin mi?</string>
+    <string name="openflux_import_ok">Kullan</string>
+    <string name="openflux_import_cancel">İptal</string>
+
+    <!-- Home: channel / carrier -->
+    <string name="openflux_home_via_carrier">%1$s üzerinden</string>
+    <string name="openflux_home_channel">Kanal: %1$s</string>
+    <string name="openflux_carrier_direct">doğrudan düğüme</string>
+    <string name="openflux_carrier_node">bir OpenFlux düğümü</string>
+    <string name="openflux_carrier_yandex">Yandex</string>
+    <string name="openflux_carrier_telemost">Telemost</string>
+    <string name="openflux_carrier_bitrix">Bitrix24</string>
+    <string name="openflux_channel_short_link">OpenFlux bağlantısı</string>
+
+    <!-- Captcha (browser check asked by a carrier) -->
+    <string name="openflux_captcha_channel">OpenFlux doğrulamaları</string>
+    <string name="openflux_captcha_title">\"Robot değilim\" doğrulaması gerekiyor</string>
+    <string name="openflux_captcha_notif_text">OpenFlux kanalının hizmeti doğrulama istiyor. Açmak için dokunun.</string>
+    <string name="openflux_captcha_home_text">Kanalın hizmeti \"robot değilim\" doğrulaması istiyor; bu olmadan kanal bağlanmaz.</string>
+    <string name="openflux_captcha_open">Doğrulamayı aç</string>
+    <string name="openflux_captcha_hint">Sayfadaki doğrulamayı tamamlayın, ardından «Bitti»ye dokunun.</string>
+    <string name="openflux_captcha_done">Bitti</string>
+    <string name="openflux_captcha_sent">Bitti: kanal yeniden bağlanıyor</string>
+    <string name="openflux_captcha_no_cookies">Doğrulama henüz tamamlanmadı: site çerez ayarlamadı</string>
+    <string name="openflux_captcha_not_running">OpenFlux şu anda çalışmıyor</string>
+</resources>

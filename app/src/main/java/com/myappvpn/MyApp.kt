@@ -1,6 +1,8 @@
 package com.myappvpn
 
 import android.app.Application
+import android.content.Context
+import com.myappvpn.util.AppLocale
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.*
 import com.myappvpn.worker.RefreshServersWorker
@@ -19,8 +21,15 @@ class MyApp : Application(), Configuration.Provider {
             .setWorkerFactory(workerFactory)
             .build()
 
+    // In-app language on Android < 13 for strings read via the application context
+    // (no-op on 13+ or with the system language selected).
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(AppLocale.wrap(base))
+    }
+
     override fun onCreate() {
         super.onCreate()
+        AppLocale.migrateToSystem(this)
         scheduleServerRefresh()
     }
 

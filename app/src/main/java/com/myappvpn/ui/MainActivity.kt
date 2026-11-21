@@ -11,7 +11,9 @@ import com.myappvpn.ui.theme.ThemeMode
 import javax.inject.Inject
 import android.os.Build
 import android.os.Bundle
+import android.content.Context
 import android.content.Intent
+import com.myappvpn.util.AppLocale
 import com.myappvpn.ui.viewmodel.OpenFluxImport
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -47,6 +49,11 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* notifications are optional, ignore result */ }
+
+    // In-app language on Android < 13 (no-op on 13+, where the system applies it).
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

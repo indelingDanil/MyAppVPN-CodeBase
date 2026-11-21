@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Uzbek (Latin) translation of values/strings_openflux.xml. -->
+<resources>
+
+    <!-- Settings row -->
+    <string name="openflux_settings_section">Tajribalar</string>
+    <string name="openflux_settings_title">OpenFlux (Beta)</string>
+    <string name="openflux_settings_subtitle">Oddiy xostingdagi shaxsiy chiqish nuqtangiz</string>
+    <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
+    <string name="openflux_state_on">Yoqilgan</string>
+    <string name="openflux_state_off">Oʻchirilgan</string>
+
+    <!-- Screen -->
+    <string name="openflux_beta">Beta</string>
+    <string name="openflux_cd_back">Orqaga</string>
+    <string name="openflux_intro">Tajribaviy rejim. Trafik VLESS serverlari orqali emas, balki shaxsiy chiqish nuqtangiz — oddiy veb-xostingdagi OpenFlux ilovasi (Node.js) orqali oʻtadi. Mobil operatoringiz faqat «oq roʻyxat»dagi saytlarni ochsa va xostingingiz shu roʻyxatda boʻlsa, foydali. Faqat TCP (80/443-portlar), tezlik oʻrtacha.</string>
+    <string name="openflux_enable_title">OpenFluxdan foydalanish</string>
+    <string name="openflux_enable_subtitle">Trafik VLESS serverlari oʻrniga chiqish nuqtangiz orqali oʻtadi</string>
+    <string name="openflux_enable_hint_fill">Avval chiqish nuqtasiga ulanishni sozlang (manzil va token yoki kanal havolasi), soʻng saqlang.</string>
+    <string name="openflux_section_settings">Chiqish nuqtasiga ulanish</string>
+    <string name="openflux_url_label">Chiqish nuqtasi manzili</string>
+    <string name="openflux_url_err_invalid">Notoʻgʻri manzil</string>
+    <string name="openflux_url_err_scheme">Manzil http:// yoki https:// bilan boshlanishi kerak</string>
+    <string name="openflux_url_err_host">Manzilda domen yoʻq</string>
+    <string name="openflux_url_err_php">Manzil .php fayliga koʻrsatishi kerak (masalan, …/phpbox.php)</string>
+    <string name="openflux_token_label">Token</string>
+    <string name="openflux_token_show">Tokenni koʻrsatish</string>
+    <string name="openflux_token_hide">Tokenni yashirish</string>
+    <string name="openflux_save">Saqlash</string>
+    <string name="openflux_saved">Saqlandi</string>
+    <string name="openflux_unsaved">Saqlanmagan oʻzgarishlar bor</string>
+    <string name="openflux_http_warning">HTTPS boʻlmasa, provayderingiz token va sayt manzillarini koʻra oladi. HTTPS saytlarining mazmuni shifrlangan holda qoladi.</string>
+    <string name="openflux_reconnect_note">VPN ulangan: chiqish nuqtasi sozlamalaridagi oʻzgarishlar qayta ulanganda kuchga kiradi.</string>
+    <string name="openflux_howto_title">Shaxsiy chiqish nuqtasini qanday sozlash mumkin</string>
+    <string name="openflux_howto_step1">1. Node.js chiqish nuqtasini (app.js) openflux-exit tarmogʻidan oling (pastdagi tugma) — u yerda Beget uchun bosqichma-bosqich yoʻriqnoma ham bor.</string>
+    <string name="openflux_howto_step2">2. config.json fayliga oʻzingizning uzun tasodifiy tokeningizni yozing.</string>
+    <string name="openflux_howto_step3">3. Uni xostingda Passenger (Node.js) orqali ishga tushiring — yoʻriqnomaga qarang.</string>
+    <string name="openflux_howto_step4">4. Chiqish nuqtasi manzili va tokenni shu yerga qoʻying.</string>
+    <string name="openflux_github">Repozitoriyni GitHubda ochish</string>
+    <string name="openflux_no_browser">Havolani ochadigan ilova topilmadi</string>
+    <string name="openflux_cd_expand">Yoyish</string>
+    <string name="openflux_cd_collapse">Yigʻish</string>
+
+    <!-- Home -->
+    <string name="openflux_home_title">OpenFlux (Beta)</string>
+    <string name="openflux_home_via">OpenFlux chiqish nuqtangiz orqali</string>
+    <string name="openflux_home_no_url">manzil koʻrsatilmagan</string>
+    <string name="openflux_home_demo">MyAppVPN demo serveri</string>
+    <string name="openflux_home_via_demo">MyAppVPN demo serveri orqali</string>
+    <string name="openflux_turn_off">Oʻchirish</string>
+
+    <!-- Servers -->
+    <string name="openflux_servers_banner">OpenFlux rejimi yoqilgan: roʻyxatdagi serverlar hozir ishlatilmayapti</string>
+
+    <!-- Exit refusals (session stopped) -->
+    <string name="openflux_status_busy">Demo server toʻla: barcha 8 ta oʻrin band. Keyinroq qayta urinib koʻring.</string>
+    <string name="openflux_status_expired">Demo serverdagi sinov soatingiz (yoki 2 GB) tugadi. Davom ettirish uchun shaxsiy OpenFlux chiqish nuqtangizni sozlang (yoʻriqnoma pastdagi tugmada) yoki oddiy serverlardan foydalaning.</string>
+    <string name="openflux_status_ended">OpenFlux demosi yakunlandi. Shaxsiy chiqish nuqtangizni sozlang: yoʻriqnoma repozitoriyda.</string>
+    <string name="openflux_status_quota">Demo server kunlik trafik limitini tugatdi. Ertaga qayta urinib koʻring.</string>
+    <string name="openflux_status_badtoken">OpenFlux tokeni yoki manzili notoʻgʻri.</string>
+    <string name="openflux_status_noclient">Iltimos, ilovani yangilang.</string>
+    <string name="openflux_status_unsupported">Bu manzil OpenFlux (Node.js) chiqish nuqtasi emas. Manzilni tekshiring: eski PHP chiqish nuqtalari endi qoʻllab-quvvatlanmaydi.</string>
+    <string name="openflux_regular_servers">Oddiy serverlar</string>
+    <string name="openflux_howto_button">Yoʻriqnoma</string>
+
+    <!-- Demo -->
+    <string name="openflux_demo_left">Demo: ~%1$d daq · %2$d MB qoldi</string>
+    <string name="openflux_demo_left_min">Demo: ~%1$d daq qoldi</string>
+    <string name="openflux_demo_left_mb">Demo: %1$d MB qoldi</string>
+    <string name="openflux_demo_title">Demo serverni sinab koʻring</string>
+    <string name="openflux_demo_text">Muallifning chiqish nuqtasiga bir martalik sinov kirishi: ulangan paytdan boshlab 1 soat (taymer toʻxtamaydi) yoki 2 GB trafik — qaysi biri oldin tugasa. Bir vaqtda 8 kishigacha, 14-oktabrgacha. Boʻsh oʻrin boʻlmasa, keyinroq urinib koʻring.</string>
+    <string name="openflux_demo_button">Demoga ulanish</string>
+    <string name="openflux_demo_selected">MyAppVPN demo serveri tanlangan</string>
+    <string name="openflux_own_exit_note">Shaxsiy chiqish nuqtasi: cheklovlarsiz</string>
+
+    <!-- Connection diagnostics -->
+    <string name="openflux_diag_button">Ulanish diagnostikasi</string>
+    <string name="openflux_diag_title">Ulanish diagnostikasi</string>
+    <string name="openflux_diag_running">Tarmoq tekshirilmoqda… bir yarim daqiqagacha</string>
+    <string name="openflux_diag_note">Diagnostikani ishlamayotgan tarmoqda ishga tushiring (masalan, mobil internetda). VPNni oʻchirish shart emas.</string>
+    <string name="openflux_diag_copy">Nusxalash</string>
+    <string name="openflux_diag_share">Ulashish</string>
+    <string name="openflux_diag_close">Yopish</string>
+    <string name="openflux_diag_copied">Hisobot nusxalandi</string>
+    <string name="openflux_diag_share_title">Hisobotni yuborish</string>
+
+    <!-- Channel to the own exit (Mail.ru / Cups / openflux:// link) -->
+    <string name="openflux_channel_title">Chiqish nuqtasiga kanal</string>
+    <string name="openflux_channel_direct">Toʻgʻridan-toʻgʻri</string>
+    <string name="openflux_channel_direct_desc">Chiqish nuqtangizga manzil va token orqali oddiy ulanish. Eng tez variant.</string>
+    <string name="openflux_channel_mailru">Mail.ru hujjati orqali</string>
+    <string name="openflux_channel_mailru_desc">Trafik Mail.ru bulutidagi hujjat orqali oʻtadi. Operator faqat oq roʻyxatdagi saytlarni ochganda yordam beradi. Kanal shifrlanmagan (HTTPS saytlari shifrlangan holda qoladi) va toʻgʻridan-toʻgʻri ulanishdan sekinroq.</string>
+    <string name="openflux_channel_cups">Cups xonalari orqali</string>
+    <string name="openflux_channel_cups_desc">Trafik cups.online xonalari orqali oʻtadi. Operator faqat oq roʻyxatdagi saytlarni ochganda yordam beradi. Kanal shifrlanmagan (HTTPS saytlari shifrlangan holda qoladi) va toʻgʻridan-toʻgʻri ulanishdan sekinroq.</string>
+    <string name="openflux_channel_link">OpenFlux havolasi</string>
+    <string name="openflux_channel_link_desc">Istalgan OpenFlux tuguniga openflux://… havolasi orqali ulanish (sizning VPS, doʻstingiz tuguni). Havolada yoki pastdagi maydonda kalit boʻlsa, kanal shifrlanadi.</string>
+    <string name="openflux_channel_demo_note">Demo server doim toʻgʻridan-toʻgʻri ishlaydi; kanal faqat shaxsiy chiqish nuqtangizga taalluqli.</string>
+    <string name="openflux_mailru_label">Mail.ru hujjati havolasi</string>
+    <string name="openflux_cups_label">Cups xonasi kodi</string>
+    <string name="openflux_share_label">openflux:// havolasi</string>
+    <string name="openflux_secret_label">Kalit (havolada boʻlmasa)</string>
+    <string name="openflux_secret_show">Kalitni koʻrsatish</string>
+    <string name="openflux_secret_hide">Kalitni yashirish</string>
+    <string name="openflux_link_err_http">https://cloud.mail.ru/public/… koʻrinishidagi havola kerak</string>
+    <string name="openflux_link_err_openflux_here">Bu openflux:// havolasi: «OpenFlux havolasi» kanalini tanlang</string>
+    <string name="openflux_link_err_not_openflux">Havola openflux://v1/ bilan boshlanishi kerak (harflar registri muhim)</string>
+    <string name="openflux_link_err_spaces">Kodda boʻsh joy boʻlmaydi</string>
+    <string name="openflux_secret_err_short">Kalit kamida 16 ta belgidan iborat boʻlishi kerak</string>
+    <string name="openflux_paste">Buferdan qoʻyish</string>
+    <string name="openflux_paste_empty">Buferda matn yoʻq</string>
+    <string name="openflux_paste_not_link">Buferda openflux:// havolasi yoʻq</string>
+
+    <!-- Import of openflux:// links -->
+    <string name="openflux_import_title">OpenFlux havolasi</string>
+    <string name="openflux_import_text">OpenFlux chiqish nuqtasi havolasi ochildi. Unda kirish kaliti boʻlishi mumkin, shuning uchun havolalarni faqat ishonchli odamlardan qabul qiling. Uni sozlamalarga qoʻyib, «OpenFlux havolasi» kanaliga oʻtilsinmi?</string>
+    <string name="openflux_import_ok">Foydalanish</string>
+    <string name="openflux_import_cancel">Bekor qilish</string>
+
+    <!-- Home: channel / carrier -->
+    <string name="openflux_home_via_carrier">%1$s orqali</string>
+    <string name="openflux_home_channel">Kanal: %1$s</string>
+    <string name="openflux_carrier_direct">tugunga toʻgʻridan-toʻgʻri</string>
+    <string name="openflux_carrier_node">OpenFlux tuguni</string>
+    <string name="openflux_carrier_yandex">Yandex</string>
+    <string name="openflux_carrier_telemost">Telemost</string>
+    <string name="openflux_carrier_bitrix">Bitrix24</string>
+    <string name="openflux_channel_short_link">OpenFlux havolasi</string>
+
+    <!-- Captcha (browser check asked by a carrier) -->
+    <string name="openflux_captcha_channel">OpenFlux tekshiruvlari</string>
+    <string name="openflux_captcha_title">«Robot emasman» tekshiruvi kerak</string>
+    <string name="openflux_captcha_notif_text">OpenFlux kanali xizmati tekshiruv soʻramoqda. Ochish uchun bosing.</string>
+    <string name="openflux_captcha_home_text">Kanal xizmati «robot emasman» tekshiruvini soʻramoqda; usiz kanal ulanmaydi.</string>
+    <string name="openflux_captcha_open">Tekshiruvni ochish</string>
+    <string name="openflux_captcha_hint">Sahifadagi tekshiruvdan oʻting, soʻng «Tayyor» tugmasini bosing.</string>
+    <string name="openflux_captcha_done">Tayyor</string>
+    <string name="openflux_captcha_sent">Tayyor: kanal qayta ulanmoqda</string>
+    <string name="openflux_captcha_no_cookies">Tekshiruvdan hali oʻtilmadi: sayt cookie oʻrnatmadi</string>
+    <string name="openflux_captcha_not_running">OpenFlux hozir ishlamayapti</string>
+</resources>

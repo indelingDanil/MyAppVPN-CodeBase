@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kazakh translation of values/strings_openflux.xml. -->
+<resources>
+
+    <!-- Settings row -->
+    <string name="openflux_settings_section">Тәжірибелер</string>
+    <string name="openflux_settings_title">OpenFlux (Beta)</string>
+    <string name="openflux_settings_subtitle">Қарапайым хостингтегі өз шығу нүктеңіз</string>
+    <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
+    <string name="openflux_state_on">Қосулы</string>
+    <string name="openflux_state_off">Өшірулі</string>
+
+    <!-- Screen -->
+    <string name="openflux_beta">Beta</string>
+    <string name="openflux_cd_back">Артқа</string>
+    <string name="openflux_intro">Тәжірибелік режим. Трафик VLESS серверлері арқылы емес, өз шығу нүктеңіз арқылы өтеді: қарапайым веб-хостингтегі OpenFlux қолданбасы (Node.js). Ұялы байланыс операторы тек \"ақ тізімдегі\" сайттарды өткізсе және хостингіңіз солардың бірі болса, пайдалы. Тек TCP (80/443 порттары), жылдамдығы орташа.</string>
+    <string name="openflux_enable_title">OpenFlux пайдалану</string>
+    <string name="openflux_enable_subtitle">Трафик VLESS серверлерінің орнына шығу нүктеңіз арқылы өтеді</string>
+    <string name="openflux_enable_hint_fill">Алдымен шығу нүктесіне қосылуды баптаңыз (мекенжай мен токен немесе арна сілтемесі), содан кейін сақтаңыз.</string>
+    <string name="openflux_section_settings">Шығу нүктесіне қосылу</string>
+    <string name="openflux_url_label">Шығу нүктесінің мекенжайы</string>
+    <string name="openflux_url_err_invalid">Мекенжай қате</string>
+    <string name="openflux_url_err_scheme">Мекенжай http:// немесе https:// деп басталуы керек</string>
+    <string name="openflux_url_err_host">Мекенжайда домен жоқ</string>
+    <string name="openflux_url_err_php">Мекенжай .php файлына апаруы керек (мысалы, …/phpbox.php)</string>
+    <string name="openflux_token_label">Токен</string>
+    <string name="openflux_token_show">Токенді көрсету</string>
+    <string name="openflux_token_hide">Токенді жасыру</string>
+    <string name="openflux_save">Сақтау</string>
+    <string name="openflux_saved">Сақталды</string>
+    <string name="openflux_unsaved">Сақталмаған өзгерістер бар</string>
+    <string name="openflux_http_warning">HTTPS болмаса, провайдер токенді және сайт мекенжайларын көре алады. HTTPS сайттарының мазмұны шифрланған күйде қалады.</string>
+    <string name="openflux_reconnect_note">VPN қосулы: шығу нүктесі баптауларындағы өзгерістер қайта қосылғанда қолданылады.</string>
+    <string name="openflux_howto_title">Өз шығу нүктеңізді қалай баптауға болады</string>
+    <string name="openflux_howto_step1">1. Node.js шығу нүктесін (app.js) openflux-exit тармағынан алыңыз (төмендегі түйме) — онда Beget бойынша қадамдық нұсқаулық та бар.</string>
+    <string name="openflux_howto_step2">2. config.json файлына өзіңіздің ұзын кездейсоқ токеніңізді жазыңыз.</string>
+    <string name="openflux_howto_step3">3. Оны хостингте Passenger (Node.js) арқылы іске қосыңыз — нұсқаулықты қараңыз.</string>
+    <string name="openflux_howto_step4">4. Шығу нүктесінің мекенжайы мен токенді осында қойыңыз.</string>
+    <string name="openflux_github">Репозиторийді GitHub-та ашу</string>
+    <string name="openflux_no_browser">Сілтемені ашатын қолданба табылмады</string>
+    <string name="openflux_cd_expand">Жаю</string>
+    <string name="openflux_cd_collapse">Жию</string>
+
+    <!-- Home -->
+    <string name="openflux_home_title">OpenFlux (Beta)</string>
+    <string name="openflux_home_via">OpenFlux шығу нүктеңіз арқылы</string>
+    <string name="openflux_home_no_url">мекенжай көрсетілмеген</string>
+    <string name="openflux_home_demo">MyAppVPN демо сервері</string>
+    <string name="openflux_home_via_demo">MyAppVPN демо сервері арқылы</string>
+    <string name="openflux_turn_off">Өшіру</string>
+
+    <!-- Servers -->
+    <string name="openflux_servers_banner">OpenFlux режимі қосулы: тізімдегі серверлер қазір пайдаланылмайды</string>
+
+    <!-- Exit refusals (session stopped) -->
+    <string name="openflux_status_busy">Демо сервер толы: 8 орынның бәрі бос емес. Кейінірек қайталап көріңіз.</string>
+    <string name="openflux_status_expired">Демо сервердегі сынақ сағатыңыз (немесе 2 ГБ) аяқталды. Жалғастыру үшін өз OpenFlux шығу нүктеңізді баптаңыз (нұсқаулық төмендегі түймеде) немесе әдеттегі серверлерді пайдаланыңыз.</string>
+    <string name="openflux_status_ended">OpenFlux демосы аяқталды. Өз шығу нүктеңізді баптаңыз: нұсқаулық репозиторийде.</string>
+    <string name="openflux_status_quota">Демо сервер тәуліктік трафик лимитін таусып қойды. Ертең қайталап көріңіз.</string>
+    <string name="openflux_status_badtoken">OpenFlux токені немесе мекенжайы қате.</string>
+    <string name="openflux_status_noclient">Қолданбаны жаңартыңыз.</string>
+    <string name="openflux_status_unsupported">Бұл мекенжай OpenFlux (Node.js) шығу нүктесі емес. Мекенжайды тексеріңіз: ескі PHP шығу нүктелеріне енді қолдау көрсетілмейді.</string>
+    <string name="openflux_regular_servers">Әдеттегі серверлер</string>
+    <string name="openflux_howto_button">Нұсқаулық</string>
+
+    <!-- Demo -->
+    <string name="openflux_demo_left">Демо: ~%1$d мин · %2$d МБ қалды</string>
+    <string name="openflux_demo_left_min">Демо: ~%1$d мин қалды</string>
+    <string name="openflux_demo_left_mb">Демо: %1$d МБ қалды</string>
+    <string name="openflux_demo_title">Демо серверді сынап көріңіз</string>
+    <string name="openflux_demo_text">Автордың шығу нүктесіне бір реттік сынақ қолжетімділігі: қосылған сәттен бастап 1 сағат (таймер тоқтамайды) немесе 2 ГБ трафик — қайсысы бұрын аяқталса. Бір уақытта 8 адамға дейін, 14 қазанға дейін. Бос орын болмаса, кейінірек қайталап көріңіз.</string>
+    <string name="openflux_demo_button">Демоға қосылу</string>
+    <string name="openflux_demo_selected">MyAppVPN демо сервері таңдалды</string>
+    <string name="openflux_own_exit_note">Өз шығу нүктеңіз: шектеусіз</string>
+
+    <!-- Connection diagnostics -->
+    <string name="openflux_diag_button">Қосылым диагностикасы</string>
+    <string name="openflux_diag_title">Қосылым диагностикасы</string>
+    <string name="openflux_diag_running">Желі тексерілуде… бір жарым минутқа дейін</string>
+    <string name="openflux_diag_note">Диагностиканы байланыс жұмыс істемейтін желіде іске қосыңыз (мысалы, мобильді интернетте). VPN-ді өшірудің қажеті жоқ.</string>
+    <string name="openflux_diag_copy">Көшіру</string>
+    <string name="openflux_diag_share">Бөлісу</string>
+    <string name="openflux_diag_close">Жабу</string>
+    <string name="openflux_diag_copied">Есеп көшірілді</string>
+    <string name="openflux_diag_share_title">Есепті жіберу</string>
+
+    <!-- Channel to the own exit (Mail.ru / Cups / openflux:// link) -->
+    <string name="openflux_channel_title">Шығу нүктесіне арна</string>
+    <string name="openflux_channel_direct">Тікелей</string>
+    <string name="openflux_channel_direct_desc">Шығу нүктеңізге мекенжай мен токен бойынша қарапайым қосылым. Ең жылдам нұсқа.</string>
+    <string name="openflux_channel_mailru">Mail.ru құжаты арқылы</string>
+    <string name="openflux_channel_mailru_desc">Трафик Mail.ru Бұлтындағы құжат арқылы өтеді. Оператор тек ақ тізімдегі сайттарды өткізгенде көмектеседі. Арна шифрланбаған (HTTPS сайттары шифрланған күйде қалады) және тікелей қосылымнан баяу.</string>
+    <string name="openflux_channel_cups">Cups бөлмелері арқылы</string>
+    <string name="openflux_channel_cups_desc">Трафик cups.online бөлмелері арқылы өтеді. Оператор тек ақ тізімдегі сайттарды өткізгенде көмектеседі. Арна шифрланбаған (HTTPS сайттары шифрланған күйде қалады) және тікелей қосылымнан баяу.</string>
+    <string name="openflux_channel_link">OpenFlux сілтемесі</string>
+    <string name="openflux_channel_link_desc">Кез келген OpenFlux түйініне openflux://… сілтемесі арқылы қосылу (өз VPS-іңіз, досыңыздың түйіні). Сілтемеде немесе төмендегі өрісте кілт болса, арна шифрланады.</string>
+    <string name="openflux_channel_demo_note">Демо сервер әрқашан тікелей жұмыс істейді; арна тек өз шығу нүктеңізге қолданылады.</string>
+    <string name="openflux_mailru_label">Mail.ru құжатының сілтемесі</string>
+    <string name="openflux_cups_label">Cups бөлмесінің коды</string>
+    <string name="openflux_share_label">openflux:// сілтемесі</string>
+    <string name="openflux_secret_label">Кілт (сілтемеде болмаса)</string>
+    <string name="openflux_secret_show">Кілтті көрсету</string>
+    <string name="openflux_secret_hide">Кілтті жасыру</string>
+    <string name="openflux_link_err_http">https://cloud.mail.ru/public/… түріндегі сілтеме қажет</string>
+    <string name="openflux_link_err_openflux_here">Бұл openflux:// сілтемесі: «OpenFlux сілтемесі» арнасын таңдаңыз</string>
+    <string name="openflux_link_err_not_openflux">Сілтеме openflux://v1/ деп басталуы керек (әріп регистрі маңызды)</string>
+    <string name="openflux_link_err_spaces">Кодта бос орын болмауы керек</string>
+    <string name="openflux_secret_err_short">Кілт кемінде 16 таңбадан тұруы керек</string>
+    <string name="openflux_paste">Буферден қою</string>
+    <string name="openflux_paste_empty">Буферде мәтін жоқ</string>
+    <string name="openflux_paste_not_link">Буферде openflux:// сілтемесі жоқ</string>
+
+    <!-- Import of openflux:// links -->
+    <string name="openflux_import_title">OpenFlux сілтемесі</string>
+    <string name="openflux_import_text">OpenFlux шығу нүктесінің сілтемесі ашылды. Онда қолжетімділік кілті болуы мүмкін, сондықтан сілтемелерді тек сенімді адамдардан қабылдаңыз. Оны баптауларға енгізіп, «OpenFlux сілтемесі» арнасына ауысу керек пе?</string>
+    <string name="openflux_import_ok">Пайдалану</string>
+    <string name="openflux_import_cancel">Бас тарту</string>
+
+    <!-- Home: channel / carrier -->
+    <string name="openflux_home_via_carrier">%1$s арқылы</string>
+    <string name="openflux_home_channel">Арна: %1$s</string>
+    <string name="openflux_carrier_direct">түйінге тікелей</string>
+    <string name="openflux_carrier_node">OpenFlux түйіні</string>
+    <string name="openflux_carrier_yandex">Яндекс</string>
+    <string name="openflux_carrier_telemost">Телемост</string>
+    <string name="openflux_carrier_bitrix">Bitrix24</string>
+    <string name="openflux_channel_short_link">OpenFlux сілтемесі</string>
+
+    <!-- Captcha (browser check asked by a carrier) -->
+    <string name="openflux_captcha_channel">OpenFlux тексерулері</string>
+    <string name="openflux_captcha_title">\"Робот емеспін\" тексеруі қажет</string>
+    <string name="openflux_captcha_notif_text">OpenFlux арнасының сервисі тексеруді сұрап тұр. Ашу үшін түртіңіз.</string>
+    <string name="openflux_captcha_home_text">Арна сервисі \"робот емеспін\" тексеруін сұрап тұр; онсыз арна қосылмайды.</string>
+    <string name="openflux_captcha_open">Тексеруді ашу</string>
+    <string name="openflux_captcha_hint">Беттегі тексеруден өтіп, «Дайын» түймесін түртіңіз.</string>
+    <string name="openflux_captcha_done">Дайын</string>
+    <string name="openflux_captcha_sent">Дайын: арна қайта қосылуда</string>
+    <string name="openflux_captcha_no_cookies">Тексеруден әлі өтпедіңіз: сайт cookie файлдарын орнатпады</string>
+    <string name="openflux_captcha_not_running">OpenFlux қазір іске қосылмаған</string>
+</resources>

@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simplified Chinese translation of values/strings_settings.xml. -->
+<resources>
+
+    <!-- Settings -->
+    <string name="settings_title">设置</string>
+    <string name="settings_section_connection">连接</string>
+    <string name="settings_section_apps_network">应用与网络</string>
+    <string name="settings_section_hotspot">共享</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_applies_next_connect">下次连接时生效</string>
+    <string name="settings_subscriptions_title">订阅</string>
+    <string name="settings_subscriptions_subtitle">自定义服务器来源，可启用或停用</string>
+    <string name="settings_autoconnect_title">开机自动连接</string>
+    <string name="settings_autoconnect_subtitle">需要授予一次 VPN 权限</string>
+    <string name="settings_killswitch_title">断网保护</string>
+    <string name="settings_killswitch_subtitle">隧道断开时拦截流量，防止泄露真实 IP</string>
+    <string name="settings_killswitch_off_warning">⚠ 已关闭：隧道断开时，流量可能绕过 VPN 直接发出。</string>
+    <string name="settings_tls_fragment_title">绕过 DPI（TLS 分片）</string>
+    <string name="settings_tls_fragment_subtitle">将与服务器的 TLS 连接开头拆分发送，使简单的 DPI 无法读取服务器名称。若运营商封锁连接，此功能可能有帮助；连接速度可能变慢。默认关闭。</string>
+    <string name="settings_split_title">分应用代理</string>
+    <string name="settings_split_subtitle">选择不经过 VPN 的应用</string>
+    <string name="settings_split_manage_title">选择应用</string>
+    <string name="settings_split_manage_subtitle">哪些应用绕过 VPN，或哪些应用只走 VPN</string>
+    <string name="settings_dns_title">DNS 服务器</string>
+    <string name="settings_hotspot_title">通过热点共享</string>
+    <string name="settings_hotspot_hint">代理仅在你的热点网络中可访问：HTTP 无需密码，SOCKS5 需要用户名和密码。连接后可在首页查看说明。</string>
+    <string name="settings_hotspot_guide_title">如何连接其他设备</string>
+    <string name="settings_hotspot_guide_subtitle">适用于 Android、iPhone、电脑和 Telegram 的分步指南</string>
+    <string name="settings_about_version">版本</string>
+    <string name="settings_about_sources">服务器来源</string>
+    <string name="settings_about_sources_value">zieng2/wl、igareck + 自定义</string>
+    <string name="settings_about_protocol">协议</string>
+
+    <!-- Split tunneling -->
+    <string name="split_title">分应用代理</string>
+    <string name="split_subtitle_off">已关闭</string>
+    <plurals name="split_apps_via_vpn">
+        <item quantity="other">%d 个应用走 VPN</item>
+    </plurals>
+    <plurals name="split_apps_bypass_vpn">
+        <item quantity="other">%d 个应用绕过 VPN</item>
+    </plurals>
+    <string name="split_cd_back">返回</string>
+    <string name="split_enable">启用分应用代理</string>
+    <string name="split_mode_exclude">排除所选应用</string>
+    <string name="split_mode_include">仅所选应用走 VPN</string>
+    <string name="split_mode_include_hint">只有所选应用使用 VPN，其他应用直连</string>
+    <string name="split_mode_exclude_hint">所选应用直连，不经过 VPN</string>
+    <string name="split_include_empty_warning">未选择应用，VPN 将应用于所有应用</string>
+    <string name="split_search_placeholder">搜索应用</string>
+    <string name="split_cd_clear_search">清除搜索</string>
+    <string name="split_select_all">全选</string>
+    <string name="split_clear_all">全部取消</string>
+    <string name="split_invert">反选</string>
+    <string name="split_bulk_applies_to">作用于匹配项：%1$d</string>
+    <string name="split_no_apps">未找到应用</string>
+    <string name="split_no_search_results">未找到结果</string>
+    <string name="split_badge_via_vpn">走 VPN</string>
+    <string name="split_badge_bypass">不走 VPN</string>
+
+    <!-- Subscriptions -->
+    <string name="subs_title">订阅</string>
+    <string name="subs_enabled_count">已启用：%1$d / %2$d</string>
+    <string name="subs_cd_back">返回</string>
+    <string name="subs_intro">添加你自己的订阅（VLESS 列表链接，https://）。搜索可用服务器时不会使用已停用的来源。</string>
+    <string name="subs_add_button">添加订阅</string>
+    <string name="subs_refreshing">正在更新服务器…</string>
+    <string name="subs_refresh_failed">无法更新服务器。请检查网络连接。</string>
+    <string name="subs_empty">暂无来源。请在上方添加订阅链接。</string>
+    <string name="subs_none_enabled">所有来源均已停用，服务器列表将不会更新。</string>
+    <string name="subs_builtin_source">内置来源</string>
+    <string name="subs_cd_delete">删除订阅 %1$s</string>
+    <string name="subs_delete_title">删除订阅？</string>
+    <string name="subs_delete_confirm">删除</string>
+    <string name="subs_cancel">取消</string>
+    <string name="subs_disable_last_title">停用最后一个来源？</string>
+    <string name="subs_last_source_warning">没有来源时，服务器列表将为空。</string>
+    <string name="subs_disable_confirm">停用</string>
+
+    <!-- DNS -->
+    <string name="dns_title">DNS 服务器</string>
+    <string name="dns_cd_back">返回</string>
+    <string name="dns_summary_default">默认（Cloudflare、Google DoH）</string>
+    <string name="dns_intro">自定义 DNS 服务器。查询通过 VPN 隧道发送。连接期间更改立即生效。</string>
+    <string name="dns_order_hint">顺序很重要：按从上到下的顺序查询服务器。总共最多 %1$d 个，同时最多启用 %2$d 个。</string>
+    <string name="dns_added_disabled">已添加但未启用：同时最多只能启用 %1$d 个</string>
+    <string name="dns_add_button">添加服务器</string>
+    <string name="dns_presets_label">添加：</string>
+    <string name="dns_preset_already_added">已添加</string>
+    <string name="dns_list_empty">列表为空，将使用默认服务器（Cloudflare、Google DoH）。</string>
+    <string name="dns_all_disabled">所有服务器均已停用，将使用默认服务器（Cloudflare、Google DoH）。</string>
+    <string name="dns_ipv6_title">IPv6 应答（AAAA）</string>
+    <string name="dns_ipv6_on">返回 IPv4 和 IPv6 地址</string>
+    <string name="dns_ipv6_off">仅 IPv4（推荐）</string>
+    <string name="dns_reset_button">恢复默认</string>
+    <string name="dns_limitations">对已排除的应用、严格模式下的 Android 私人 DNS 以及浏览器内置 DNS 无效。</string>
+    <string name="dns_delete_title">删除服务器？</string>
+    <string name="dns_delete_confirm">删除</string>
+    <string name="dns_cancel">取消</string>
+    <string name="dns_reset_title">重置 DNS？</string>
+    <string name="dns_reset_message">列表将被清空，并使用默认服务器（Cloudflare、Google DoH）。IPv6 应答将被关闭。</string>
+    <string name="dns_reset_confirm">重置</string>
+    <string name="dns_cd_move_up">上移 %1$s</string>
+    <string name="dns_cd_move_down">下移 %1$s</string>
+    <string name="dns_cd_delete">删除 %1$s</string>
+
+    <!-- Hotspot sharing guide -->
+    <string name="hotspot_title">VPN 共享</string>
+    <string name="hotspot_cd_back">返回</string>
+    <string name="hotspot_back">返回</string>
+    <string name="hotspot_host_hint_unknown">上方区块中的 IP</string>
+    <string name="hotspot_status_connect_first">请先连接 VPN</string>
+    <string name="hotspot_status_on_but_disabled">共享正在运行，但已在设置中关闭，重新连接后将停止</string>
+    <string name="hotspot_status_working">共享正在运行</string>
+    <string name="hotspot_status_enable_in_settings">请在设置中开启“通过热点共享”并重新连接</string>
+    <string name="hotspot_status_no_hotspot">未检测到热点。请开启热点并重新连接 VPN</string>
+    <string name="hotspot_params_title">代理参数</string>
+    <string name="hotspot_http_proxy">HTTP 代理</string>
+    <string name="hotspot_socks5">SOCKS5</string>
+    <string name="hotspot_auth_note">HTTP 代理无需密码。用户名和密码仅用于 SOCKS5。</string>
+    <string name="hotspot_login">用户名</string>
+    <string name="hotspot_password">密码</string>
+    <string name="hotspot_new_password_pending">新密码将在重新连接 VPN 后生效。</string>
+    <string name="hotspot_change_password">更改密码</string>
+    <string name="hotspot_password_change_note">更改密码后需重新连接 VPN 才能生效。</string>
+    <string name="hotspot_copied">已复制：%1$s</string>
+    <string name="hotspot_cd_copy">复制：%1$s</string>
+    <string name="hotspot_cd_show_password">显示密码</string>
+    <string name="hotspot_cd_hide_password">隐藏密码</string>
+    <string name="hotspot_before_title">开始之前</string>
+    <string name="hotspot_before_step1">在设置中开启“通过热点共享”</string>
+    <string name="hotspot_before_step2">在本手机上开启热点</string>
+    <string name="hotspot_before_step3">连接 VPN（在开启热点之后）</string>
+    <string name="hotspot_before_step4">将其他设备连接到你的热点</string>
+    <string name="hotspot_step_save">点按“保存”</string>
+    <string name="hotspot_android_title">Android</string>
+    <string name="hotspot_android_step1">设置 → WLAN</string>
+    <string name="hotspot_android_step2">长按你的热点网络 →“修改网络”（或 ⚙ 图标）</string>
+    <string name="hotspot_android_step3">打开“高级选项”</string>
+    <string name="hotspot_android_step4">代理 →“手动”</string>
+    <string name="hotspot_android_step5">主机名：%1$s，端口：%2$d</string>
+    <string name="hotspot_ios_title">iPhone / iPad</string>
+    <string name="hotspot_ios_step1">设置 → 无线局域网</string>
+    <string name="hotspot_ios_step2">点按热点网络旁边的 (i)</string>
+    <string name="hotspot_ios_step3">在底部：“配置代理”→“手动”</string>
+    <string name="hotspot_ios_step4">服务器：%1$s，端口：%2$d</string>
+    <string name="hotspot_ios_step5">鉴定：关闭</string>
+    <string name="hotspot_desktop_title">Windows / macOS</string>
+    <string name="hotspot_desktop_windows">Windows：设置 → 网络和 Internet → 代理 →“使用代理服务器”→ 地址 %1$s，端口 %2$d → 保存</string>
+    <string name="hotspot_desktop_macos">macOS：系统设置 → 无线局域网 → 详细信息… → 代理 →“网页代理（HTTP）”和“安全网页代理（HTTPS）”→ %1$s : %2$d → 好</string>
+    <string name="hotspot_telegram_title">Telegram（SOCKS5）</string>
+    <string name="hotspot_telegram_step1">设置 → 数据与存储 → 代理 → 添加代理</string>
+    <string name="hotspot_telegram_step2">类型：SOCKS5</string>
+    <string name="hotspot_telegram_step3">服务器：%1$s，端口：%2$d</string>
+    <string name="hotspot_telegram_step4">用户名：%1$s，密码：见上方区块</string>
+    <string name="hotspot_telegram_step5">保存并启用代理</string>
+    <string name="hotspot_notes_title">重要提示</string>
+    <string name="hotspot_note_access">只有连接到你热点的设备才能使用代理。代理受热点密码保护。</string>
+    <string name="hotspot_note_not_all_traffic">并非所有应用的流量都会经过系统代理（部分游戏和应用会忽略代理）。</string>
+    <string name="hotspot_note_ip_changed">如果热点 IP 发生变化（热点曾被关闭），请重新连接 VPN，并在其他设备上更新设置。</string>
+    <string name="hotspot_verify_title">检查</string>
+    <string name="hotspot_verify_text">在其他设备上打开浏览器，在 2ip.ru 或 whoer.net 上查看 IP，它应与 VPN 服务器的 IP 一致。</string>
+    <string name="hotspot_disable_title">如何关闭</string>
+    <string name="hotspot_disable_text">在其他设备上重复上述步骤，并将“代理”设为“无”（iOS 为“关闭”）。</string>
+    <!-- Appearance -->
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_theme_title">主题</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <!-- In-app language (language names themselves are constants in AppLocale.OPTIONS) -->
+    <string name="settings_language_title">语言</string>
+    <string name="settings_language_dialog_title">应用语言</string>
+    <string name="settings_language_system">跟随系统</string>
+    <string name="settings_language_cancel">取消</string>
+</resources>

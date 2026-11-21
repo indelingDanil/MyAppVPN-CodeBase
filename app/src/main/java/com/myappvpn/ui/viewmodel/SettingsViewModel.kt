@@ -1,6 +1,8 @@
 package com.myappvpn.ui.viewmodel
 
+import android.app.Activity
 import android.content.Context
+import com.myappvpn.util.AppLocale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.myappvpn.data.datastore.AppPreferences
@@ -169,6 +171,15 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(value: String) = viewModelScope.launch {
         preferences.setThemeMode(value)
     }
+
+    /**
+     * In-app language tag ("" = system default), read synchronously. Not a StateFlow: changing
+     * it recreates the activity (this ViewModel survives that), so the screen re-reads it.
+     */
+    fun currentLanguage(): String = AppLocale.current(context)
+
+    /** Applies the language; the activity is recreated (by the system on 13+, by us below). */
+    fun setLanguage(activity: Activity, tag: String) = AppLocale.apply(activity, tag)
 
     fun setHotspotSharing(value: Boolean) = viewModelScope.launch {
         preferences.setHotspotSharing(value)

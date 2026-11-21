@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Persian translation of values/strings_openflux.xml. -->
+<resources>
+
+    <!-- Settings row -->
+    <string name="openflux_settings_section">آزمایشی</string>
+    <string name="openflux_settings_title">OpenFlux (بتا)</string>
+    <string name="openflux_settings_subtitle">خروجی شخصی شما روی یک هاست معمولی</string>
+    <string name="openflux_settings_subtitle_state">%1$s · %2$s</string>
+    <string name="openflux_state_on">روشن</string>
+    <string name="openflux_state_off">خاموش</string>
+
+    <!-- Screen -->
+    <string name="openflux_beta">بتا</string>
+    <string name="openflux_cd_back">بازگشت</string>
+    <string name="openflux_intro">حالت آزمایشی. ترافیک نه از سرورهای VLESS، بلکه از خروجی شخصی شما عبور می‌کند: برنامه OpenFlux (Node.js) روی یک هاست وب معمولی. وقتی اپراتور موبایل فقط سایت‌های «لیست سفید» را باز می‌گذارد و هاست شما جزو آن‌هاست، به کار می‌آید. فقط TCP (پورت‌های 80/443)، سرعت متوسط است.</string>
+    <string name="openflux_enable_title">استفاده از OpenFlux</string>
+    <string name="openflux_enable_subtitle">ترافیک به‌جای سرورهای VLESS از خروجی شما عبور می‌کند</string>
+    <string name="openflux_enable_hint_fill">ابتدا اتصال به خروجی را تنظیم کنید (آدرس و توکن، یا لینک کانال) و سپس ذخیره کنید.</string>
+    <string name="openflux_section_settings">اتصال به خروجی</string>
+    <string name="openflux_url_label">آدرس خروجی</string>
+    <string name="openflux_url_err_invalid">آدرس نامعتبر است</string>
+    <string name="openflux_url_err_scheme">آدرس باید با http:// یا https:// شروع شود</string>
+    <string name="openflux_url_err_host">آدرس دامنه ندارد</string>
+    <string name="openflux_url_err_php">آدرس باید به یک فایل .php اشاره کند (مثلاً …/phpbox.php)</string>
+    <string name="openflux_token_label">توکن</string>
+    <string name="openflux_token_show">نمایش توکن</string>
+    <string name="openflux_token_hide">پنهان کردن توکن</string>
+    <string name="openflux_save">ذخیره</string>
+    <string name="openflux_saved">ذخیره شد</string>
+    <string name="openflux_unsaved">تغییرات ذخیره‌نشده دارید</string>
+    <string name="openflux_http_warning">بدون HTTPS، ارائه‌دهنده اینترنت شما توکن و آدرس سایت‌ها را می‌بیند. محتوای سایت‌های HTTPS رمزگذاری‌شده باقی می‌ماند.</string>
+    <string name="openflux_reconnect_note">VPN متصل است: تغییر تنظیمات خروجی پس از اتصال مجدد اعمال می‌شود.</string>
+    <string name="openflux_howto_title">چگونه خروجی شخصی خود را راه‌اندازی کنید</string>
+    <string name="openflux_howto_step1">1. خروجی Node.js (app.js) را از شاخه openflux-exit دریافت کنید (دکمه پایین) — راهنمای گام‌به‌گام Beget هم همان‌جاست.</string>
+    <string name="openflux_howto_step2">2. یک توکن تصادفی و طولانی دلخواه در config.json قرار دهید.</string>
+    <string name="openflux_howto_step3">3. آن را روی هاست از طریق Passenger (Node.js) اجرا کنید — به راهنما مراجعه کنید.</string>
+    <string name="openflux_howto_step4">4. آدرس خروجی و توکن را اینجا وارد کنید.</string>
+    <string name="openflux_github">باز کردن مخزن در GitHub</string>
+    <string name="openflux_no_browser">برنامه‌ای برای باز کردن لینک پیدا نشد</string>
+    <string name="openflux_cd_expand">باز کردن</string>
+    <string name="openflux_cd_collapse">بستن</string>
+
+    <!-- Home -->
+    <string name="openflux_home_title">OpenFlux (بتا)</string>
+    <string name="openflux_home_via">از طریق خروجی OpenFlux شما</string>
+    <string name="openflux_home_no_url">آدرس تنظیم نشده</string>
+    <string name="openflux_home_demo">سرور نمایشی MyAppVPN</string>
+    <string name="openflux_home_via_demo">از طریق سرور نمایشی MyAppVPN</string>
+    <string name="openflux_turn_off">خاموش کردن</string>
+
+    <!-- Servers -->
+    <string name="openflux_servers_banner">حالت OpenFlux روشن است: سرورهای فهرست در حال حاضر استفاده نمی‌شوند</string>
+
+    <!-- Exit refusals (session stopped) -->
+    <string name="openflux_status_busy">سرور نمایشی پر است: هر 8 جایگاه اشغال شده‌اند. لطفاً بعداً دوباره تلاش کنید.</string>
+    <string name="openflux_status_expired">ساعت آزمایشی شما (یا 2 گیگابایت) روی سرور نمایشی تمام شد. برای ادامه، خروجی OpenFlux شخصی خود را راه‌اندازی کنید (راهنما با دکمه پایین) یا از سرورهای معمولی استفاده کنید.</string>
+    <string name="openflux_status_ended">نسخه نمایشی OpenFlux به پایان رسیده است. خروجی شخصی خود را راه‌اندازی کنید: راهنما در مخزن است.</string>
+    <string name="openflux_status_quota">سهمیه ترافیک روزانه سرور نمایشی تمام شده است. لطفاً فردا دوباره تلاش کنید.</string>
+    <string name="openflux_status_badtoken">توکن یا آدرس OpenFlux اشتباه است.</string>
+    <string name="openflux_status_noclient">لطفاً برنامه را به‌روزرسانی کنید.</string>
+    <string name="openflux_status_unsupported">این آدرس یک خروجی OpenFlux (Node.js) نیست. آدرس را بررسی کنید: خروجی‌های قدیمی PHP دیگر پشتیبانی نمی‌شوند.</string>
+    <string name="openflux_regular_servers">سرورهای معمولی</string>
+    <string name="openflux_howto_button">راهنما</string>
+
+    <!-- Demo -->
+    <string name="openflux_demo_left">نمایشی: ~%1$d دقیقه · %2$d مگابایت باقی‌مانده</string>
+    <string name="openflux_demo_left_min">نمایشی: ~%1$d دقیقه باقی‌مانده</string>
+    <string name="openflux_demo_left_mb">نمایشی: %1$d مگابایت باقی‌مانده</string>
+    <string name="openflux_demo_title">سرور نمایشی را امتحان کنید</string>
+    <string name="openflux_demo_text">دسترسی آزمایشی یک‌باره به خروجی نویسنده: 1 ساعت از لحظه اتصال (زمان‌سنج متوقف نمی‌شود) یا 2 گیگابایت ترافیک، هر کدام زودتر تمام شود. تا 8 نفر همزمان، تا 14 اکتبر. اگر جایگاه خالی نیست، بعداً دوباره تلاش کنید.</string>
+    <string name="openflux_demo_button">اتصال به نسخه نمایشی</string>
+    <string name="openflux_demo_selected">سرور نمایشی MyAppVPN انتخاب شده است</string>
+    <string name="openflux_own_exit_note">خروجی شخصی: بدون محدودیت</string>
+
+    <!-- Connection diagnostics -->
+    <string name="openflux_diag_button">عیب‌یابی اتصال</string>
+    <string name="openflux_diag_title">عیب‌یابی اتصال</string>
+    <string name="openflux_diag_running">در حال بررسی شبکه… تا یک دقیقه و نیم</string>
+    <string name="openflux_diag_note">عیب‌یابی را در شبکه‌ای اجرا کنید که اتصال در آن کار نمی‌کند (مثلاً اینترنت موبایل). نیازی به خاموش کردن VPN نیست.</string>
+    <string name="openflux_diag_copy">کپی</string>
+    <string name="openflux_diag_share">اشتراک‌گذاری</string>
+    <string name="openflux_diag_close">بستن</string>
+    <string name="openflux_diag_copied">گزارش کپی شد</string>
+    <string name="openflux_diag_share_title">ارسال گزارش</string>
+
+    <!-- Channel to the own exit (Mail.ru / Cups / openflux:// link) -->
+    <string name="openflux_channel_title">کانال به خروجی</string>
+    <string name="openflux_channel_direct">مستقیم</string>
+    <string name="openflux_channel_direct_desc">اتصال ساده به خروجی شما با آدرس و توکن. سریع‌ترین گزینه.</string>
+    <string name="openflux_channel_mailru">از طریق سند Mail.ru</string>
+    <string name="openflux_channel_mailru_desc">ترافیک از طریق یک سند در فضای ابری Mail.ru عبور می‌کند. وقتی اپراتور فقط سایت‌های لیست سفید را باز می‌گذارد کمک می‌کند. کانال رمزگذاری نشده است (سایت‌های HTTPS رمزگذاری‌شده می‌مانند) و از حالت مستقیم کندتر است.</string>
+    <string name="openflux_channel_cups">از طریق اتاق‌های Cups</string>
+    <string name="openflux_channel_cups_desc">ترافیک از طریق اتاق‌های cups.online عبور می‌کند. وقتی اپراتور فقط سایت‌های لیست سفید را باز می‌گذارد کمک می‌کند. کانال رمزگذاری نشده است (سایت‌های HTTPS رمزگذاری‌شده می‌مانند) و از حالت مستقیم کندتر است.</string>
+    <string name="openflux_channel_link">لینک OpenFlux</string>
+    <string name="openflux_channel_link_desc">اتصال به هر نود OpenFlux با لینک openflux://… (VPS شما، نود یک دوست). اگر لینک یا فیلد زیر کلید داشته باشد، کانال رمزگذاری می‌شود.</string>
+    <string name="openflux_channel_demo_note">سرور نمایشی همیشه مستقیم کار می‌کند؛ کانال فقط برای خروجی شخصی شما اعمال می‌شود.</string>
+    <string name="openflux_mailru_label">لینک سند Mail.ru</string>
+    <string name="openflux_cups_label">کد اتاق Cups</string>
+    <string name="openflux_share_label">لینک openflux://</string>
+    <string name="openflux_secret_label">کلید (اگر لینک کلید ندارد)</string>
+    <string name="openflux_secret_show">نمایش کلید</string>
+    <string name="openflux_secret_hide">پنهان کردن کلید</string>
+    <string name="openflux_link_err_http">لینکی مانند https://cloud.mail.ru/public/… لازم است</string>
+    <string name="openflux_link_err_openflux_here">این یک لینک openflux:// است: کانال «لینک OpenFlux» را انتخاب کنید</string>
+    <string name="openflux_link_err_not_openflux">لینک باید با openflux://v1/ شروع شود (حروف بزرگ و کوچک مهم است)</string>
+    <string name="openflux_link_err_spaces">کد نباید فاصله داشته باشد</string>
+    <string name="openflux_secret_err_short">کلید باید دست‌کم 16 نویسه باشد</string>
+    <string name="openflux_paste">چسباندن از کلیپ‌بورد</string>
+    <string name="openflux_paste_empty">کلیپ‌بورد متنی ندارد</string>
+    <string name="openflux_paste_not_link">در کلیپ‌بورد لینک openflux:// نیست</string>
+
+    <!-- Import of openflux:// links -->
+    <string name="openflux_import_title">لینک OpenFlux</string>
+    <string name="openflux_import_text">یک لینک خروجی OpenFlux باز شد. ممکن است حاوی کلید دسترسی باشد، پس فقط لینک افراد مورد اعتماد را بپذیرید. آن را در تنظیمات قرار دهیم و به کانال «لینک OpenFlux» برویم؟</string>
+    <string name="openflux_import_ok">استفاده</string>
+    <string name="openflux_import_cancel">لغو</string>
+
+    <!-- Home: channel / carrier -->
+    <string name="openflux_home_via_carrier">از طریق %1$s</string>
+    <string name="openflux_home_channel">کانال: %1$s</string>
+    <string name="openflux_carrier_direct">مستقیم به نود</string>
+    <string name="openflux_carrier_node">یک نود OpenFlux</string>
+    <string name="openflux_carrier_yandex">Yandex</string>
+    <string name="openflux_carrier_telemost">Telemost</string>
+    <string name="openflux_carrier_bitrix">Bitrix24</string>
+    <string name="openflux_channel_short_link">لینک OpenFlux</string>
+
+    <!-- Captcha (browser check asked by a carrier) -->
+    <string name="openflux_captcha_channel">بررسی‌های OpenFlux</string>
+    <string name="openflux_captcha_title">بررسی «ربات نیستم» لازم است</string>
+    <string name="openflux_captcha_notif_text">سرویس کانال OpenFlux درخواست بررسی دارد. برای باز کردن ضربه بزنید.</string>
+    <string name="openflux_captcha_home_text">سرویس کانال درخواست بررسی «ربات نیستم» دارد؛ بدون آن کانال وصل نمی‌شود.</string>
+    <string name="openflux_captcha_open">باز کردن بررسی</string>
+    <string name="openflux_captcha_hint">بررسی را در صفحه انجام دهید، سپس «انجام شد» را بزنید.</string>
+    <string name="openflux_captcha_done">انجام شد</string>
+    <string name="openflux_captcha_sent">انجام شد: کانال در حال اتصال مجدد است</string>
+    <string name="openflux_captcha_no_cookies">بررسی هنوز انجام نشده: سایت هیچ کوکی‌ای تنظیم نکرد</string>
+    <string name="openflux_captcha_not_running">OpenFlux در حال حاضر اجرا نمی‌شود</string>
+</resources>

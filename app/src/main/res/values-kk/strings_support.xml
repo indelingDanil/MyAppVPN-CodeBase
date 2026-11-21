@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_project">Қолдау</string>
+
+    <string name="project_title">Жобаны қолдау</string>
+    <string name="project_subtitle">MyAppVPN %1$s · бір әзірлеушінің ашық бастапқы кодты жобасы</string>
+
+    <string name="support_tg_title">Telegram арнасы</string>
+    <string name="support_tg_subtitle">Жаңалықтар мен релиздер — жаңартулар туралы бірінші біліңіз</string>
+    <string name="support_github_title">GitHub</string>
+    <string name="support_github_subtitle">Бастапқы код, релиздер, қателер туралы хабарлар және идеялар</string>
+
+    <string name="support_title">Донат ☕</string>
+    <string name="support_text">Қолданба тегін және тегін болып қала береді. Донат толығымен ерікті, бірақ әрбір кішкентай үлес жұмысты жалғастыруға — түзетуге, жаңартуға және жаңа нәрселер жасауға — ынта қосады.</string>
+    <string name="support_dream">Арман: өз қолданбаммен %1$s ₽ табу 😄</string>
+    <string name="support_progress">Релиз кезінде жиналғаны: %1$s ₽ · жолдың %2$s%%</string>
+    <string name="support_cloudtips">CloudTips арқылы донат (RUB)</string>
+    <string name="support_crypto">Криптовалютамен</string>
+    <string name="support_copy_action">Мекенжайды көшіру</string>
+    <string name="support_copied">%1$s мекенжайы көшірілді</string>
+    <string name="support_thanks">Қолданбаны пайдаланып, бөлісіп жүрген барлығыңызға рахмет ❤️</string>
+
+    <string name="support_disclaimer">⚠️ Білім беру жобасы, оқу және зерттеу мақсатында жасалған. Автор қолданбаны қалай пайдаланатыныңызға жауапты емес. Ресейде бұғаттауларды айналып өтуге арналған VPN қызметтері заңмен шектелген және заңсыз деп танылуы мүмкін. Өз тәуекеліңізбен пайдаланыңыз.</string>
+</resources>

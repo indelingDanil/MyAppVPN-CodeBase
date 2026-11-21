@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Languages offered in system Settings → Apps → MyAppVPN → Language (Android 13+).
+     Keep in sync with res/values-* and AppLocale.OPTIONS. -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="ru" />
+    <locale android:name="en" />
+    <locale android:name="fa" />
+    <locale android:name="zh-CN" />
+    <locale android:name="tr" />
+    <locale android:name="kk" />
+    <locale android:name="uz" />
+</locale-config>

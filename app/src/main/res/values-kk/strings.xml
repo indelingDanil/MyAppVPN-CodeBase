@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_name">VPN қызметі</string>
+    <string name="notification_channel_description">VPN қосылымының күйін көрсетеді</string>
+    <string name="vpn_connected">Қосылды</string>
+    <string name="vpn_disconnected">Ажыратылды</string>
+    <string name="vpn_connecting">Қосылуда…</string>
+    <string name="vpn_disconnect_action">Ажырату</string>
+</resources>

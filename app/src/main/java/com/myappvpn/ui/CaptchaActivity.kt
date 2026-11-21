@@ -28,6 +28,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.myappvpn.R
 import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.service.MyVpnService
+import com.myappvpn.util.AppLocale
 import com.myappvpn.ui.theme.*
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -53,6 +54,11 @@ class CaptchaActivity : ComponentActivity() {
     @Inject lateinit var preferences: AppPreferences
 
     private var webView: WebView? = null
+
+    // In-app language on Android < 13 (no-op on 13+, where the system applies it).
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

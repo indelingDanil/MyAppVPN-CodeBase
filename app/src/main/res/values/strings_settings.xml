@@ -178,4 +178,9 @@
     <string name="settings_theme_system">Как в системе</string>
     <string name="settings_theme_light">Светлая</string>
     <string name="settings_theme_dark">Тёмная</string>
+    <!-- In-app language (language names themselves are constants in AppLocale.OPTIONS) -->
+    <string name="settings_language_title">Язык</string>
+    <string name="settings_language_dialog_title">Язык приложения</string>
+    <string name="settings_language_system">Как в системе</string>
+    <string name="settings_language_cancel">Отмена</string>
 </resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_name">VPN 服务</string>
+    <string name="notification_channel_description">显示 VPN 连接状态</string>
+    <string name="vpn_connected">已连接</string>
+    <string name="vpn_disconnected">已断开</string>
+    <string name="vpn_connecting">正在连接…</string>
+    <string name="vpn_disconnect_action">断开连接</string>
+</resources>

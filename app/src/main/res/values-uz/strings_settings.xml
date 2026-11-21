@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Uzbek (Latin) translation of values/strings_settings.xml. -->
+<resources>
+
+    <!-- Settings -->
+    <string name="settings_title">Sozlamalar</string>
+    <string name="settings_section_connection">Ulanish</string>
+    <string name="settings_section_apps_network">Ilovalar va tarmoq</string>
+    <string name="settings_section_hotspot">Tarqatish</string>
+    <string name="settings_section_about">Ilova haqida</string>
+    <string name="settings_applies_next_connect">Keyingi ulanishda kuchga kiradi</string>
+    <string name="settings_subscriptions_title">Obunalar</string>
+    <string name="settings_subscriptions_subtitle">Shaxsiy server manbalaringiz, ularni yoqing yoki oʻchiring</string>
+    <string name="settings_autoconnect_title">Qurilma yoqilganda ulanish</string>
+    <string name="settings_autoconnect_subtitle">Bir marta VPN ruxsatini berish talab qilinadi</string>
+    <string name="settings_killswitch_title">Favqulodda uzish (Kill switch)</string>
+    <string name="settings_killswitch_subtitle">Tunnel uzilsa, trafikni bloklaydi — haqiqiy IP manzilingiz oshkor boʻlmaydi</string>
+    <string name="settings_killswitch_off_warning">⚠ Oʻchirilgan: tunnel uzilsa, trafik VPNni chetlab, toʻgʻridan-toʻgʻri ketishi mumkin.</string>
+    <string name="settings_tls_fragment_title">DPI ni chetlab oʻtish (TLS fragmentatsiyasi)</string>
+    <string name="settings_tls_fragment_subtitle">Serverga TLS ulanishining boshini qismlarga boʻladi, shunda oddiy DPI server nomini oʻqiy olmaydi. Operatoringiz ulanishlarni bloklasa, yordam berishi mumkin; ulanish sekinlashishi mumkin. Odatda oʻchirilgan.</string>
+    <string name="settings_split_title">Tunnelni ajratish</string>
+    <string name="settings_split_subtitle">VPNsiz ishlaydigan ilovalarni tanlang</string>
+    <string name="settings_split_manage_title">Ilovalarni tanlash</string>
+    <string name="settings_split_manage_subtitle">Qaysi ilovalar VPNni chetlab oʻtadi yoki faqat VPNdan foydalanadi</string>
+    <string name="settings_dns_title">DNS serverlar</string>
+    <string name="settings_hotspot_title">Hotspot orqali tarqatish</string>
+    <string name="settings_hotspot_hint">Proksi faqat hotspot tarmogʻingizda mavjud: HTTP parolsiz, SOCKS5 login va parol bilan. Yoʻriqnoma ulangandan keyin Asosiy ekranda chiqadi.</string>
+    <string name="settings_hotspot_guide_title">Boshqa qurilmani qanday ulash mumkin</string>
+    <string name="settings_hotspot_guide_subtitle">Android, iPhone, kompyuter va Telegram uchun bosqichma-bosqich yoʻriqnoma</string>
+    <string name="settings_about_version">Versiya</string>
+    <string name="settings_about_sources">Server manbalari</string>
+    <string name="settings_about_sources_value">zieng2/wl, igareck + shaxsiy</string>
+    <string name="settings_about_protocol">Protokol</string>
+
+    <!-- Split tunneling -->
+    <string name="split_title">Tunnelni ajratish</string>
+    <string name="split_subtitle_off">Oʻchirilgan</string>
+    <plurals name="split_apps_via_vpn">
+        <item quantity="one">%d ta ilova VPN orqali</item>
+        <item quantity="other">%d ta ilova VPN orqali</item>
+    </plurals>
+    <plurals name="split_apps_bypass_vpn">
+        <item quantity="one">%d ta ilova VPNsiz</item>
+        <item quantity="other">%d ta ilova VPNsiz</item>
+    </plurals>
+    <string name="split_cd_back">Orqaga</string>
+    <string name="split_enable">Tunnelni ajratishni yoqish</string>
+    <string name="split_mode_exclude">Tanlanganlarni chiqarib tashlash</string>
+    <string name="split_mode_include">Faqat tanlanganlar VPN orqali</string>
+    <string name="split_mode_include_hint">Faqat tanlangan ilovalar VPNdan foydalanadi, qolganlari toʻgʻridan-toʻgʻri ishlaydi</string>
+    <string name="split_mode_exclude_hint">Tanlangan ilovalar VPNsiz, toʻgʻridan-toʻgʻri ishlaydi</string>
+    <string name="split_include_empty_warning">Hech qanday ilova tanlanmagan — VPN barcha ilovalarga taalluqli</string>
+    <string name="split_search_placeholder">Ilovalarni qidirish</string>
+    <string name="split_cd_clear_search">Qidiruvni tozalash</string>
+    <string name="split_select_all">Hammasini tanlash</string>
+    <string name="split_clear_all">Hammasini tozalash</string>
+    <string name="split_invert">Teskari tanlash</string>
+    <string name="split_bulk_applies_to">Mos kelganlarga qoʻllanadi: %1$d</string>
+    <string name="split_no_apps">Ilovalar topilmadi</string>
+    <string name="split_no_search_results">Hech narsa topilmadi</string>
+    <string name="split_badge_via_vpn">VPN ORQALI</string>
+    <string name="split_badge_bypass">VPNSIZ</string>
+
+    <!-- Subscriptions -->
+    <string name="subs_title">Obunalar</string>
+    <string name="subs_enabled_count">Yoqilgan: %2$d tadan %1$d ta</string>
+    <string name="subs_cd_back">Orqaga</string>
+    <string name="subs_intro">Shaxsiy obunalaringizni qoʻshing (VLESS roʻyxatiga havola, https://). Oʻchirilgan manbalar ishlaydigan serverlarni qidirishda ishlatilmaydi.</string>
+    <string name="subs_add_button">Obuna qoʻshish</string>
+    <string name="subs_refreshing">Serverlar yangilanmoqda…</string>
+    <string name="subs_refresh_failed">Serverlarni yangilab boʻlmadi. Internet ulanishini tekshiring.</string>
+    <string name="subs_empty">Hozircha manbalar yoʻq. Yuqorida obuna havolasini qoʻshing.</string>
+    <string name="subs_none_enabled">Barcha manbalar oʻchirilgan — serverlar roʻyxati yangilanmaydi.</string>
+    <string name="subs_builtin_source">Oʻrnatilgan manba</string>
+    <string name="subs_cd_delete">%1$s obunasini oʻchirish</string>
+    <string name="subs_delete_title">Obuna oʻchirilsinmi?</string>
+    <string name="subs_delete_confirm">Oʻchirish</string>
+    <string name="subs_cancel">Bekor qilish</string>
+    <string name="subs_disable_last_title">Oxirgi manba oʻchirilsinmi?</string>
+    <string name="subs_last_source_warning">Manbalarsiz serverlar roʻyxati boʻsh qoladi.</string>
+    <string name="subs_disable_confirm">Oʻchirish</string>
+
+    <!-- DNS -->
+    <string name="dns_title">DNS serverlar</string>
+    <string name="dns_cd_back">Orqaga</string>
+    <string name="dns_summary_default">Standart (Cloudflare, Google DoH)</string>
+    <string name="dns_intro">Shaxsiy DNS serverlaringiz. Soʻrovlar VPN tunneli orqali oʻtadi. Ulangan holatda oʻzgarishlar darhol kuchga kiradi.</string>
+    <string name="dns_order_hint">Tartib muhim: serverlarga yuqoridan pastga qarab murojaat qilinadi. Jami %1$d tagacha, bir vaqtda koʻpi bilan %2$d tasi yoqilgan.</string>
+    <string name="dns_added_disabled">Oʻchirilgan holda qoʻshildi: bir vaqtda koʻpi bilan %1$d tasini yoqish mumkin</string>
+    <string name="dns_add_button">Server qoʻshish</string>
+    <string name="dns_presets_label">Qoʻshish:</string>
+    <string name="dns_preset_already_added">allaqachon qoʻshilgan</string>
+    <string name="dns_list_empty">Roʻyxat boʻsh — standart serverlar ishlatiladi (Cloudflare, Google DoH).</string>
+    <string name="dns_all_disabled">Barcha serverlar oʻchirilgan — standart serverlar ishlatiladi (Cloudflare, Google DoH).</string>
+    <string name="dns_ipv6_title">IPv6 javoblari (AAAA)</string>
+    <string name="dns_ipv6_on">IPv4 va IPv6 manzillarni qaytarish</string>
+    <string name="dns_ipv6_off">Faqat IPv4 (tavsiya etiladi)</string>
+    <string name="dns_reset_button">Standartga qaytarish</string>
+    <string name="dns_limitations">Chiqarib tashlangan ilovalarga, qatʼiy rejimdagi Android Shaxsiy DNSga va brauzerlarning oʻrnatilgan DNSiga taʼsir qilmaydi.</string>
+    <string name="dns_delete_title">Server oʻchirilsinmi?</string>
+    <string name="dns_delete_confirm">Oʻchirish</string>
+    <string name="dns_cancel">Bekor qilish</string>
+    <string name="dns_reset_title">DNS standartga qaytarilsinmi?</string>
+    <string name="dns_reset_message">Roʻyxat tozalanadi va standart serverlar (Cloudflare, Google DoH) ishlatiladi. IPv6 javoblari oʻchiriladi.</string>
+    <string name="dns_reset_confirm">Qaytarish</string>
+    <string name="dns_cd_move_up">%1$s ni yuqoriga surish</string>
+    <string name="dns_cd_move_down">%1$s ni pastga surish</string>
+    <string name="dns_cd_delete">%1$s ni oʻchirish</string>
+
+    <!-- Hotspot sharing guide -->
+    <string name="hotspot_title">VPN tarqatish</string>
+    <string name="hotspot_cd_back">Orqaga</string>
+    <string name="hotspot_back">Orqaga</string>
+    <string name="hotspot_host_hint_unknown">Yuqoridagi blokdagi IP</string>
+    <string name="hotspot_status_connect_first">Avval VPNga ulaning</string>
+    <string name="hotspot_status_on_but_disabled">Tarqatish faol, lekin Sozlamalarda oʻchirilgan — qayta ulangandan keyin toʻxtaydi</string>
+    <string name="hotspot_status_working">Tarqatish faol</string>
+    <string name="hotspot_status_enable_in_settings">Sozlamalarda «Hotspot orqali tarqatish»ni yoqing va qayta ulaning</string>
+    <string name="hotspot_status_no_hotspot">Hotspot aniqlanmadi. Hotspotni yoqing va VPNga qayta ulaning</string>
+    <string name="hotspot_params_title">Proksi sozlamalari</string>
+    <string name="hotspot_http_proxy">HTTP proksi</string>
+    <string name="hotspot_socks5">SOCKS5</string>
+    <string name="hotspot_auth_note">HTTP proksida parol yoʻq. Login va parol faqat SOCKS5 uchun kerak.</string>
+    <string name="hotspot_login">Login</string>
+    <string name="hotspot_password">Parol</string>
+    <string name="hotspot_new_password_pending">Yangi parol VPNga qayta ulangandan keyin kuchga kiradi.</string>
+    <string name="hotspot_change_password">Parolni oʻzgartirish</string>
+    <string name="hotspot_password_change_note">Parol oʻzgarishi VPNga qayta ulangandan keyin kuchga kiradi.</string>
+    <string name="hotspot_copied">Nusxalandi: %1$s</string>
+    <string name="hotspot_cd_copy">Nusxalash: %1$s</string>
+    <string name="hotspot_cd_show_password">Parolni koʻrsatish</string>
+    <string name="hotspot_cd_hide_password">Parolni yashirish</string>
+    <string name="hotspot_before_title">Boshlashdan oldin</string>
+    <string name="hotspot_before_step1">Sozlamalarda «Hotspot orqali tarqatish»ni yoqing</string>
+    <string name="hotspot_before_step2">Shu telefonda hotspotni yoqing</string>
+    <string name="hotspot_before_step3">VPNga ulaning (hotspotni yoqgandan keyin)</string>
+    <string name="hotspot_before_step4">Boshqa qurilmani hotspotingizga ulang</string>
+    <string name="hotspot_step_save">«Saqlash» tugmasini bosing</string>
+    <string name="hotspot_android_title">Android</string>
+    <string name="hotspot_android_step1">Sozlamalar → Wi-Fi</string>
+    <string name="hotspot_android_step2">Hotspot tarmogʻingizni bosib turing → «Oʻzgartirish» (yoki ⚙ belgisi)</string>
+    <string name="hotspot_android_step3">«Kengaytirilgan sozlamalar»ni oching</string>
+    <string name="hotspot_android_step4">Proksi → «Qoʻlda»</string>
+    <string name="hotspot_android_step5">Xost: %1$s, port: %2$d</string>
+    <string name="hotspot_ios_title">iPhone / iPad</string>
+    <string name="hotspot_ios_step1">Sozlamalar → Wi-Fi</string>
+    <string name="hotspot_ios_step2">Hotspot tarmogʻingiz yonidagi (i) belgisini bosing</string>
+    <string name="hotspot_ios_step3">Pastda: «Proksini sozlash» → «Qoʻlda»</string>
+    <string name="hotspot_ios_step4">Server: %1$s, port: %2$d</string>
+    <string name="hotspot_ios_step5">Autentifikatsiya — oʻchiq</string>
+    <string name="hotspot_desktop_title">Windows / macOS</string>
+    <string name="hotspot_desktop_windows">Windows: Sozlamalar → Tarmoq va Internet → Proksi → «Proksi serverdan foydalanish» → manzil %1$s, port %2$d → Saqlash</string>
+    <string name="hotspot_desktop_macos">macOS: Tizim sozlamalari → Wi-Fi → Tafsilotlar… → Proksilar → «Veb-proksi (HTTP)» va «Xavfsiz veb-proksi (HTTPS)» → %1$s : %2$d → OK</string>
+    <string name="hotspot_telegram_title">Telegram (SOCKS5)</string>
+    <string name="hotspot_telegram_step1">Sozlamalar → Maʼlumotlar va xotira → Proksi → Proksi qoʻshish</string>
+    <string name="hotspot_telegram_step2">Turi: SOCKS5</string>
+    <string name="hotspot_telegram_step3">Server: %1$s, port: %2$d</string>
+    <string name="hotspot_telegram_step4">Login: %1$s, parol: yuqoridagi blokdan</string>
+    <string name="hotspot_telegram_step5">Saqlang va proksini yoqing</string>
+    <string name="hotspot_notes_title">Muhim</string>
+    <string name="hotspot_note_access">Proksi faqat hotspotingizga ulangan qurilmalar uchun mavjud. U hotspot paroli bilan himoyalangan.</string>
+    <string name="hotspot_note_not_all_traffic">Ilovalarning hamma trafigi ham tizim proksisi orqali oʻtmaydi (baʼzi oʻyinlar va ilovalar uni eʼtiborsiz qoldiradi).</string>
+    <string name="hotspot_note_ip_changed">Agar hotspot IP manzili oʻzgargan boʻlsa (hotspot oʻchirilgan boʻlsa), VPNga qayta ulaning va boshqa qurilmadagi sozlamalarni yangilang.</string>
+    <string name="hotspot_verify_title">Tekshirish</string>
+    <string name="hotspot_verify_text">Boshqa qurilmada brauzerni oching va IP manzilingizni 2ip.ru yoki whoer.net saytida tekshiring — u VPN serverining IP manziliga mos kelishi kerak.</string>
+    <string name="hotspot_disable_title">Qanday oʻchirish mumkin</string>
+    <string name="hotspot_disable_text">Boshqa qurilmada yuqoridagi qadamlarni takrorlang va «Proksi»ni «Yoʻq» holatiga qoʻying (iOSda — «Oʻchiq»).</string>
+    <!-- Appearance -->
+    <string name="settings_section_appearance">Koʻrinish</string>
+    <string name="settings_theme_title">Mavzu</string>
+    <string name="settings_theme_system">Tizim boʻyicha</string>
+    <string name="settings_theme_light">Yorugʻ</string>
+    <string name="settings_theme_dark">Qorongʻi</string>
+    <!-- In-app language (language names themselves are constants in AppLocale.OPTIONS) -->
+    <string name="settings_language_title">Til</string>
+    <string name="settings_language_dialog_title">Ilova tili</string>
+    <string name="settings_language_system">Tizim boʻyicha</string>
+    <string name="settings_language_cancel">Bekor qilish</string>
+</resources>

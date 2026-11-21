@@ -1,5 +1,6 @@
 package com.myappvpn.ui.screens
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -33,6 +34,7 @@ import com.myappvpn.ui.theme.*
 import com.myappvpn.ui.viewmodel.DnsViewModel
 import com.myappvpn.ui.viewmodel.OpenFluxViewModel
 import com.myappvpn.ui.viewmodel.SettingsViewModel
+import com.myappvpn.util.AppLocale
 
 @Composable
 fun SettingsScreen(
@@ -57,6 +59,10 @@ fun SettingsScreen(
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
+    // Re-read on every (re)creation: picking a language recreates the activity.
+    val languageTag = remember { viewModel.currentLanguage() }
+    var showLanguageDialog by rememberSaveable { mutableStateOf(false) }
+    val activity = LocalActivity.current
 
     // Connection-time settings only take effect on the next connect while a session is active.
     val sessionActive = vpnState != VpnState.DISCONNECTED && vpnState != VpnState.ERROR
@@ -201,6 +207,14 @@ fun SettingsScreen(
                 subtitle = themeMode?.let { stringResource(themeLabelRes(it)) } ?: "",
                 onClick = { showThemeDialog = true }
             )
+            SettingsDivider()
+            SettingsNavigateItem(
+                icon = Icons.Default.Language,
+                title = stringResource(R.string.settings_language_title),
+                subtitle = AppLocale.OPTIONS.firstOrNull { it.first == languageTag }?.second
+                    ?: stringResource(R.string.settings_language_system),
+                onClick = { showLanguageDialog = true }
+            )
         }
 
         // About
@@ -239,6 +253,60 @@ fun SettingsScreen(
             onDismiss = { showThemeDialog = false }
         )
     }
+
+    if (showLanguageDialog) {
+        LanguageDialog(
+            current = languageTag,
+            onSelect = { tag ->
+                showLanguageDialog = false
+                if (tag != languageTag) activity?.let { viewModel.setLanguage(it, tag) }
+            },
+            onDismiss = { showLanguageDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun LanguageDialog(current: String, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
+    val options = listOf("" to stringResource(R.string.settings_language_system)) + AppLocale.OPTIONS
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = AetherSurface,
+        title = { Text(stringResource(R.string.settings_language_dialog_title), color = AetherTextPrimary) },
+        text = {
+            Column(Modifier.selectableGroup().verticalScroll(rememberScrollState())) {
+                options.forEach { (tag, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .selectable(
+                                selected = current == tag,
+                                role = Role.RadioButton,
+                                onClick = { onSelect(tag) }
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        RadioButton(
+                            selected = current == tag,
+                            onClick = null,
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = AetherCyan,
+                                unselectedColor = AetherTextTertiary
+                            )
+                        )
+                        Text(label, color = AetherTextPrimary)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_language_cancel), color = AetherCyan)
+            }
+        }
+    )
 }
 
 private fun themeLabelRes(mode: String): Int = when (mode) {

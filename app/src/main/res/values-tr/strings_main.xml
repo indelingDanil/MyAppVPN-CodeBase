@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Main flow (Home / Servers / Stats / bottom nav). Turkish translation. -->
+<resources>
+    <!-- Bottom navigation -->
+    <string name="nav_home">Ana Sayfa</string>
+    <string name="nav_servers">Sunucular</string>
+    <string name="nav_stats">İstatistik</string>
+    <string name="nav_settings">Ayarlar</string>
+
+    <!-- Connect button -->
+    <string name="main_connect_action_connect">BAĞLAN</string>
+    <string name="main_connect_action_disconnect">BAĞLANTIYI KES</string>
+    <string name="main_connect_progress_connecting">BAĞLANIYOR</string>
+    <string name="main_connect_progress_disconnecting">DURDURULUYOR</string>
+    <string name="main_connect_progress_recovering">YENİDEN BAĞLANIYOR</string>
+    <string name="main_connect_action_retry">TEKRAR DENE</string>
+    <string name="main_connect_hint_cancel">iptal için dokunun</string>
+    <string name="main_connect_cd">VPN</string>
+    <string name="main_connect_click_connect">VPN\'e bağlan</string>
+    <string name="main_connect_click_disconnect">VPN bağlantısını kes</string>
+    <string name="main_state_connected">Bağlandı</string>
+    <string name="main_state_connecting">Bağlanıyor</string>
+    <string name="main_state_disconnecting">Bağlantı kesiliyor</string>
+    <string name="main_state_blocked">Trafik engellendi, onarılıyor</string>
+    <string name="main_state_error">Bağlantı hatası</string>
+    <string name="main_state_disconnected">Bağlı değil</string>
+
+    <!-- Speed / session indicators -->
+    <string name="main_speed_up">Yükleme</string>
+    <string name="main_speed_down">İndirme</string>
+    <string name="main_session_duration">Süre</string>
+    <string name="main_session_received">Alınan</string>
+    <string name="main_session_sent">Gönderilen</string>
+
+    <!-- Home -->
+    <string name="home_status_connected">Korunuyor</string>
+    <string name="home_status_connecting">Çalışan bir sunucu aranıyor…</string>
+    <string name="home_status_disconnecting">Bağlantı kesiliyor…</string>
+    <string name="home_status_blocked">Bağlantı koptu — trafik korunuyor, yeniden bağlanılıyor…</string>
+    <string name="home_status_error">Bağlantı hatası</string>
+    <string name="home_status_disconnected">Korunmuyor</string>
+    <string name="home_hotspot_title">Hotspot üzerinden paylaşım</string>
+    <string name="home_hotspot_subtitle">HTTP %1$s:%2$d · talimatlar için dokunun</string>
+    <string name="home_mode_auto">Otomatik</string>
+    <string name="home_mode_manual">Manuel</string>
+    <string name="home_switching">Değiştiriliyor…</string>
+    <string name="home_auto_active">%1$s · otomatik seçildi</string>
+    <string name="home_auto_hint">En iyi sunucuyu otomatik seçer</string>
+    <string name="home_pinned_latency">%1$s · %2$d ms</string>
+    <string name="home_change">Değiştir</string>
+    <string name="home_no_server">Sunucu seçilmedi — seçmek için dokunun</string>
+    <string name="home_choose_server">Sunucu seç</string>
+    <string name="home_server_down">Sunucu yanıt vermiyor</string>
+    <string name="home_switch_to_auto">Otomatiğe geç</string>
+    <string name="home_err_pick_server">Bir sunucu seçin veya Otomatik modu açın.</string>
+    <string name="home_err_vpn_permission">VPN izni gerekli</string>
+    <string name="home_err_connect_failed">Bağlanılamadı: %1$s</string>
+
+    <!-- Servers -->
+    <string name="servers_title">Sunucular</string>
+    <plurals name="servers_count">
+        <item quantity="one">%d sunucu</item>
+        <item quantity="other">%d sunucu</item>
+    </plurals>
+    <string name="servers_count_filtered">%2$d sunucudan %1$d tanesi gösteriliyor</string>
+    <string name="servers_ping">Ping</string>
+    <string name="servers_refresh">Yenile</string>
+    <string name="servers_filter_no_ru">Rus sunucuları hariç</string>
+    <string name="servers_search_hint">Ülkeye veya ada göre ara…</string>
+    <string name="servers_clear_search">Aramayı temizle</string>
+    <string name="servers_ping_progress">Gecikme ölçülüyor…</string>
+    <string name="servers_loading">Sunucular yükleniyor…</string>
+    <string name="servers_section_working">Son 24 saatte çalışanlar</string>
+    <string name="servers_section_all">Tüm sunucular</string>
+    <string name="servers_auto_title">Otomatik mod</string>
+    <string name="servers_auto_subtitle">En iyi sunucu otomatik olarak seçilir</string>
+    <string name="servers_selected">Seçili</string>
+    <string name="servers_active">etkin</string>
+    <string name="servers_empty_search">Hiçbir şey bulunamadı</string>
+    <string name="servers_empty">Sunucu yok</string>
+    <string name="servers_remove_from_pool">Çalışanlardan kaldır</string>
+    <string name="servers_removed_from_pool">Sunucu çalışanlardan kaldırıldı</string>
+    <string name="servers_undo">Geri al</string>
+    <string name="servers_latency_ms">%1$d ms</string>
+    <string name="servers_latency_cd">Gecikme %1$d ms</string>
+    <string name="servers_latency_timeout">Erişilemiyor</string>
+    <string name="servers_latency_unknown">Test edilmedi</string>
+    <string name="servers_validation_verified">Çalıştığı doğrulandı</string>
+    <string name="servers_validation_handshake">El sıkışma başarılı</string>
+    <string name="servers_validation_stale">Kontrol güncel değil</string>
+    <string name="servers_err_load">Sunucular yüklenemedi: %1$s</string>
+
+    <!-- Stats -->
+    <string name="stats_title">İstatistik</string>
+    <string name="stats_vpn_active">VPN etkin</string>
+    <string name="stats_vpn_connecting">Bağlanıyor…</string>
+    <string name="stats_vpn_blocked">Trafik engellendi, onarılıyor…</string>
+    <string name="stats_vpn_disconnecting">Bağlantı kesiliyor…</string>
+    <string name="stats_vpn_error">Bağlantı hatası</string>
+    <string name="stats_vpn_inactive">VPN etkin değil</string>
+    <string name="stats_upload_speed">Yükleme hızı</string>
+    <string name="stats_download_speed">İndirme hızı</string>
+    <string name="stats_uploaded">Yüklenen</string>
+    <string name="stats_downloaded">İndirilen</string>
+    <string name="stats_session_duration">Oturum süresi</string>
+    <string name="stats_hint_disconnected">Canlı istatistikleri görmek için VPN\'e bağlanın</string>
+</resources>

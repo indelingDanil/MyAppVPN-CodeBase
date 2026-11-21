@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_project">Homiylik</string>
+
+    <string name="project_title">Loyihani qoʻllab-quvvatlash</string>
+    <string name="project_subtitle">MyAppVPN %1$s · bitta dasturchining ochiq kodli loyihasi</string>
+
+    <string name="support_tg_title">Telegram kanali</string>
+    <string name="support_tg_subtitle">Yangiliklar va relizlar — yangilanishlardan birinchi boʻlib xabardor boʻling</string>
+    <string name="support_github_title">GitHub</string>
+    <string name="support_github_subtitle">Manba kodi, relizlar, xatolar haqida xabarlar va gʻoyalar</string>
+
+    <string name="support_title">Xayriya ☕</string>
+    <string name="support_text">Ilova bepul va bepulligicha qoladi. Xayriya butunlay ixtiyoriy, lekin har bir kichik yordam ishni davom ettirishga turtki beradi: tuzatish, yangilash va yangi narsalar yaratish.</string>
+    <string name="support_dream">Orzu: oʻz ilovam bilan %1$s ₽ ishlab topish 😄</string>
+    <string name="support_progress">Reliz vaqtida yigʻilgan: %1$s ₽ · yoʻlning %2$s%%</string>
+    <string name="support_cloudtips">CloudTips orqali xayriya (RUB)</string>
+    <string name="support_crypto">Kriptovalyutada</string>
+    <string name="support_copy_action">Manzilni nusxalash</string>
+    <string name="support_copied">%1$s manzili nusxalandi</string>
+    <string name="support_thanks">Ilovadan foydalanayotgan va uni ulashayotgan hammaga rahmat ❤️</string>
+
+    <string name="support_disclaimer">⚠️ Taʼlimiy loyiha, oʻrganish va tadqiqot maqsadida yaratilgan. Muallif ilovadan qanday foydalanishingiz uchun javobgar emas. Rossiyada bloklashlarni chetlab oʻtishga moʻljallangan VPN xizmatlari qonun bilan cheklangan va noqonuniy deb hisoblanishi mumkin. Oʻz xavfingiz ostida foydalaning.</string>
+</resources>
