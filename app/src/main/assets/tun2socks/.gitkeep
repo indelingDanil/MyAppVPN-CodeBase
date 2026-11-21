@@ -1,9 +1,0 @@
-Place tun2socks binaries here.
-See SETUP.md for download instructions.
-
-Required files:
-- tun2socks-arm64-v8a
-- tun2socks-armeabi-v7a
-- tun2socks-x86_64
-
-Download from: https://github.com/xjasonlyu/tun2socks/releases/latest

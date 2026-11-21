@@ -29,11 +29,9 @@ app/debug/
 # Logs
 *.log
 
-# Binaries (download per SETUP.md)
-app/src/main/assets/xray/xray-*
+# Xray geo data (see README.md -> Building); executables live in app/src/main/jniLibs
 app/src/main/assets/xray/geoip.dat
 app/src/main/assets/xray/geosite.dat
-app/src/main/assets/tun2socks/tun2socks-*
 
 # Claude Code
 .claude/
