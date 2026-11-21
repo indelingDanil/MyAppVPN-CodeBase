@@ -72,7 +72,7 @@ class HomeViewModel @Inject constructor(
     /** Channel to the own exit (the demo is always direct). */
     val openfluxChannel: StateFlow<com.myappvpn.domain.OpenFluxChannel> =
         combine(preferences.openfluxChannel, preferences.openfluxDemo) { ch, demo ->
-            if (demo) com.myappvpn.domain.OpenFluxChannel.DIRECT else com.myappvpn.domain.OpenFluxChannel.of(ch)
+            if (demo) com.myappvpn.domain.OpenFluxChannel.DIRECT else com.myappvpn.domain.OpenFluxChannel.effective(ch)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, com.myappvpn.domain.OpenFluxChannel.DIRECT)
 
     /** Carrier the live OpenFlux session rides (mailru / cupsonline / session / yandex …) or null. */

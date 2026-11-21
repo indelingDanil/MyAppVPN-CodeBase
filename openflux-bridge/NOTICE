@@ -3,12 +3,19 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 This program links the OpenFlux core as a Go library:
   module  github.com/p1neappleXpress/OpenFlux
-  version v0.13.0 (commit 4f9c786cdd1d9fcd0c133e2e0fec0c5a12522610)
+  version v0.17.1 (commit f492a1a33b7581ad8f88118f97e0b866adda3cdc)
   source  https://github.com/p1neappleXpress/OpenFlux
   licence GNU General Public License v3.0 or later
 
 carriers.go reimplements the client-side Session assembly of the core's
-mobile bridge (mobile/session.go, mobile/proxy.go of the same repository).
+mobile bridge (mobile/session.go, mobile/share.go, mobile/proxy.go of the
+same repository).
+
+third_party/sctp is the core's patched copy of pion/sctp v1.11.3 (MIT, see
+third_party/sctp/LICENSE and OPENFLUX_PATCH.md), taken unchanged from
+third_party/sctp of the OpenFlux tag above. go.mod replaces
+github.com/pion/sctp with it, as the core's own go.mod does (a dependency's
+replace directive does not reach this module).
 
 The upstream COPYRIGHT and NOTICE files follow unchanged.
 

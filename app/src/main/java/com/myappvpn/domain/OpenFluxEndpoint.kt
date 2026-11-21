@@ -124,7 +124,7 @@ object OpenFluxEndpoint {
         return if (preferences.openfluxDemo.first()) {
             Resolved(demoUrl, demoToken, demo = true)
         } else {
-            val channel = OpenFluxChannel.of(preferences.openfluxChannel.first())
+            val channel = OpenFluxChannel.effective(preferences.openfluxChannel.first())
             val link = when (channel) {
                 OpenFluxChannel.DIRECT -> ""
                 OpenFluxChannel.MAILRU -> preferences.openfluxLinkMailru.first()
@@ -157,8 +157,28 @@ enum class OpenFluxChannel(val key: String, val transport: String) {
     /** An openflux://v1/… share link to any OpenFlux node (+ optional key). */
     LINK("link", "session");
 
+    /** Carried through a third-party document service (Mail.ru / Cups), see [SHOW_DOC_CHANNELS]. */
+    val isDocChannel: Boolean get() = this == MAILRU || this == CUPS
+
     companion object {
+        /**
+         * Feature flag for the document channels (Mail.ru / Cups). Off: Mail.ru now refuses
+         * anonymous editors (HTTP 401 "public is available with auth only") and account sign-in
+         * isn't implemented. While off they are hidden in the UI and a stored mailru/cups choice is
+         * treated as [DIRECT] (the stored links stay untouched). Set to true to bring them back.
+         */
+        const val SHOW_DOC_CHANNELS = false
+
+        /** Channels offered on the OpenFlux screen. */
+        val selectable: List<OpenFluxChannel>
+            get() = entries.filter { SHOW_DOC_CHANNELS || !it.isDocChannel }
+
+        /** Raw stored value → channel (no feature-flag mapping). */
         fun of(key: String?): OpenFluxChannel = entries.firstOrNull { it.key == key } ?: DIRECT
+
+        /** Stored value → the channel actually used (hidden doc channels fall back to [DIRECT]). */
+        fun effective(key: String?): OpenFluxChannel =
+            of(key).let { if (!SHOW_DOC_CHANNELS && it.isDocChannel) DIRECT else it }
         fun ofTransport(t: String?): OpenFluxChannel = entries.firstOrNull { it.transport == t } ?: DIRECT
     }
 }

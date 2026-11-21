@@ -2,9 +2,9 @@ module github.com/indelingDanil/myappvpn/openflux-bridge
 
 go 1.26.6
 
-// OpenFlux core (GPL-3.0), tag v0.13.0 = commit 4f9c786cdd1d9fcd0c133e2e0fec0c5a12522610;
+// OpenFlux core (GPL-3.0), tag v0.17.1 = commit f492a1a33b7581ad8f88118f97e0b866adda3cdc;
 // go.sum pins the exact content.
-require github.com/p1neappleXpress/OpenFlux v0.13.0
+require github.com/p1neappleXpress/OpenFlux v0.17.1
 
 require (
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
@@ -44,3 +44,7 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	gvisor.dev/gvisor v0.0.0-20260530041128-23ef90c42be7 // indirect
 )
+
+// The core's patched pion/sctp (third_party/sctp/OPENFLUX_PATCH.md, MIT): the core
+// calls sctp.SetOutboundMTU; its own replace directive does not reach this module.
+replace github.com/pion/sctp => ./third_party/sctp

@@ -114,7 +114,7 @@ fun OpenFluxScreen(
     val saved = savedOrNull ?: OwnExit()
     val savedUrl = saved.url
     val savedToken = saved.token
-    val channel = OpenFluxChannel.of(channelKey)
+    val channel = OpenFluxChannel.effective(channelKey)
     val draft = OwnExit(urlDraft, tokenDraft, channel, mailruDraft, cupsDraft, shareDraft, secretDraft)
     val urlError = remember(urlDraft) { OpenFluxConfig.validateUrl(urlDraft) }
     // Errors are shown (and block saving) only for the fields of the selected channel.
@@ -886,7 +886,7 @@ private fun ChannelSelector(
                 Triple(OpenFluxChannel.MAILRU, R.string.openflux_channel_mailru, R.string.openflux_channel_mailru_desc),
                 Triple(OpenFluxChannel.CUPS, R.string.openflux_channel_cups, R.string.openflux_channel_cups_desc),
                 Triple(OpenFluxChannel.LINK, R.string.openflux_channel_link, R.string.openflux_channel_link_desc),
-            ).forEach { (ch, titleRes, descRes) ->
+            ).filter { it.first in OpenFluxChannel.selectable }.forEach { (ch, titleRes, descRes) ->
                 val isSelected = ch == selected
                 Row(
                     modifier = Modifier

@@ -536,3 +536,19 @@ func localLANIPv4() string {
 	}
 	return ""
 }
+
+// A script carrier's own page (inline html or its loopback server) cannot be
+// opened by the app: the line still says "captcha", with "-" for the address.
+func TestPromptOwnPageNote(t *testing.T) {
+	for _, tc := range []struct{ url, html string }{
+		{"", "<html></html>"},
+		{"http://127.0.0.1:8123/setup", ""},
+	} {
+		var out bytes.Buffer
+		ck := newChecks("", &out)
+		ck.pending("script", tc.url, tc.html, "setup", "", nil)
+		if got := out.String(); got != "OFNOTE captcha -\n" {
+			t.Fatalf("%q/%q: note %q", tc.url, tc.html, got)
+		}
+	}
+}

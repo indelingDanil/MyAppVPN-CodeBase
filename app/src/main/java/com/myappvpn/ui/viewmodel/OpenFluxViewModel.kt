@@ -250,7 +250,7 @@ class OpenFluxViewModel @Inject constructor(
             preferences.openfluxSecret,
         )
     ) { a ->
-        OwnExit(a[0], a[1], OpenFluxChannel.of(a[2]), a[3], a[4], a[5], a[6])
+        OwnExit(a[0], a[1], OpenFluxChannel.effective(a[2]), a[3], a[4], a[5], a[6])
     }
         .map<OwnExit, OwnExit?> { it }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)

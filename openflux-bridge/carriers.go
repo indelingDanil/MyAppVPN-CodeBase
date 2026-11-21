@@ -46,6 +46,7 @@ import (
 	"github.com/p1neappleXpress/OpenFlux/transport/manager"
 	"github.com/p1neappleXpress/OpenFlux/transport/phpbox"
 	"github.com/p1neappleXpress/OpenFlux/transport/registry"
+	"github.com/p1neappleXpress/OpenFlux/transport/script"
 	"github.com/p1neappleXpress/OpenFlux/tunnel"
 	"github.com/p1neappleXpress/OpenFlux/utils"
 )
@@ -224,14 +225,17 @@ func newChecks(path string, out io.Writer) *checks {
 	return c
 }
 
-func (c *checks) pending(name, rawURL, reason, key string, apply func(map[string]string) error) {
+func (c *checks) pending(name, rawURL, html, reason, key string, apply func(map[string]string) error) {
 	log.Printf("%s: browser check needed (%s)", name, reason)
 	c.mu.Lock()
 	c.key, c.apply = key, apply
 	c.asked.Store(true)
 	c.mu.Unlock()
+	if script.IsOwnPage(rawURL, html) {
+		rawURL = "" // the script's own page (inline html / its loopback server): not supported here
+	}
 	if rawURL == "" {
-		rawURL = "-" // a page the carrier built itself (script carriers): not supported here
+		rawURL = "-"
 	}
 	fmt.Fprintf(c.out, "OFNOTE captcha %s\n", strings.ReplaceAll(rawURL, " ", "%20"))
 }
@@ -295,11 +299,11 @@ func (c *checks) attachRaw(typ, link string, raw transport.Transport) {
 		}
 	}
 	if n, ok := raw.(transport.ErrorNotifier); ok {
-		n.SetErrorNotifier(func(_ error, name, rawURL, _, reason string) {
+		n.SetErrorNotifier(func(_ error, name, rawURL, html, reason string) {
 			if name == "" {
 				name = typ
 			}
-			c.pending(name, rawURL, reason, key, apply)
+			c.pending(name, rawURL, html, reason, key, apply)
 		})
 	}
 }
@@ -391,11 +395,16 @@ func buildSession(p *carrierPlan, ck *checks) (transport.Transport, *transport.S
 		return transport.NewCodecTransport(raw, p.cfg.Codec, true), nil, types, nil
 	}
 
+	// Like mobile (ShareSessionSpecs → parseSessionSpecs): the link's context
+	// is pinned first (share.ContextOf: the link's explicit context, else the
+	// fixed placeholder) and passed as the explicit one, so the primary is
+	// that pinned string and the alternates are the legacy contexts older
+	// nodes derived from carrier URLs/names.
 	sources := make([]transport.ContextSource, len(specs))
 	for i, s := range specs {
 		sources[i] = transport.ContextSource{Type: s.typ, URL: s.url, Priority: s.priority}
 	}
-	context, alternates := transport.KDFContexts(p.cfg.Context, "", sources)
+	context, alternates := transport.KDFContexts(share.ContextOf(p.cfg), "", sources)
 	sess, err := transport.NewSession(transport.PeerParameters{
 		Capabilities:  transport.CapabilityIPv4 | transport.CapabilityTCP | transport.CapabilityUDP | transport.CapabilityICMPErrors,
 		MaxPacketSize: transport.MaxNegotiatedPacket,
@@ -443,8 +452,8 @@ func buildSession(p *carrierPlan, ck *checks) (transport.Transport, *transport.S
 			}
 		}
 	}
-	m.SetCaptchaNotifier(func(name, rawURL, _, reason string) {
-		ck.pending(name, rawURL, reason, keys[name], func(jar map[string]string) error { return m.ApplyCookiesFor(name, jar) })
+	m.SetPromptNotifier(func(name, rawURL, html, reason string) { // core: "prompt"; still OFNOTE captcha on stdout
+		ck.pending(name, rawURL, html, reason, keys[name], func(jar map[string]string) error { return m.ApplyCookiesFor(name, jar) })
 	})
 	return m, sess, types, nil
 }

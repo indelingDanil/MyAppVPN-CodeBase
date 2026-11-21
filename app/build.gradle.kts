@@ -17,8 +17,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // Per-ABI APKs get versionCode * 10 + 1 (armeabi-v7a) / + 2 (arm64-v8a), see androidComponents.
-        versionCode = 15
-        versionName = "2.2.0-beta"
+        versionCode = 16
+        versionName = "2.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Personal tester builds: ./gradlew assembleDebug -PofPresetUrl=… -PofPresetToken=… (empty = none).
