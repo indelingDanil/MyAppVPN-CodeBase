@@ -25,7 +25,7 @@ JNIEXPORT jint JNICALL
 Java_com_myappvpn_util_NativeHelper_startTun2Socks(
         JNIEnv *env, jclass /*cls*/,
         jstring jBinary, jint tunFd, jint socksPort,
-        jstring jProxyUser, jstring jProxyPass)
+        jstring jProxyUser, jstring jProxyPass, jstring jOwnerSocket)
 {
     const char *binary = env->GetStringUTFChars(jBinary, nullptr);
     if (!binary) { LOGE("null binary string"); return -1; }
@@ -43,6 +43,17 @@ Java_com_myappvpn_util_NativeHelper_startTun2Socks(
                  proxyUser, proxyPass, (int)socksPort);
     } else {
         snprintf(proxy_arg, sizeof(proxy_arg), "socks5://127.0.0.1:%d", (int)socksPort);
+    }
+
+    // Optional socket-owner check (tun2socks-owner): abstract socket served by OwnerUidServer.
+    char owner_arg[128];
+    owner_arg[0] = '\0';
+    if (jOwnerSocket) {
+        const char *ownerSocket = env->GetStringUTFChars(jOwnerSocket, nullptr);
+        if (ownerSocket) {
+            snprintf(owner_arg, sizeof(owner_arg), "%s", ownerSocket);
+            env->ReleaseStringUTFChars(jOwnerSocket, ownerSocket);
+        }
     }
 
     // Release JNI strings before fork
@@ -94,13 +105,16 @@ Java_com_myappvpn_util_NativeHelper_startTun2Socks(
         }
 
         // binary pointer is still valid (COW after fork, used before parent releases)
-        char *const argv[] = {
-            const_cast<char*>(binary),
-            const_cast<char*>("-device"),   fd_arg,
-            const_cast<char*>("-proxy"),    proxy_arg,
-            const_cast<char*>("-loglevel"), const_cast<char*>("error"),
-            nullptr
-        };
+        char *argv[10];
+        int argc = 0;
+        argv[argc++] = const_cast<char*>(binary);
+        argv[argc++] = const_cast<char*>("-device");   argv[argc++] = fd_arg;
+        argv[argc++] = const_cast<char*>("-proxy");    argv[argc++] = proxy_arg;
+        argv[argc++] = const_cast<char*>("-loglevel"); argv[argc++] = const_cast<char*>("error");
+        if (owner_arg[0] != '\0') {
+            argv[argc++] = const_cast<char*>("-owner-socket"); argv[argc++] = owner_arg;
+        }
+        argv[argc] = nullptr;
 
         execv(binary, argv);
         // execv only returns on failure
@@ -113,7 +127,7 @@ Java_com_myappvpn_util_NativeHelper_startTun2Socks(
         fcntl((int)tunFd, F_SETFD, flags | FD_CLOEXEC);
     }
 
-    LOGI("process started: pid=%d", pid);
+    LOGI("process started: pid=%d owner-check=%s", pid, owner_arg[0] ? "on" : "off");
     env->ReleaseStringUTFChars(jBinary, binary);
     return (jint)pid;
 }

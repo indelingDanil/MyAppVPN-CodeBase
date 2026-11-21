@@ -14,22 +14,47 @@ object XrayConfigBuilder {
     const val RULE_TAG_LOCAL_BLOCK = "local-block"
     const val RULE_TAG_LOCAL_BLOCK_DOMAIN = "local-block-domain"
     const val RULE_TAG_HOTSPOT_PRIVATE_BLOCK = "hotspot-private-block"
+    const val RULE_TAG_HOTSPOT_SELF_BLOCK = "hotspot-self-block"
+    const val RULE_TAG_HOTSPOT_OFFNET_BLOCK = "hotspot-offnet-block"
+
+    /**
+     * Placeholder listen path of the API inbound in config TEMPLATES. The VPN service always
+     * rewrites it to the real socket in the app's private files dir (MyVpnService.prepareConfig).
+     */
+    const val API_SOCKET_PLACEHOLDER = "/xray-api.sock"
+
+    /**
+     * Local control API inbound (dokodemo-door → the "api" handler), listening on a Unix domain
+     * socket at [socketPath] instead of a loopback TCP port: a socket file inside the app's
+     * private data dir can't be opened by other apps (Linux DAC + per-app SELinux), while any
+     * app could connect to a 127.0.0.1 port and drive RoutingService (AddRule / balancer
+     * override — e.g. route the tunnel to "direct"). `network: unix` makes Xray create the UDS
+     * worker; a fixed `port` keeps dokodemo-door from parsing a port out of the socket address.
+     */
+    fun apiInbound(socketPath: String): JSONObject = JSONObject().apply {
+        put("tag", "api")
+        put("listen", socketPath)
+        put("protocol", "dokodemo-door")
+        put("settings", JSONObject().apply {
+            put("address", "127.0.0.1")
+            put("port", 1)
+            put("network", "unix")
+        })
+    }
 
     /**
      * Builds a minimal but complete xray JSON config for VLESS with various transport types.
      * Inbound: SOCKS5 on 127.0.0.1:socksPort (ALWAYS loopback — hotspot sharing adds its own
      * dedicated inbounds bound to the hotspot IP, see MyVpnService.prepareConfig).
      * Outbound: VLESS to remote server
-     * [includeHttpInbound] — add the loopback HTTP inbound on [httpPort]. Micro-tests pass
-     * false so parallel test instances don't fight over neighbouring ports.
+     * No loopback HTTP inbound: nothing in the app uses it (tun2socks, in-tunnel refresh and
+     * micro-tests all go through SOCKS), and every extra local listener is one more probe target.
      * [socksAccount] — optional user/password for the SOCKS inbound (micro-tests); the VPN
      * service injects its session credentials itself.
      */
     fun build(
         config: VlessConfig,
         socksPort: Int = 10808,
-        includeHttpInbound: Boolean = true,
-        httpPort: Int = socksPort + 1,
         socksAccount: Pair<String, String>? = null,
     ): String {
         val listenAddr = "127.0.0.1"
@@ -76,18 +101,6 @@ object XrayConfigBuilder {
                     put("ip", listenAddr)
                 })
             })
-            // HTTP inbound (optional, for apps that prefer HTTP proxy). Loopback-only.
-            if (includeHttpInbound) {
-                put(JSONObject().apply {
-                    put("tag", "http")
-                    put("port", httpPort)
-                    put("listen", "127.0.0.1")
-                    put("protocol", "http")
-                    put("settings", JSONObject().apply {
-                        put("allowTransparent", false)
-                    })
-                })
-            }
         })
 
         // Outbounds
@@ -151,8 +164,7 @@ object XrayConfigBuilder {
     fun buildBalancer(
         configs: List<VlessConfig>,
         socksPort: Int = 10808,
-        httpPort: Int = socksPort + 1,
-        apiPort: Int = socksPort + 2,
+        apiSocketPath: String = API_SOCKET_PLACEHOLDER,
     ): String {
         val listenAddr = "127.0.0.1"   // always loopback (hotspot inbounds are added separately)
         val root = JSONObject()
@@ -169,16 +181,14 @@ object XrayConfigBuilder {
             })
         })
 
-        // Local control API (RoutingService = balancer override `bo`/info `bi`,
-        // ObservatoryService = per-outbound alive/delay). Bound to loopback only, on [apiPort]
-        // (the VPN service picks a random free port per session).
-        // Lets the app know which proxy is alive/active and pin a chosen one (sticky) without
-        // restarting Xray — IF this build honors it (verified by an on-device spike).
+        // Local control API — RoutingService only (balancer override `bo` / info `bi`: the app
+        // pins the balancer to a chosen proxy without restarting Xray). ObservatoryService was
+        // never queried by the app, so it's not exposed. Reachable only via the Unix socket at
+        // [apiSocketPath] in the app's private dir (see [apiInbound]), never a TCP port.
         root.put("api", JSONObject().apply {
             put("tag", "api")
             put("services", JSONArray().apply {
                 put("RoutingService")
-                put("ObservatoryService")
             })
         })
 
@@ -194,21 +204,8 @@ object XrayConfigBuilder {
                     put("ip", listenAddr)
                 })
             })
-            put(JSONObject().apply {
-                put("tag", "http")
-                put("port", httpPort)
-                put("listen", "127.0.0.1")   // loopback-only; never expose HTTP proxy to LAN
-                put("protocol", "http")
-                put("settings", JSONObject().apply { put("allowTransparent", false) })
-            })
-            // API inbound (dokodemo-door) — loopback only; carries `xray api` gRPC calls.
-            put(JSONObject().apply {
-                put("tag", "api")
-                put("port", apiPort)
-                put("listen", "127.0.0.1")
-                put("protocol", "dokodemo-door")
-                put("settings", JSONObject().apply { put("address", "127.0.0.1") })
-            })
+            // API inbound (dokodemo-door on a private Unix socket); carries `xray api` gRPC calls.
+            put(apiInbound(apiSocketPath))
         })
 
         // One VLESS outbound per server, tagged proxy-0 … proxy-N
@@ -288,7 +285,7 @@ object XrayConfigBuilder {
     }
 
     /**
-     * OpenFlux (Beta) chain: the same loopback inbounds as [build] (socks + http; the service
+     * OpenFlux (Beta) chain: the same loopback inbound as [build] (socks; the service
      * injects auth / rewrites ports), but the "proxy" outbound is a SOCKS5 client to the local
      * OpenFlux bridge (127.0.0.1:[bridgePort], user/pass auth), which tunnels TCP through the
      * user's PHP exit.
@@ -300,7 +297,6 @@ object XrayConfigBuilder {
      */
     fun buildSocksChain(
         socksPort: Int,
-        httpPort: Int,
         bridgePort: Int,
         bridgeUser: String,
         bridgePass: String,
@@ -332,13 +328,6 @@ object XrayConfigBuilder {
                     put("udp", true)        // tun2socks needs UDP ASSOCIATE (DNS :53 → dns-out)
                     put("ip", listenAddr)
                 })
-            })
-            put(JSONObject().apply {
-                put("tag", "http")
-                put("port", httpPort)
-                put("listen", listenAddr)
-                put("protocol", "http")
-                put("settings", JSONObject().apply { put("allowTransparent", false) })
             })
         })
 
@@ -409,24 +398,17 @@ object XrayConfigBuilder {
     }
 
     /**
-     * Kill-switch config: the SAME loopback inbounds (socks/http/api on the session ports — the
-     * service injects auth) but a single blackhole outbound. Keeps our local ports bound while
-     * the session is BLOCKED, so no other local app can grab them and receive tun2socks traffic
-     * (with our credentials); every connection is simply dropped.
+     * Kill-switch config: the SAME loopback SOCKS inbound (session port — the service injects
+     * auth) but a single blackhole outbound. Keeps our local port bound while the session is
+     * BLOCKED, so no other local app can grab it and receive tun2socks traffic (with our
+     * credentials); every connection is simply dropped. No control API here: nothing pins a
+     * balancer while BLOCKED, and RoutingService would only be an extra attack surface.
      */
-    fun buildBlackhole(socksPort: Int, httpPort: Int, apiPort: Int): String {
+    fun buildBlackhole(socksPort: Int): String {
         val root = JSONObject()
         root.put("log", JSONObject().apply {
             put("loglevel", "warning")
             put("access", "none")
-        })
-        root.put("api", JSONObject().apply {
-            put("tag", "api")
-            put("services", JSONArray().apply {
-                // NOT ObservatoryService: it hard-requires an `observatory` section, which this
-                // config doesn't have — Xray would refuse to start and the port would go unbound.
-                put("RoutingService")
-            })
         })
         root.put("inbounds", JSONArray().apply {
             put(JSONObject().apply {
@@ -439,20 +421,6 @@ object XrayConfigBuilder {
                     put("udp", true)
                     put("ip", "127.0.0.1")
                 })
-            })
-            put(JSONObject().apply {
-                put("tag", "http")
-                put("port", httpPort)
-                put("listen", "127.0.0.1")
-                put("protocol", "http")
-                put("settings", JSONObject().apply { put("allowTransparent", false) })
-            })
-            put(JSONObject().apply {
-                put("tag", "api")
-                put("port", apiPort)
-                put("listen", "127.0.0.1")
-                put("protocol", "dokodemo-door")
-                put("settings", JSONObject().apply { put("address", "127.0.0.1") })
             })
         })
         root.put("outbounds", JSONArray().apply {
@@ -468,11 +436,6 @@ object XrayConfigBuilder {
             put("rules", JSONArray().apply {
                 put(JSONObject().apply {
                     put("type", "field")
-                    put("inboundTag", JSONArray().apply { put("api") })
-                    put("outboundTag", "api")
-                })
-                put(JSONObject().apply {
-                    put("type", "field")
                     put("network", "tcp,udp")
                     put("outboundTag", "block")
                 })
@@ -486,9 +449,25 @@ object XrayConfigBuilder {
      * right AFTER the api inboundTag rule (if any) and therefore before DNS hijack and the
      * geoip:private→direct rule. With [hotspotInboundTags] non-empty, also blocks every private
      * destination (phone LAN/loopback) for those inbounds. Ensures a "block" outbound exists.
+     *
+     * With [hotspotIp] set (and hotspot tags), the FIRST of our rules blackholes every hotspot
+     * connection that doesn't come from a hotspot client: sources = the phone's own hotspot
+     * address, loopback, and everything outside the hotspot subnet ([hotspotIp]/[hotspotPrefix]
+     * — this covers the phone's other addresses: mobile data, Wi-Fi client, TUN). The hotspot
+     * HTTP inbound has no auth (Android's Wi-Fi proxy can't do it), so without this any app on
+     * the phone outside the tunnel (split-tunnel INCLUDE mode) could CONNECT through it and learn
+     * the VPN exit IP. Real hotspot clients connect from other subnet addresses and keep working.
      */
-    fun applyLocalBlockRules(root: JSONObject, hotspotInboundTags: List<String> = emptyList()) {
-        val ourTags = setOf(RULE_TAG_LOCAL_BLOCK, RULE_TAG_LOCAL_BLOCK_DOMAIN, RULE_TAG_HOTSPOT_PRIVATE_BLOCK)
+    fun applyLocalBlockRules(
+        root: JSONObject,
+        hotspotInboundTags: List<String> = emptyList(),
+        hotspotIp: String? = null,
+        hotspotPrefix: Int = 24,
+    ) {
+        val ourTags = setOf(
+            RULE_TAG_LOCAL_BLOCK, RULE_TAG_LOCAL_BLOCK_DOMAIN, RULE_TAG_HOTSPOT_PRIVATE_BLOCK,
+            RULE_TAG_HOTSPOT_SELF_BLOCK, RULE_TAG_HOTSPOT_OFFNET_BLOCK,
+        )
         val routing = root.optJSONObject("routing") ?: JSONObject().also { root.put("routing", it) }
         val old = routing.optJSONArray("rules") ?: JSONArray()
         val kept = ArrayList<Any>()
@@ -503,6 +482,35 @@ object XrayConfigBuilder {
             if (r is JSONObject && r.optString("outboundTag") == "api") insertAt = idx + 1
         }
         val ours = ArrayList<JSONObject>()
+        if (hotspotInboundTags.isNotEmpty() && hotspotIp != null) {
+            val tags = JSONArray().apply { hotspotInboundTags.forEach { put(it) } }
+            // 1) The phone itself: its hotspot address + loopback.
+            ours.add(JSONObject().apply {
+                put("type", "field")
+                put("ruleTag", RULE_TAG_HOTSPOT_SELF_BLOCK)
+                put("inboundTag", tags)
+                put("sourceIP", JSONArray().apply {
+                    put("$hotspotIp/32")
+                    put("127.0.0.0/8")
+                    put("::1/128")
+                })
+                put("outboundTag", "block")
+            })
+            // 2) Anything outside the hotspot subnet (the phone's other interfaces, IPv6).
+            val offNet = ipv4SubnetComplement(hotspotIp, hotspotPrefix)
+            if (offNet != null) {
+                ours.add(JSONObject().apply {
+                    put("type", "field")
+                    put("ruleTag", RULE_TAG_HOTSPOT_OFFNET_BLOCK)
+                    put("inboundTag", JSONArray().apply { hotspotInboundTags.forEach { put(it) } })
+                    put("sourceIP", JSONArray().apply {
+                        offNet.forEach { put(it) }
+                        put("::/0")
+                    })
+                    put("outboundTag", "block")
+                })
+            }
+        }
         ours.add(JSONObject().apply {
             put("type", "field")
             put("ruleTag", RULE_TAG_LOCAL_BLOCK)
@@ -541,6 +549,106 @@ object XrayConfigBuilder {
                 })
             })
         }
+    }
+
+    /**
+     * CIDR list covering all of IPv4 EXCEPT the subnet [ip]/[prefix] (prefix outside 8..30 → 24).
+     * [prefix] CIDRs: for every bit position i < prefix, the block that shares the first i bits
+     * with the subnet but differs at bit i. null if [ip] isn't a dotted IPv4 address.
+     */
+    internal fun ipv4SubnetComplement(ip: String, prefix: Int): List<String>? {
+        val parts = ip.split('.').map { it.toIntOrNull() ?: return null }
+        if (parts.size != 4 || parts.any { it !in 0..255 }) return null
+        val p = if (prefix in 8..30) prefix else 24
+        val addr = parts.fold(0L) { acc, b -> (acc shl 8) or b.toLong() }
+        return (0 until p).map { i ->
+            val bit = 1L shl (31 - i)
+            val keepMask = if (i == 0) 0L else (0xFFFFFFFFL shl (32 - i)) and 0xFFFFFFFFL
+            val net = ((addr and keepMask) or ((addr and bit) xor bit)) and 0xFFFFFFFFL
+            val dotted = (3 downTo 0).joinToString(".") { ((net shr (it * 8)) and 0xFF).toString() }
+            "$dotted/${i + 1}"
+        }
+    }
+
+    /** Tag of the helper freedom outbound that fragments the TLS ClientHello (see [applyTlsFragment]). */
+    const val TLS_FRAGMENT_TAG = "tls-fragment"
+    // Freedom "fragment" defaults: split the ClientHello into 100–200-byte TCP writes with a
+    // 10–20 ms pause between them — enough to hide the SNI from simple per-packet DPI while
+    // adding only ~50–150 ms to the handshake (a ~500-byte chrome/REALITY hello → 3–5 pieces).
+    const val TLS_FRAGMENT_LENGTH = "100-200"
+    const val TLS_FRAGMENT_INTERVAL = "10-20"
+    private val FRAGMENT_PROTOCOLS = setOf("vless", "vmess", "trojan", "shadowsocks")
+    // UDP-based transports can't be dialed through a TCP freedom fragmenter.
+    private val FRAGMENT_SKIP_NETWORKS = setOf("kcp", "mkcp", "quic", "hysteria")
+
+    /**
+     * "Обход DPI": the standard Xray way of fragmenting the TLS ClientHello. Every outbound that
+     * dials a VPN server (vless/vmess/trojan/ss with TLS or REALITY, TCP-based transport) gets
+     * `streamSettings.sockopt.dialerProxy = "tls-fragment"`, and a helper freedom outbound
+     *
+     *     {"tag":"tls-fragment","protocol":"freedom","settings":{"fragment":
+     *         {"packets":"tlshello","length":"100-200","interval":"10-20"}}}
+     *
+     * is added, so the proxy's TCP connection to the server goes out through freedom, which
+     * splits the first TLS record (the ClientHello carrying the SNI) into small pieces.
+     * direct / block / dns-out / the OpenFlux socks chain are never touched. Other sockopt
+     * fields are preserved; an outbound already using dialerProxy / proxySettings is left alone.
+     *
+     * Idempotent in both directions: [enabled] = false removes the helper and every
+     * dialerProxy pointing at it, so re-preparing an old config after the user turned the
+     * option off yields a clean config. Returns the number of outbounds routed via the fragmenter.
+     */
+    fun applyTlsFragment(root: JSONObject, enabled: Boolean): Int {
+        val outs = root.optJSONArray("outbounds") ?: return 0
+        val kept = JSONArray()
+        var routed = 0
+        for (i in 0 until outs.length()) {
+            val o = outs.optJSONObject(i) ?: continue
+            if (o.optString("tag") == TLS_FRAGMENT_TAG) continue   // re-added below if needed
+            val stream = o.optJSONObject("streamSettings")
+            val sockopt = stream?.optJSONObject("sockopt")
+            if (sockopt != null && sockopt.optString("dialerProxy") == TLS_FRAGMENT_TAG) {
+                sockopt.remove("dialerProxy")
+                if (sockopt.length() == 0) stream.remove("sockopt")
+            }
+            if (enabled && stream != null && wantsTlsFragment(o, stream)) {
+                val so = stream.optJSONObject("sockopt") ?: JSONObject().also { stream.put("sockopt", it) }
+                so.put("dialerProxy", TLS_FRAGMENT_TAG)
+                routed++
+            }
+            kept.put(o)
+        }
+        if (routed > 0) {
+            kept.put(JSONObject().apply {
+                put("tag", TLS_FRAGMENT_TAG)
+                put("protocol", "freedom")
+                put("settings", JSONObject().apply {
+                    put("fragment", JSONObject().apply {
+                        put("packets", "tlshello")
+                        put("length", TLS_FRAGMENT_LENGTH)
+                        put("interval", TLS_FRAGMENT_INTERVAL)
+                    })
+                })
+            })
+        }
+        root.put("outbounds", kept)
+        return routed
+    }
+
+    /** Convenience for string configs (micro-tests). */
+    fun applyTlsFragment(configJson: String, enabled: Boolean): String {
+        val root = JSONObject(configJson)
+        applyTlsFragment(root, enabled)
+        return root.toString(2)
+    }
+
+    private fun wantsTlsFragment(o: JSONObject, stream: JSONObject): Boolean {
+        if (o.optString("protocol") !in FRAGMENT_PROTOCOLS) return false
+        if (o.has("proxySettings")) return false   // conflicts with sockopt.dialerProxy
+        if (stream.optString("security") !in setOf("tls", "reality")) return false  // no ClientHello
+        if (stream.optString("network").lowercase() in FRAGMENT_SKIP_NETWORKS) return false
+        val existing = stream.optJSONObject("sockopt")?.optString("dialerProxy").orEmpty()
+        return existing.isEmpty()
     }
 
     private fun buildVlessOutbound(config: VlessConfig, tag: String = "proxy"): JSONObject {

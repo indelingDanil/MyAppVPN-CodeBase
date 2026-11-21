@@ -32,9 +32,16 @@ class HotspotViewModel @Inject constructor(
     val credentials: StateFlow<Pair<String, String>?> = preferences.hotspotCredentials
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    /** Stored per-install hotspot proxy ports (http to socks) — what the NEXT session will use. */
+    val ports: StateFlow<Pair<Int, Int>?> = preferences.hotspotPorts
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     init {
-        // Make sure credentials exist so the screen can show them even before the first share.
-        viewModelScope.launch { preferences.ensureHotspotCredentials() }
+        // Make sure credentials + ports exist so the screen can show them before the first share.
+        viewModelScope.launch {
+            preferences.ensureHotspotCredentials()
+            preferences.ensureHotspotPorts()
+        }
     }
 
     fun regeneratePassword() {

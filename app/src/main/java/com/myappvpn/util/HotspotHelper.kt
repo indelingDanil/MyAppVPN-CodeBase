@@ -8,14 +8,18 @@ import java.net.NetworkInterface
 
 object HotspotHelper {
 
-    /** Name prefixes of interfaces that are (almost) always a soft-AP / tethering interface. */
-    private val AP_PREFIXES = listOf("ap", "swlan", "softap", "rndis", "wlan1", "wigig")
+    /**
+     * Name prefixes of interfaces that are (almost) always a Wi-Fi soft-AP interface.
+     * USB tethering (rndis0, ncm0, …) is intentionally NOT included: hotspot sharing is a Wi-Fi
+     * feature, and binding the no-auth HTTP proxy to a USB-tether address was never intended.
+     */
+    private val AP_PREFIXES = listOf("ap", "swlan", "softap", "wlan1", "wigig")
 
     /**
      * Returns the phone's private IPv4 address on the hotspot (soft-AP) interface,
      * e.g. "192.168.43.1", or null if no hotspot is active.
      *
-     * Dedicated AP interfaces (ap0, swlan0, softap*, wlan1, rndis*) are preferred. wlan0 is used
+     * Dedicated AP interfaces (ap0, swlan0, softap*, wlan1) are preferred. wlan0 is used
      * only when it is NOT the interface of a Wi-Fi client connection — otherwise we would return
      * the phone's address in the home Wi-Fi network (with no [context] we can't tell, so wlan0
      * is then skipped entirely).
@@ -49,6 +53,14 @@ object HotspotHelper {
         return up.filter { it.name.startsWith("wlan") }
             .firstNotNullOfOrNull { ipOf(it) }
     }
+
+    /** Network prefix length of the local IPv4 address [ip] (e.g. 24), or null if unknown. */
+    fun getPrefixLength(ip: String): Int? = runCatching {
+        val addr = java.net.InetAddress.getByName(ip)
+        NetworkInterface.getByInetAddress(addr)?.interfaceAddresses
+            ?.firstOrNull { it.address == addr }
+            ?.networkPrefixLength?.toInt()
+    }.getOrNull()
 
     /** Compatibility overload: without a Context wlan0 is never considered. */
     fun getHotspotIp(): String? = getHotspotIp(null)

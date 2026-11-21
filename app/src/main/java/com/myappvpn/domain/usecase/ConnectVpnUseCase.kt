@@ -23,7 +23,7 @@ class ConnectVpnUseCase @Inject constructor(
         private const val TAG = "ConnectVpnUseCase"
         private const val POOL_LIMIT = 50
         // Placeholder ports only: the service picks random free loopback ports per session and
-        // rewrites the socks/http/api inbounds (and adds hotspot inbounds / auth) in its single
+        // rewrites the socks/api inbounds (and adds hotspot inbounds / auth) in its single
         // config chokepoint (MyVpnService.prepareConfig), so the config built here is a template.
         private const val TEMPLATE_SOCKS_PORT = 10808
     }

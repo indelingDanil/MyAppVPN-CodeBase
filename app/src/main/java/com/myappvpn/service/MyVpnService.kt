@@ -161,6 +161,22 @@ class MyVpnService : VpnService() {
         // requests (e.g. subscription refresh) THROUGH the tunnel — the app is excluded from its
         // TUN, so without this its traffic goes over the restricted operator network directly.
         @Volatile var activeSocksPort: Int = 0
+
+        // Socket-owner server of the live TUN (GitHub issue #8) — read by diagnostics.
+        @Volatile private var liveOwnerServer: OwnerUidServer? = null
+
+        /**
+         * One-line state of the tun2socks socket-owner check for diagnostics, e.g.
+         * "on, queries=120 denied=3 errors=0, last denied: tcp 172.19.0.1:40000 1.2.3.4:443 (…)".
+         * null = no TUN (not connected).
+         */
+        fun ownerCheckStats(): String? {
+            val s = liveOwnerServer ?: return null
+            return buildString {
+                append("on, queries=${s.queries.get()} denied=${s.denied.get()} errors=${s.errors.get()}")
+                s.lastDenied?.let { append(", last denied: ").append(it) }
+            }
+        }
     }
 
     @Inject lateinit var preferences: AppPreferences
@@ -185,6 +201,9 @@ class MyVpnService : VpnService() {
     )
     private lateinit var xrayManager: XrayManager
     private lateinit var tun2SocksManager: Tun2SocksManager
+    // Answers tun2socks' per-flow "who owns this socket?" queries; one per established TUN
+    // (recreated in buildTun, stopped in cleanupProcesses). null → tun2socks runs without the check.
+    @Volatile private var ownerUidServer: OwnerUidServer? = null
     private lateinit var openFluxManager: OpenFluxManager
 
     /** OpenFlux (Beta) session parameters (URL/token from the connect intent). */
@@ -213,13 +232,18 @@ class MyVpnService : VpnService() {
     private var tunFd: ParcelFileDescriptor? = null
 
     /** Random loopback ports of the current session (picked at connect, kept until teardown). */
-    private data class LocalPorts(val socks: Int, val http: Int, val api: Int)
-    private var ports = LocalPorts(10808, 10809, 10810)
+    private data class LocalPorts(val socks: Int)
+    private var ports = LocalPorts(10808)
     private val currentSocksPort: Int get() = ports.socks
     private var currentServerName: String = "Unknown"
     private var hotspotSharingEnabled = false
     // Stable hotspot SOCKS credentials (from preferences) — set at connect when sharing is on.
     private var hotspotCreds: Pair<String, String>? = null
+    // Stable per-install hotspot ports (http to socks, from preferences) — set together with creds.
+    private var hotspotPorts: Pair<Int, Int>? = null
+    // Set when Xray couldn't start with the control-API Unix socket: from then on configs are
+    // started without the API (Auto mode works, just without balancer pinning).
+    @Volatile private var apiDisabled = false
     // Hotspot endpoint baked into the most recent prepared config (null = no hotspot inbounds).
     @Volatile private var configHotspot: HotspotInfo? = null
 
@@ -246,6 +270,8 @@ class MyVpnService : VpnService() {
     private var poolReverifyJob: Job? = null
     // Kill-switch: keep TUN up + block traffic on unexpected failure, then auto-recover.
     private var killSwitchEnabled = true
+    // "Обход DPI" (TLS ClientHello fragmentation), read once per connect; see prepareConfig.
+    @Volatile private var tlsFragmentEnabled = false
     private var recoveryJob: Job? = null
 
     // Latest startId seen by onStartCommand. disconnect() stops via stopSelf(lastStartId) (never the
@@ -663,6 +689,8 @@ class MyVpnService : VpnService() {
         }
         try {
             killSwitchEnabled = preferences.killSwitchEnabled.first()
+            tlsFragmentEnabled = preferences.tlsFragmentEnabled.first()
+            if (tlsFragmentEnabled) Log.i(TAG, "DPI bypass: TLS ClientHello fragmentation ON")
             currentDns = try {
                 dnsRepository.effectiveConfig()
             } catch (e: CancellationException) {
@@ -674,20 +702,22 @@ class MyVpnService : VpnService() {
             _vpnState.value = VpnState.CONNECTING
             startForeground(NOTIFICATION_ID, buildNotification(serverName, VpnState.CONNECTING))
 
-            // Random loopback ports for this session (SOCKS/HTTP/API). Fixed well-known ports
+            // Random loopback SOCKS port for this session. Fixed well-known ports
             // could be pre-bound by another app whenever Xray isn't listening.
             // OpenFlux: one more port for the local bridge + its own random SOCKS5 credentials.
-            val picked = LocalProxyAuth.pickFreeLoopbackPorts(if (openFluxMode) 4 else 3)
-            ports = LocalPorts(socks = picked[0], http = picked[1], api = picked[2])
+            // (No loopback HTTP inbound any more; the control API is a private Unix socket.)
+            val picked = LocalProxyAuth.pickFreeLoopbackPorts(if (openFluxMode) 2 else 1)
+            ports = LocalPorts(socks = picked[0])
             if (openFluxMode) {
-                bridgePort = picked[3]
+                bridgePort = picked[1]
                 val (bu, bp) = LocalProxyAuth.randomCredentials()
                 bridgeUser = bu
                 bridgePass = bp
             }
 
-            // Hotspot sharing: stable credentials for the hotspot SOCKS inbound.
+            // Hotspot sharing: stable credentials + per-install random ports for the hotspot inbounds.
             hotspotCreds = if (!hotspotSharing) null else try {
+                hotspotPorts = preferences.ensureHotspotPorts()
                 preferences.ensureHotspotCredentials()
             } catch (e: CancellationException) {
                 throw e
@@ -746,7 +776,7 @@ class MyVpnService : VpnService() {
             registerNetworkCallback()
 
             // 3. Start tun2socks (native fork+exec for proper fd inheritance)
-            if (!tun2SocksManager.start(tunFd = tunFd!!.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass)) {
+            if (!tun2SocksManager.start(tunFd = tunFd!!.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass, ownerSocket = ownerUidServer?.name)) {
                 failConnect("Failed to start tun2socks")
                 return
             }
@@ -823,7 +853,7 @@ class MyVpnService : VpnService() {
 
     /** Xray → bridge chain template for the current session ports (prepareConfig adds auth etc.). */
     private fun openFluxChainTemplate(): String =
-        XrayConfigBuilder.buildSocksChain(ports.socks, ports.http, bridgePort, bridgeUser, bridgePass)
+        XrayConfigBuilder.buildSocksChain(ports.socks, bridgePort, bridgeUser, bridgePass)
 
     /** (Re)start the bridge on the session's bridge port/credentials. Caller holds opMutex. */
     private suspend fun startOpenFluxBridge(): Boolean {
@@ -941,20 +971,32 @@ class MyVpnService : VpnService() {
         // Hotspot endpoint for this config: re-resolved every time so a restart never tries to
         // bind an IP that disappeared (hotspot turned off) — and picks it up once it appears.
         val creds = hotspotCreds
-        val hotspotIp = if (hotspotSharingEnabled && creds != null) HotspotHelper.getHotspotIp(this) else null
-        val hotspot = if (hotspotIp != null && creds != null) {
-            HotspotInfo(hotspotIp, HotspotInfo.HTTP_PORT, HotspotInfo.SOCKS_PORT, creds.first, creds.second)
+        val hPorts = hotspotPorts
+        val hotspotIp = if (hotspotSharingEnabled && creds != null && hPorts != null) HotspotHelper.getHotspotIp(this) else null
+        val hotspot = if (hotspotIp != null && creds != null && hPorts != null) {
+            HotspotInfo(hotspotIp, hPorts.first, hPorts.second, creds.first, creds.second)
         } else null
 
         rewriteLocalPorts(root, ports, hotspot)
         injectProxyAuth(root)
+        // DPI bypass: VPN-server outbounds dial via a ClientHello-fragmenting freedom outbound.
+        // Never for OpenFlux (its chain goes to the local bridge); `false` strips it (idempotent).
+        XrayConfigBuilder.applyTlsFragment(root, tlsFragmentEnabled && !openFluxMode)
+        // Hotspot inbounds: only real hotspot clients may use them — connections from the phone
+        // itself (its hotspot IP, loopback, or any address outside the hotspot subnet) are
+        // blackholed, so apps outside the tunnel can't CONNECT through the no-auth HTTP inbound
+        // to learn the exit IP (issue #8).
         XrayConfigBuilder.applyLocalBlockRules(
             root,
             if (hotspot != null) listOf(HotspotInfo.TAG_HTTP, HotspotInfo.TAG_SOCKS) else emptyList(),
+            hotspotIp = hotspot?.ip,
+            hotspotPrefix = hotspot?.ip?.let { HotspotHelper.getPrefixLength(it) } ?: 24,
         )
         configHotspot = hotspot
 
-        val authed = root.toString(2)
+        val rendered = root.toString(2)
+        // The bundled Xray once refused the API Unix socket → keep the API off (see startXray).
+        val authed = if (apiDisabled) stripApi(rendered) ?: rendered else rendered
         if (!withDns) return authed
         val userDns = currentDns ?: return authed
         // OpenFlux: the resolver's traffic goes to the bridge, which only does TCP CONNECT to
@@ -980,7 +1022,8 @@ class MyVpnService : VpnService() {
     }
 
     /**
-     * Local inbounds → session ports, loopback-only. Old hotspot-* inbounds are dropped and, if
+     * Local inbounds → session SOCKS port, loopback-only; the loopback HTTP inbound is dropped and
+     * the API inbound moves to the private Unix socket. Old hotspot-* inbounds are dropped and, if
      * [hotspot] is non-null, re-added bound to the hotspot IP (never 0.0.0.0):
      * hotspot-http (no auth — Android's Wi-Fi proxy can't authenticate; the hotspot password is
      * the gate) and hotspot-socks (stable user/password, UDP).
@@ -992,21 +1035,24 @@ class MyVpnService : VpnService() {
             val inbound = old.optJSONObject(i) ?: continue
             val tag = inbound.optString("tag")
             if (tag.startsWith("hotspot-")) continue
+            // No loopback HTTP inbound: nothing in the app uses it (tun2socks, in-tunnel refresh
+            // and micro-tests are SOCKS-only) — one less local listener to probe.
+            if (tag == "http") continue
+            if (tag == "api") {
+                // Control API → private Unix socket (never a TCP port other apps could reach).
+                out.put(XrayConfigBuilder.apiInbound(xrayManager.apiSocketPath))
+                continue
+            }
             val settings = inbound.optJSONObject("settings") ?: JSONObject().also { inbound.put("settings", it) }
-            when (tag) {
-                "socks" -> {
-                    inbound.put("port", p.socks)
-                    settings.put("ip", "127.0.0.1")
-                }
-                "http" -> inbound.put("port", p.http)
-                "api" -> {
-                    inbound.put("port", p.api)
-                    settings.put("address", "127.0.0.1")
-                }
+            if (tag == "socks") {
+                inbound.put("port", p.socks)
+                settings.put("ip", "127.0.0.1")
             }
             inbound.put("listen", "127.0.0.1")   // main inbounds are ALWAYS loopback-only
             out.put(inbound)
         }
+        // ObservatoryService is never queried by the app; only RoutingService (balancer bo/bi).
+        root.optJSONObject("api")?.put("services", JSONArray().apply { put("RoutingService") })
         if (hotspot != null) {
             out.put(JSONObject().apply {
                 put("tag", HotspotInfo.TAG_HTTP)
@@ -1191,7 +1237,38 @@ class MyVpnService : VpnService() {
             }
         }
 
-        return builder.establish()
+        val fd = builder.establish() ?: return null
+        // INCLUDE mode: also restrict the owner check to the routed apps (defence in depth).
+        val ownerAllowedAppIds = if (allowedCount > 0) {
+            OwnerUidServer.appIdsForPackages(packageManager, includeSelection)
+        } else null
+        restartOwnerUidServer(ownerAllowedAppIds)
+        return fd
+    }
+
+    /**
+     * Replaces the socket-owner server for a freshly established TUN (issue #8: apps OUTSIDE the
+     * VPN binding to tun0 must not reach the exit). Fail-open: if the socket can't be bound,
+     * tun2socks simply runs without -owner-socket.
+     */
+    private fun restartOwnerUidServer(allowedAppIds: Set<Int>?) {
+        ownerUidServer?.stop()
+        val server = OwnerUidServer(this, allowedAppIds)
+        if (server.start()) {
+            ownerUidServer = server
+            liveOwnerServer = server
+            Log.i(TAG, "Owner check: on (include-list ${allowedAppIds?.size ?: "off"})")
+        } else {
+            ownerUidServer = null
+            liveOwnerServer = null
+            Log.w(TAG, "Owner check: OwnerUidServer failed to start — tun2socks runs without it")
+        }
+    }
+
+    private fun stopOwnerUidServer() {
+        ownerUidServer?.stop()
+        ownerUidServer = null
+        liveOwnerServer = null
     }
 
     // ── Underlying network tracking ────────────────────────────────────────────
@@ -1298,7 +1375,7 @@ class MyVpnService : VpnService() {
         }
 
         // Restart tun2socks with the fresh fd
-        if (!tun2SocksManager.start(tunFd = newFd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass)) {
+        if (!tun2SocksManager.start(tunFd = newFd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass, ownerSocket = ownerUidServer?.name)) {
             Log.e(TAG, "Failed to restart tun2socks after TUN rebuild")
             enterBlackhole("tun2socks restart after TUN rebuild failed")
             return
@@ -1399,7 +1476,8 @@ class MyVpnService : VpnService() {
                         if (tun2SocksManager.isRunning) return@withLock true
                         val fd = tunFd
                         val ok = fd != null && tun2SocksManager.start(
-                            tunFd = fd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass
+                            tunFd = fd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass,
+                            ownerSocket = ownerUidServer?.name,
                         )
                         if (!ok) {
                             Log.e(TAG, "tun2socks restart failed")
@@ -1977,11 +2055,13 @@ class MyVpnService : VpnService() {
     }
 
     // ── Balancer control API (xray api bo/bi) ───────────────────────────────────
-    // Confirmed working on the bundled Xray 26.2.6:
-    //   bo --server=127.0.0.1:<apiPort> -b balancer <proxy-N>   → seamless override (no restart)
-    //   bi --server=127.0.0.1:<apiPort> balancer                → text with "Selecting Override" + "Selects"
+    // bo/bi confirmed working on the bundled Xray 26.2.6 (over the old loopback TCP API):
+    //   bo --server=unix://<apiSocket> -b balancer <proxy-N>    → seamless override (no restart)
+    //   bi --server=unix://<apiSocket> balancer                 → text with "Selecting Override" + "Selects"
+    // The API listens on a Unix socket in the app-private files dir (not a loopback port), so
+    // other apps on the phone can't drive RoutingService (AddRule → "direct", override, …).
 
-    private fun apiServerArg() = "--server=127.0.0.1:${ports.api}"
+    private fun apiServerArg() = xrayManager.apiServerArg
 
     /**
      * Reads `xray api bi`. Returns (overrideTag, selectsTag): the current override target and the
@@ -2084,11 +2164,64 @@ class MyVpnService : VpnService() {
      */
     /**
      * Start Xray with an already-prepared config. If it fails and the config carried hotspot
-     * inbounds (fixed ports 10808/10809 on the hotspot IP may be taken by another app), turn
-     * sharing off for this session and retry once — the VPN itself must still come up.
+     * inbounds (their ports on the hotspot IP may be taken by another app), turn sharing off for
+     * this session and retry once — the VPN itself must still come up. Last resort: retry
+     * without the control API (Unix-socket listener) — Auto mode then runs on the balancer's
+     * own leastPing choice without pinning, and the API stays off for this service instance.
      */
     private suspend fun startXray(prepared: String): Boolean {
+        if (startXrayInner(prepared)) return true
+        val current = lastTriedConfig ?: prepared   // incl. any pruned bad outbounds
+        if (apiDisabled || !hasApi(current)) return false
+        Log.w(TAG, "Xray failed to start with the control API socket — retrying without it " +
+            "(balancer pinning off): ${xrayManager.lastStartError ?: "no error line"}")
+        val stripped = stripApi(prepareConfig(current)) ?: return false
+        if (!xrayManager.start(stripped)) return false
+        apiDisabled = true
+        if (lastXrayConfig == current || lastXrayConfig == prepared) lastXrayConfig = stripped
+        return true
+    }
+
+    /** True if [configJson] has the control-API inbound. */
+    private fun hasApi(configJson: String): Boolean = try {
+        val ins = JSONObject(configJson).optJSONArray("inbounds") ?: JSONArray()
+        (0 until ins.length()).any { ins.optJSONObject(it)?.optString("tag") == "api" }
+    } catch (_: Exception) { false }
+
+    /** [configJson] without the control API (section, inbound, routing rule); null on parse error. */
+    private fun stripApi(configJson: String): String? = try {
+        val root = JSONObject(configJson)
+        root.remove("api")
+        root.optJSONArray("inbounds")?.let { ins ->
+            root.put("inbounds", JSONArray().apply {
+                for (i in 0 until ins.length()) {
+                    val ib = ins.optJSONObject(i) ?: continue
+                    if (ib.optString("tag") != "api") put(ib)
+                }
+            })
+        }
+        root.optJSONObject("routing")?.let { routing ->
+            val rules = routing.optJSONArray("rules") ?: JSONArray()
+            routing.put("rules", JSONArray().apply {
+                for (i in 0 until rules.length()) {
+                    val r = rules.opt(i)
+                    if (r is JSONObject && r.optString("outboundTag") == "api") continue
+                    put(r)
+                }
+            })
+        }
+        root.toString(2)
+    } catch (e: Exception) {
+        Log.w(TAG, "stripApi failed: ${e.message}")
+        null
+    }
+
+    /** Config of the last failed [startXrayInner] attempt chain (after outbound pruning). */
+    private var lastTriedConfig: String? = null
+
+    private suspend fun startXrayInner(prepared: String): Boolean {
         var cfg = prepared
+        lastTriedConfig = null
         if (xrayManager.start(cfg)) return true
         // Balancer: Xray names the outbound it couldn't build ("…outbound config with tag
         // proxy-10 > …"). One malformed server must not kill the whole pool — drop it and
@@ -2105,6 +2238,7 @@ class MyVpnService : VpnService() {
             cfg = pruned
             if (xrayManager.start(cfg)) return true
         }
+        lastTriedConfig = cfg
         if (configHotspot == null) return false
         Log.w(TAG, "Xray failed with hotspot inbounds (port busy?) — sharing disabled for this session")
         hotspotSharingEnabled = false
@@ -2163,7 +2297,7 @@ class MyVpnService : VpnService() {
             balancerPoolIds = pairs.map { it.first.id }   // refresh proxy-N mapping
             pinnedTag = null                              // restart drops any override
             val json = prepareConfig(
-                XrayConfigBuilder.buildBalancer(pairs.map { it.second }, ports.socks, ports.http, ports.api)
+                XrayConfigBuilder.buildBalancer(pairs.map { it.second }, ports.socks, xrayManager.apiSocketPath)
             )
             lastXrayConfig = json
             startXray(json)   // stops the old (or blackhole) process first
@@ -2221,7 +2355,7 @@ class MyVpnService : VpnService() {
             // failed start retries THIS server (recoverSingle reads the selected server).
             configRepository.selectServer(serverId)
             currentServerName = server.name
-            val cfg = prepareConfig(XrayConfigBuilder.build(vlessConfig, ports.socks, httpPort = ports.http))
+            val cfg = prepareConfig(XrayConfigBuilder.build(vlessConfig, ports.socks))
             lastXrayConfig = cfg
             // start() stops the old process itself → the port is free only for the spawn time.
             if (!startXray(cfg)) {
@@ -2348,7 +2482,7 @@ class MyVpnService : VpnService() {
      * Caller holds opMutex.
      */
     private suspend fun startBlackholeXray() {
-        val template = XrayConfigBuilder.buildBlackhole(ports.socks, ports.http, ports.api)
+        val template = XrayConfigBuilder.buildBlackhole(ports.socks)
         val savedHotspot = configHotspot
         var ok = xrayManager.start(prepareConfig(template, withDns = false))
         if (!ok && configHotspot != null) {
@@ -2375,7 +2509,7 @@ class MyVpnService : VpnService() {
         if (tun2SocksManager.isRunning) return true
         val fd = tunFd ?: return false
         Log.i(TAG, "Restarting tun2socks on the existing TUN")
-        return tun2SocksManager.start(tunFd = fd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass)
+        return tun2SocksManager.start(tunFd = fd.fd, socksPort = currentSocksPort, proxyUser = proxyUser, proxyPass = proxyPass, ownerSocket = ownerUidServer?.name)
     }
 
     /**
@@ -2454,7 +2588,7 @@ class MyVpnService : VpnService() {
     private suspend fun recoverSingle(): Boolean {
         val server = configRepository.getSelectedServer() ?: return false
         val vless = VlessUriParser.parse(server.vlessUri) ?: return false
-        val cfg = prepareConfig(XrayConfigBuilder.build(vless, ports.socks, httpPort = ports.http))
+        val cfg = prepareConfig(XrayConfigBuilder.build(vless, ports.socks))
         if (!startXray(cfg)) return false   // start() replaces the blackhole process
         lastXrayConfig = cfg
         currentServerName = server.name
@@ -2509,6 +2643,7 @@ class MyVpnService : VpnService() {
         proxyUser = ""
         proxyPass = ""
         hotspotCreds = null
+        hotspotPorts = null
         balancerMode = false
         lastXrayConfig = ""
         balancerPoolIds = emptyList()
@@ -2526,6 +2661,7 @@ class MyVpnService : VpnService() {
         unregisterNetworkCallback()
         trafficMonitor.stop()
         tun2SocksManager.stop()
+        stopOwnerUidServer()          // after tun2socks: nothing queries it any more
         xrayManager.stop()
         xrayManager.deleteConfigs()   // no session credentials / server secrets left on disk
         openFluxManager.stop()        // after Xray: nothing dials the bridge any more

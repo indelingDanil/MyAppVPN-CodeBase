@@ -5,10 +5,15 @@ object NativeHelper {
         System.loadLibrary("tun_helper")
     }
 
-    /** Fork + exec tun2socks via native code. Returns child PID or -1 on error. */
+    /**
+     * Fork + exec tun2socks via native code. Returns child PID or -1 on error.
+     * [ownerSocket]: abstract socket name of [com.myappvpn.service.OwnerUidServer]; non-empty →
+     * `-owner-socket <name>` (per-flow socket-owner check, GitHub issue #8).
+     */
     @JvmStatic external fun startTun2Socks(
         binary: String, tunFd: Int, socksPort: Int,
-        proxyUser: String? = null, proxyPass: String? = null
+        proxyUser: String? = null, proxyPass: String? = null,
+        ownerSocket: String? = null,
     ): Int
 
     /**

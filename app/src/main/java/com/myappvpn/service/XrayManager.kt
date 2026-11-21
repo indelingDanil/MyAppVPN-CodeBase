@@ -16,6 +16,9 @@ class XrayManager(private val context: Context) {
     companion object {
         private const val TAG = "XrayManager"
         private const val CONFIG_FILE = "xray_config.json"
+        // Unix socket of the Xray control API (in the app-private files dir — other apps can't
+        // open it, unlike a 127.0.0.1 port). Xray adds "<path>.lock" next to it.
+        private const val API_SOCKET_FILE = "xray_api.sock"
         private const val STARTUP_WAIT_MS = 800L
         private const val STALE_TEST_CONFIG_MS = 60_000L
         // XRay log keywords that indicate VLESS outbound failures
@@ -30,6 +33,20 @@ class XrayManager(private val context: Context) {
 
     val isRunning: Boolean get() = process?.isAlive == true
 
+    /** Absolute path of the control-API Unix socket (see XrayConfigBuilder.apiInbound). */
+    val apiSocketPath: String get() = File(context.filesDir, API_SOCKET_FILE).absolutePath
+
+    /** `xray api --server=` value for [apiSocketPath] (gRPC unix-scheme target). */
+    val apiServerArg: String get() = "--server=unix://$apiSocketPath"
+
+    /**
+     * Xray doesn't unlink a stale socket file (e.g. after a SIGKILL) before binding, so a
+     * leftover would make the next start fail with "address already in use".
+     */
+    private fun deleteApiSocket() {
+        try { File(context.filesDir, API_SOCKET_FILE).delete() } catch (_: Exception) {}
+    }
+
     /** Number of VLESS-level errors logged by XRay in the last ~60s. */
     val errorRate: Int get() = _recentErrorCount.get()
 
@@ -43,6 +60,7 @@ class XrayManager(private val context: Context) {
 
     suspend fun start(xrayConfigJson: String): Boolean = withContext(Dispatchers.IO) {
         stop() // ensure clean state
+        deleteApiSocket()
         lastStartError = null
 
         try {
@@ -128,6 +146,7 @@ class XrayManager(private val context: Context) {
         // The config holds the session proxy credentials + server secrets — don't leave it on
         // disk once the process is gone (start() rewrites it on the next run).
         try { File(context.filesDir, CONFIG_FILE).delete() } catch (_: Exception) {}
+        deleteApiSocket()
         Log.i(TAG, "XRay stopped")
     }
 

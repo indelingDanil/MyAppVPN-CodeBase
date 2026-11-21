@@ -336,7 +336,7 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(12.dp))
                         HotspotBanner(
                             ip = shown?.ip ?: "—",
-                            httpPort = shown?.httpPort ?: 10809,
+                            httpPort = shown?.httpPort ?: 0,   // banner is only visible with live info
                             onClick = onNavigateToHotspotSetup
                         )
                     }

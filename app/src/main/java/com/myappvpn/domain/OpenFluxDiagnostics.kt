@@ -8,6 +8,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import com.myappvpn.BuildConfig
 import com.myappvpn.data.datastore.AppPreferences
+import com.myappvpn.service.MyVpnService
 import com.myappvpn.service.OpenFluxManager
 import com.myappvpn.util.BinaryInstaller
 import kotlinx.coroutines.CancellationException
@@ -322,6 +323,11 @@ object OpenFluxDiagnostics {
 
         sb.appendLine(L("— Сеть —", "— Network —"))
         sb.appendLine(L("VPN поднят: ", "VPN up: ") + yn(vpnUp))
+        // tun2socks socket-owner check (issue #8): flows from apps outside the VPN bound to tun0.
+        sb.appendLine(
+            L("Проверка владельца сокета: ", "Socket-owner check: ") +
+                sanitize(MyVpnService.ownerCheckStats() ?: L("нет TUN", "no TUN"))
+        )
         if (activeFacts != null) {
             sb.appendLine(L("Активная сеть:", "Active network:"))
             appendFacts(sb, activeFacts, ::yn, ru)

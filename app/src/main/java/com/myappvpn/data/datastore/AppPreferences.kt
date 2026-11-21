@@ -42,6 +42,8 @@ class AppPreferences @Inject constructor(
         val KEY_SOCKS_PORT = intPreferencesKey("socks_port")
         val KEY_HOTSPOT_SHARING = booleanPreferencesKey("hotspot_sharing")
         val KEY_KILL_SWITCH = booleanPreferencesKey("kill_switch_enabled")
+        // "Обход DPI": fragment the TLS ClientHello to the VPN server (XrayConfigBuilder.applyTlsFragment).
+        val KEY_TLS_FRAGMENT = booleanPreferencesKey("tls_fragment_enabled")
         val KEY_AUTO_MODE = booleanPreferencesKey("auto_mode")
         val KEY_EXCLUDED_COUNTRIES = stringSetPreferencesKey("excluded_countries")
         // OpenFlux (Beta): own exit via a PHP script (phpbox.php) on ordinary web hosting.
@@ -67,11 +69,23 @@ class AppPreferences @Inject constructor(
         val KEY_HOTSPOT_PASS = stringPreferencesKey("hotspot_pass")
         // No 0/O/1/l/I — the password is typed by hand on another device.
         private const val HOTSPOT_PASS_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-        private const val HOTSPOT_PASS_LENGTH = 10
+        // 16 chars for new passwords (existing installs keep their stored one until regenerated).
+        private const val HOTSPOT_PASS_LENGTH = 16
+        // Stable per-install hotspot proxy ports (random, see ensureHotspotPorts): fixed
+        // well-known ports (10808/10809) are an easy fingerprint for local port scanners.
+        val KEY_HOTSPOT_HTTP_PORT = intPreferencesKey("hotspot_http_port")
+        val KEY_HOTSPOT_SOCKS_PORT = intPreferencesKey("hotspot_socks_port")
+        private const val HOTSPOT_PORT_MIN = 20000
+        private const val HOTSPOT_PORT_MAX = 60000
         private val secureRandom = SecureRandom()
 
         private fun newHotspotUser(): String =
             "share" + (1..4).joinToString("") { secureRandom.nextInt(10).toString() }
+
+        private fun newHotspotPort(): Int =
+            HOTSPOT_PORT_MIN + secureRandom.nextInt(HOTSPOT_PORT_MAX - HOTSPOT_PORT_MIN + 1)
+
+        private fun isValidHotspotPort(p: Int?): Boolean = p != null && p in HOTSPOT_PORT_MIN..HOTSPOT_PORT_MAX
 
         private fun newHotspotPass(): String = buildString(HOTSPOT_PASS_LENGTH) {
             repeat(HOTSPOT_PASS_LENGTH) {
@@ -240,6 +254,35 @@ class AppPreferences @Inject constructor(
         return prefs[KEY_HOTSPOT_USER]!! to prefs[KEY_HOTSPOT_PASS]!!
     }
 
+    /** Hotspot proxy ports (http to socks); null until first generated. */
+    val hotspotPorts: Flow<Pair<Int, Int>?> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { prefs ->
+            val http = prefs[KEY_HOTSPOT_HTTP_PORT]
+            val socks = prefs[KEY_HOTSPOT_SOCKS_PORT]
+            if (http != null && socks != null && isValidHotspotPort(http) && isValidHotspotPort(socks) && http != socks) {
+                http to socks
+            } else null
+        }
+
+    /**
+     * Returns the stable hotspot proxy ports (http to socks), generated once per install: random,
+     * distinct, in 20000–60000. Same single-edit pattern as [ensureHotspotCredentials].
+     */
+    suspend fun ensureHotspotPorts(): Pair<Int, Int> {
+        val prefs = dataStore.edit { p ->
+            if (!isValidHotspotPort(p[KEY_HOTSPOT_HTTP_PORT])) p[KEY_HOTSPOT_HTTP_PORT] = newHotspotPort()
+            val http = p[KEY_HOTSPOT_HTTP_PORT]!!
+            val socks = p[KEY_HOTSPOT_SOCKS_PORT]
+            if (!isValidHotspotPort(socks) || socks == http) {
+                var s = newHotspotPort()
+                while (s == http) s = newHotspotPort()
+                p[KEY_HOTSPOT_SOCKS_PORT] = s
+            }
+        }
+        return prefs[KEY_HOTSPOT_HTTP_PORT]!! to prefs[KEY_HOTSPOT_SOCKS_PORT]!!
+    }
+
     /** New random password (login kept). Takes effect on the next connect. */
     suspend fun regenerateHotspotPassword() {
         dataStore.edit { p ->
@@ -260,6 +303,19 @@ class AppPreferences @Inject constructor(
 
     suspend fun setKillSwitchEnabled(v: Boolean) {
         dataStore.edit { it[KEY_KILL_SWITCH] = v }
+    }
+
+    /**
+     * DPI bypass: split the TLS ClientHello sent to the VPN server into small fragments so simple
+     * DPI can't read the SNI. Default OFF — it slows connection setup a little and most networks
+     * don't need it. Read at connect time (and by micro-tests); not applied to OpenFlux.
+     */
+    val tlsFragmentEnabled: Flow<Boolean> = dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { it[KEY_TLS_FRAGMENT] ?: false }
+
+    suspend fun setTlsFragmentEnabled(v: Boolean) {
+        dataStore.edit { it[KEY_TLS_FRAGMENT] = v }
     }
 
     /** Raw JSON of user-added custom subscriptions (decoded by SubscriptionRepository). */

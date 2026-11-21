@@ -2,6 +2,7 @@ package com.myappvpn.domain.validation
 
 import android.content.Context
 import android.util.Log
+import com.myappvpn.data.datastore.AppPreferences
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.service.LocalProxyAuth
@@ -14,6 +15,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -37,7 +39,8 @@ data class MicroTestResult(
 
 @Singleton   // one shared semaphore for ALL callers (batch, background probe, re-verify)
 class XrayMicroTest @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val preferences: AppPreferences,
 ) {
     companion object {
         private const val TAG = "XrayMicroTest"
@@ -70,10 +73,14 @@ class XrayMicroTest @Inject constructor(
                 val vlessConfig = VlessUriParser.parse(server.vlessUri)
                     ?: return@withContext MicroTestResult(server.id, false, errorReason = "parse_failed")
 
-                val xrayJson = XrayConfigBuilder.build(
-                    vlessConfig, socksPort = testPort, includeHttpInbound = false,
+                val baseJson = XrayConfigBuilder.build(
+                    vlessConfig, socksPort = testPort,
                     socksAccount = testUser to testPass,
                 )
+                // Test the server the way the tunnel will dial it: with "Обход DPI" on, a server
+                // reachable only via a fragmented ClientHello must pass (and vice versa).
+                val fragment = preferences.tlsFragmentEnabled.first()   // flow already catches IO errors
+                val xrayJson = if (fragment) XrayConfigBuilder.applyTlsFragment(baseJson, true) else baseJson
                 configFile.writeText(xrayJson)
                 LocalProxyAuth.registerTestPort(testPort, testUser, testPass)
 

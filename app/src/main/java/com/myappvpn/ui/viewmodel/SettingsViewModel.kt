@@ -40,6 +40,10 @@ class SettingsViewModel @Inject constructor(
     val killSwitchEnabled: StateFlow<Boolean?> = preferences.killSwitchEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    /** "Обход DPI" — TLS ClientHello fragmentation to the VPN server (applies on next connect). */
+    val tlsFragmentEnabled: StateFlow<Boolean?> = preferences.tlsFragmentEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     val excludedApps: StateFlow<Set<String>> = preferences.excludedApps
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
@@ -172,6 +176,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setKillSwitchEnabled(value: Boolean) = viewModelScope.launch {
         preferences.setKillSwitchEnabled(value)
+    }
+
+    fun setTlsFragmentEnabled(value: Boolean) = viewModelScope.launch {
+        preferences.setTlsFragmentEnabled(value)
     }
 
     fun setAutoConnect(value: Boolean) = viewModelScope.launch {

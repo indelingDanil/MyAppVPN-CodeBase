@@ -16,6 +16,8 @@
     <string name="settings_killswitch_title">Kill switch</string>
     <string name="settings_killswitch_subtitle">Блокировать трафик при обрыве туннеля — реальный IP не утечёт</string>
     <string name="settings_killswitch_off_warning">⚠ Выключено: при обрыве трафик может пойти напрямую в обход VPN.</string>
+    <string name="settings_tls_fragment_title">Обход DPI (фрагментация TLS)</string>
+    <string name="settings_tls_fragment_subtitle">Дробит начало TLS-соединения с сервером, чтобы простой DPI не прочитал имя сервера. Может помочь, если оператор блокирует подключения; установка соединения может стать медленнее. По умолчанию выключено.</string>
     <string name="settings_split_title">Раздельное туннелирование</string>
     <string name="settings_split_subtitle">Выбрать приложения, которые работают без VPN</string>
     <string name="settings_split_manage_title">Выбор приложений</string>

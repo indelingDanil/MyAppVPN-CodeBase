@@ -53,6 +53,7 @@ fun SettingsScreen(
     val hotspotSharing by viewModel.hotspotSharing.collectAsStateWithLifecycle()
     val splitTunnelEnabled by viewModel.splitTunnelEnabled.collectAsStateWithLifecycle()
     val killSwitchEnabled by viewModel.killSwitchEnabled.collectAsStateWithLifecycle()
+    val tlsFragmentEnabled by viewModel.tlsFragmentEnabled.collectAsStateWithLifecycle()
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
@@ -107,6 +108,19 @@ fun SettingsScreen(
             if (killSwitchEnabled == false) {
                 SettingsHint(stringResource(R.string.settings_killswitch_off_warning))
             }
+            SettingsDivider()
+            SettingsSwitchItem(
+                icon = Icons.Default.Shield,
+                title = stringResource(R.string.settings_tls_fragment_title),
+                subtitle = if (sessionActive) {
+                    stringResource(R.string.settings_tls_fragment_subtitle) + "\n" +
+                        stringResource(R.string.settings_applies_next_connect)
+                } else {
+                    stringResource(R.string.settings_tls_fragment_subtitle)
+                },
+                checked = tlsFragmentEnabled,
+                onCheckedChange = { viewModel.setTlsFragmentEnabled(it) }
+            )
         }
 
         // Apps & network

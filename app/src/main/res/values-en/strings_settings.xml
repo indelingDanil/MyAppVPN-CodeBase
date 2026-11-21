@@ -16,6 +16,8 @@
     <string name="settings_killswitch_title">Kill switch</string>
     <string name="settings_killswitch_subtitle">Block traffic if the tunnel drops — your real IP won\'t leak</string>
     <string name="settings_killswitch_off_warning">⚠ Off: if the tunnel drops, traffic may go directly, bypassing the VPN.</string>
+    <string name="settings_tls_fragment_title">DPI bypass (TLS fragmentation)</string>
+    <string name="settings_tls_fragment_subtitle">Splits the start of the TLS connection to the server so simple DPI can\'t read the server name. May help if your operator blocks connections; connecting may get slower. Off by default.</string>
     <string name="settings_split_title">Split tunneling</string>
     <string name="settings_split_subtitle">Choose apps that work without the VPN</string>
     <string name="settings_split_manage_title">Choose apps</string>

@@ -36,19 +36,22 @@ class Tun2SocksManager(private val context: Context) {
      * Java's ProcessBuilder closes all non-stdio fds before exec; native fork() does not.
      * tun2socks reads the TUN via fd:// — the TUN addresses (172.19.0.1/30, fdfe:dcba:9876::1/126,
      * set in MyVpnService.buildTun) aren't passed to it. [socksPort] is the session's random port.
+     * [ownerSocket]: name of the running [OwnerUidServer] → tun2socks checks each flow's socket
+     * owner (drops flows from apps outside the VPN that bound to tun0); null = no check.
      */
     suspend fun start(
         tunFd: Int,
         socksPort: Int,
         proxyUser: String? = null,
         proxyPass: String? = null,
+        ownerSocket: String? = null,
     ): Boolean = withContext(Dispatchers.IO) {
         stop()
 
         try {
             val tun2socksBin = BinaryInstaller.getTun2SocksBinaryPath(context)
 
-            pid = NativeHelper.startTun2Socks(tun2socksBin, tunFd, socksPort, proxyUser, proxyPass)
+            pid = NativeHelper.startTun2Socks(tun2socksBin, tunFd, socksPort, proxyUser, proxyPass, ownerSocket)
             if (pid <= 0) {
                 Log.e(TAG, "NativeHelper.startTun2Socks failed (returned $pid)")
                 return@withContext false
@@ -58,7 +61,7 @@ class Tun2SocksManager(private val context: Context) {
 
             val alive = NativeHelper.isProcessAlive(pid)
             if (alive) {
-                Log.i(TAG, "tun2socks started (pid=$pid) fd=$tunFd -> socks5 :$socksPort")
+                Log.i(TAG, "tun2socks started (pid=$pid) fd=$tunFd -> socks5 :$socksPort, owner check ${if (ownerSocket.isNullOrEmpty()) "off" else "on"}")
             } else {
                 Log.e(TAG, "tun2socks died immediately (pid=$pid)")
                 pid = -1

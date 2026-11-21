@@ -1,0 +1,8 @@
+tun2socks-owner
+SPDX-License-Identifier: GPL-3.0-or-later (files in this directory: main.go, owner/)
+
+Builds on tun2socks v2.6.0 by Jason Lyu (https://github.com/xjasonlyu/tun2socks),
+used unmodified as a Go module dependency and licensed under the MIT License — see
+LICENSE.tun2socks. main.go reproduces upstream's command-line flags and startup
+sequence; the additions are the -owner-* flags and the owner package (per-flow
+socket-owner check, MyAppVPN GitHub issue #8).
