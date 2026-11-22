@@ -16,7 +16,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -84,12 +85,16 @@ class OffersRepository @Inject constructor(
         private const val KEY_JSON = "json"
         private const val KEY_FETCHED_AT = "fetched_at"
         private const val KEY_HIDDEN_LEGACY = "hidden"   // 24h-hide map of the removed Home slot
-        private const val MAX_AGE_MS = 12 * 60 * 60_000L
+        // The file is ~2 KB: re-check on every screen open, but at most every 30 min.
+        private const val MAX_AGE_MS = 30 * 60_000L
 
-        private val MIRRORS = listOf(
+        // GitHub raw is always fresh (≈5 min cache); CDN mirrors can serve a stale copy for hours
+        // even after a purge (seen on a real phone), so they are only a fallback.
+        private const val PRIMARY = "https://raw.githubusercontent.com/indelingDanil/MyAppVPN-subs/main/offers/offers.json"
+        private const val PRIMARY_GRACE_MS = 5_000L
+        private val FALLBACK_MIRRORS = listOf(
             "https://cdn.jsdelivr.net/gh/indelingDanil/MyAppVPN-subs@main/offers/offers.json",
             "https://raw.githack.com/indelingDanil/MyAppVPN-subs/main/offers/offers.json",
-            "https://raw.githubusercontent.com/indelingDanil/MyAppVPN-subs/main/offers/offers.json",
         )
 
         private val TG_RE = Regex("^[A-Za-z0-9_]{5,32}$")
@@ -173,33 +178,47 @@ class OffersRepository @Inject constructor(
         if (prefs.contains(KEY_HIDDEN_LEGACY)) prefs.edit().remove(KEY_HIDDEN_LEGACY).apply()
     }
 
-    /** Refreshes the list in the background if the cache is older than 12h. Once per process. */
+    /**
+     * Shows the cached list immediately and refreshes it in the background when the cache is
+     * older than [MAX_AGE_MS]. Called on every open of the offers screen; one fetch at a time.
+     */
     fun refreshIfStale() {
-        if (!refreshStarted.compareAndSet(false, true)) return
         if (System.currentTimeMillis() - prefs.getLong(KEY_FETCHED_AT, 0L) < MAX_AGE_MS) return
+        if (!refreshStarted.compareAndSet(false, true)) return
         scope.launch {
-            val (json, list) = fetchFirstWorking() ?: return@launch   // failed → keep cache/fallback
-            prefs.edit().putString(KEY_JSON, json).putLong(KEY_FETCHED_AT, System.currentTimeMillis()).apply()
-            _offers.value = list
+            try {
+                val (json, list) = fetchFreshest() ?: return@launch   // failed → keep cache/fallback
+                prefs.edit().putString(KEY_JSON, json).putLong(KEY_FETCHED_AT, System.currentTimeMillis()).apply()
+                _offers.value = list
+            } finally {
+                refreshStarted.set(false)
+            }
         }
     }
 
-    /** Races the mirrors (≤8s each), first one that parses as an offers file wins. */
-    private suspend fun fetchFirstWorking(): Pair<String, List<Offer>>? = coroutineScope {
-        val winner = CompletableDeferred<Pair<String, List<Offer>>?>()
-        val jobs = MIRRORS.map { url ->
-            launch {
-                val json = withTimeoutOrNull(8_000) {
-                    runCatching { fetcher.fetch(url, MyVpnService.activeSocksPort) }
-                        .onFailure { if (it is CancellationException) throw it }
-                        .getOrNull()
-                } ?: return@launch
-                parse(json)?.let { winner.complete(json to it) }
-            }
+    /**
+     * All mirrors start at once. GitHub raw (always fresh) wins if it answers within
+     * [PRIMARY_GRACE_MS]; otherwise (e.g. GitHub throttled on RU mobile) the first CDN mirror
+     * that answers is used. Each request is capped at 8s.
+     */
+    private suspend fun fetchFreshest(): Pair<String, List<Offer>>? = coroutineScope {
+        fun get(url: String) = async {
+            withTimeoutOrNull(8_000) {
+                runCatching { fetcher.fetch(url, MyVpnService.activeSocksPort) }
+                    .onFailure { if (it is CancellationException) throw it }
+                    .getOrNull()
+            }?.let { json -> parse(json)?.let { json to it } }
         }
-        launch { jobs.joinAll(); winner.complete(null) }
-        val result = winner.await()
-        jobs.forEach { it.cancel() }
+        val primary = get(PRIMARY)
+        val fallbacks = FALLBACK_MIRRORS.map { get(it) }
+        val fresh = withTimeoutOrNull(PRIMARY_GRACE_MS) { primary.await() }
+        val result = fresh ?: run {
+            val winner = CompletableDeferred<Pair<String, List<Offer>>?>()
+            (fallbacks + primary).forEach { d -> launch { d.await()?.let { winner.complete(it) } } }
+            launch { (fallbacks + primary).awaitAll(); winner.complete(null) }
+            winner.await()
+        }
+        (fallbacks + primary).forEach { it.cancel() }
         result
     }
 }

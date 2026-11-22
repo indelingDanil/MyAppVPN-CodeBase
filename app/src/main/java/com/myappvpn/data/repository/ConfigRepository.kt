@@ -11,6 +11,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import java.net.URI
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -36,6 +38,9 @@ class ConfigRepository @Inject constructor(
         private val BLOCKED_COUNTRIES = setOf("Ukraine")
         /** Max Hysteria2 servers guaranteed a slot in the Auto pool (see [getBalancerPool]). */
         private const val HY2_POOL_RESERVE = 10
+        /** Always-current mirror host; preferred over CDN mirrors that may serve stale copies. */
+        private const val FRESH_HOST = "raw.githubusercontent.com"
+        private const val FRESH_GRACE_MS = 5_000L
     }
 
     /** Serializes refreshes (worker / pull-to-refresh / in-tunnel refresh) — one at a time. */
@@ -99,9 +104,8 @@ class ConfigRepository @Inject constructor(
      * instead of sequentially waiting ~30s on each blocked one before reaching the good mirror.
      */
     private suspend fun fetchFirstWorking(chain: List<String>): String? = coroutineScope {
-        val winner = CompletableDeferred<String?>()
-        val jobs = chain.map { url ->
-            launch {
+        val attempts = chain.map { url ->
+            async {
                 val text = withTimeoutOrNull(12_000) {
                     runCatching { fetchRaw(url) }
                         .onFailure { if (it is CancellationException) throw it }
@@ -110,17 +114,24 @@ class ConfigRepository @Inject constructor(
                 // Validate AFTER decoding (base64 subscriptions have no literal "vless://" /
                 // "hysteria2://"):
                 // accept only if it yields ≥1 server. Parsing is CPU work → Default dispatcher.
-                if (text != null) {
-                    val ok = withContext(Dispatchers.Default) {
-                        VlessUriParser.parseSubscription(text).isNotEmpty()
-                    }
-                    if (ok) winner.complete(text)
+                text?.takeIf {
+                    withContext(Dispatchers.Default) { VlessUriParser.parseSubscription(it).isNotEmpty() }
                 }
             }
         }
-        launch { jobs.joinAll(); winner.complete(null) }   // all failed → null
-        val result = winner.await()
-        jobs.forEach { it.cancel() }                       // stop the losers
+        // CDN mirrors (jsDelivr, githack) can keep serving a stale copy for hours even after a
+        // purge — the server count "jumped" 301 ↔ 460 depending on which mirror answered first.
+        // raw.githubusercontent.com is always current, so if the chain has it and it answers
+        // within a short grace period, it wins; otherwise the race goes on as before.
+        val freshIdx = chain.indexOfFirst { runCatching { URI(it).host }.getOrNull() == FRESH_HOST }
+        val fresh = if (freshIdx >= 0) withTimeoutOrNull(FRESH_GRACE_MS) { attempts[freshIdx].await() } else null
+        val result = fresh ?: run {
+            val winner = CompletableDeferred<String?>()
+            attempts.forEach { d -> launch { d.await()?.let { winner.complete(it) } } }
+            launch { attempts.awaitAll(); winner.complete(null) }   // all failed → null
+            winner.await()
+        }
+        attempts.forEach { it.cancel() }                            // stop the losers
         result
     }
 
