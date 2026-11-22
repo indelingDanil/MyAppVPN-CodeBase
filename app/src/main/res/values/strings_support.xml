@@ -21,4 +21,8 @@
     <string name="support_thanks">Спасибо всем, кто пользуется и делится приложением ❤️</string>
 
     <string name="support_disclaimer">⚠️ Учебный проект, сделан в образовательных и исследовательских целях. Автор не несёт ответственности за то, как вы используете приложение. В РФ VPN-сервисы для обхода блокировок ограничены законом и могут считаться незаконными. Используете на свой страх и риск.</string>
+    <string name="partner_title" translatable="false">YepShop</string>
+    <string name="partner_text">Пополнение Steam, игр и сервисов</string>
+    <string name="partner_hide">Скрыть</string>
+    <string name="partner_open_tg">Открыть в Telegram</string>
 </resources>

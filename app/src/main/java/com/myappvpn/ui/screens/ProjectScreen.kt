@@ -15,6 +15,7 @@ import com.myappvpn.BuildConfig
 import com.myappvpn.R
 import com.myappvpn.ui.components.DisclaimerText
 import com.myappvpn.ui.components.LocalBottomBarPadding
+import com.myappvpn.ui.components.PartnerCard
 import com.myappvpn.ui.components.ProjectLinksCard
 import com.myappvpn.ui.components.SupportCard
 import com.myappvpn.ui.theme.*
@@ -45,6 +46,7 @@ fun ProjectScreen() {
         }
         ProjectLinksCard()
         SupportCard()
+        PartnerCard()
         DisclaimerText()
         Spacer(Modifier.height(8.dp))
     }

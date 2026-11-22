@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,6 +46,12 @@ object SupportInfo {
     const val TELEGRAM_URL = "https://t.me/myappvpn_dprog"
     const val GITHUB_URL = "https://github.com/indelingDanil/MyAppVPN"
     const val CLOUDTIPS_URL = "https://pay.cloudtips.ru/p/8c90d7a5"
+
+    /** Partner (referral) link — a plain link, no SDK, no tracking from the app side. */
+    const val PARTNER_URL = "https://yepshop.app/?ref=6A086889"
+    const val PARTNER_TG_URL = "https://t.me/YepShopBot?start=ref_6A086889"
+    /** Opens the bot straight in the Telegram app (t.me links are often grabbed by the browser). */
+    const val PARTNER_TG_APP_URL = "tg://resolve?domain=YepShopBot&start=ref_6A086889"
 
     val CRYPTO = listOf(
         "USDT (TRC20)" to "TB3Qn2guzVdj93kUi43KG8gQY6mruGZbNG",
@@ -211,6 +218,72 @@ fun SupportCard() {
                 color = AetherTextTertiary,
                 fontSize = 11.sp,
             )
+        }
+    }
+}
+
+private const val UI_PREFS = "ui_prefs"
+private const val KEY_PARTNER_HOME_HIDDEN = "partner_home_hidden"
+
+/**
+ * Quiet partner banner: one row, opens the partner site in the browser. It's a plain link —
+ * no ad SDK, no network calls from the app. On Home it can be hidden for good ([dismissible]).
+ */
+@Composable
+fun PartnerCard(modifier: Modifier = Modifier, dismissible: Boolean = false) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(UI_PREFS, Context.MODE_PRIVATE) }
+    var hidden by remember { mutableStateOf(dismissible && prefs.getBoolean(KEY_PARTNER_HOME_HIDDEN, false)) }
+
+    AnimatedVisibility(visible = !hidden, modifier = modifier) {
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .clickable(role = Role.Button) { openUrl(context, SupportInfo.PARTNER_URL) }
+                    .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AetherCyan.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.SportsEsports, contentDescription = null, tint = AetherCyan, modifier = Modifier.size(20.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.partner_title), color = AetherTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        stringResource(R.string.partner_text),
+                        color = AetherTextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SupportInfo.PARTNER_TG_APP_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (_: ActivityNotFoundException) {
+                        openUrl(context, SupportInfo.PARTNER_TG_URL)   // no Telegram app → web link
+                    }
+                }) {
+                    Icon(Icons.Default.Send, contentDescription = stringResource(R.string.partner_open_tg), tint = AetherCyan, modifier = Modifier.size(18.dp))
+                }
+                if (dismissible) {
+                    IconButton(onClick = {
+                        hidden = true
+                        prefs.edit().putBoolean(KEY_PARTNER_HOME_HIDDEN, true).apply()
+                    }) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.partner_hide), tint = AetherTextTertiary, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
         }
     }
 }

@@ -21,4 +21,7 @@
     <string name="support_thanks">Қолданбаны пайдаланып, бөлісіп жүрген барлығыңызға рахмет ❤️</string>
 
     <string name="support_disclaimer">⚠️ Білім беру жобасы, оқу және зерттеу мақсатында жасалған. Автор қолданбаны қалай пайдаланатыныңызға жауапты емес. Ресейде бұғаттауларды айналып өтуге арналған VPN қызметтері заңмен шектелген және заңсыз деп танылуы мүмкін. Өз тәуекеліңізбен пайдаланыңыз.</string>
+    <string name="partner_text">Steam, ойындар мен сервистерді толтыру</string>
+    <string name="partner_hide">Жасыру</string>
+    <string name="partner_open_tg">Telegram-да ашу</string>
 </resources>

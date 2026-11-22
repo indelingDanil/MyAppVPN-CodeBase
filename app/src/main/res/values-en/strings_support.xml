@@ -21,4 +21,7 @@
     <string name="support_thanks">Thanks to everyone who uses and shares the app ❤️</string>
 
     <string name="support_disclaimer">⚠️ Educational project, made for learning and research purposes. The author is not responsible for how you use the app. In Russia, VPN services intended to bypass blocking are restricted by law and may be considered illegal. Use at your own risk.</string>
+    <string name="partner_text">Top up Steam, games and services</string>
+    <string name="partner_hide">Hide</string>
+    <string name="partner_open_tg">Open in Telegram</string>
 </resources>

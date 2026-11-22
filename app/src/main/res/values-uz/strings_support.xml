@@ -21,4 +21,7 @@
     <string name="support_thanks">Ilovadan foydalanayotgan va uni ulashayotgan hammaga rahmat ❤️</string>
 
     <string name="support_disclaimer">⚠️ Taʼlimiy loyiha, oʻrganish va tadqiqot maqsadida yaratilgan. Muallif ilovadan qanday foydalanishingiz uchun javobgar emas. Rossiyada bloklashlarni chetlab oʻtishga moʻljallangan VPN xizmatlari qonun bilan cheklangan va noqonuniy deb hisoblanishi mumkin. Oʻz xavfingiz ostida foydalaning.</string>
+    <string name="partner_text">Steam, oʻyinlar va xizmatlarni toʻldirish</string>
+    <string name="partner_hide">Yashirish</string>
+    <string name="partner_open_tg">Telegramda ochish</string>
 </resources>

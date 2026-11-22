@@ -342,6 +342,14 @@ fun HomeScreen(
                     }
                 }
 
+                // Partner link — one quiet row, can be hidden for good with ✕.
+                com.myappvpn.ui.components.PartnerCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
+                    dismissible = true
+                )
+
                 Spacer(modifier = Modifier.height(16.dp + LocalBottomBarPadding.current))
             }
         }

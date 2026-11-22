@@ -21,4 +21,7 @@
     <string name="support_thanks">Uygulamayı kullanan ve paylaşan herkese teşekkürler ❤️</string>
 
     <string name="support_disclaimer">⚠️ Eğitim amaçlı bir projedir; öğrenme ve araştırma amacıyla geliştirilmiştir. Yazar, uygulamayı nasıl kullandığınızdan sorumlu değildir. Rusya\'da engellemeleri aşmaya yönelik VPN hizmetleri yasalarla kısıtlanmıştır ve yasa dışı sayılabilir. Kullanım riski size aittir.</string>
+    <string name="partner_text">Steam, oyun ve hizmet bakiyesi yükleme</string>
+    <string name="partner_hide">Gizle</string>
+    <string name="partner_open_tg">Telegram\'da aç</string>
 </resources>

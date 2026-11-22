@@ -21,4 +21,7 @@
     <string name="support_thanks">感谢每一位使用和分享本应用的人 ❤️</string>
 
     <string name="support_disclaimer">⚠️ 本项目为教育项目，仅用于学习和研究目的。作者不对你如何使用本应用承担任何责任。在俄罗斯，用于绕过封锁的 VPN 服务受到法律限制，可能被视为违法。使用风险由你自行承担。</string>
+    <string name="partner_text">充值 Steam、游戏和服务</string>
+    <string name="partner_hide">隐藏</string>
+    <string name="partner_open_tg">在 Telegram 中打开</string>
 </resources>
