@@ -12,12 +12,18 @@
 
     <string name="support_title">Donate ☕</string>
     <string name="support_text">The app is free and will stay free. Donations are entirely voluntary, but every little bit adds motivation to keep going: fixing, updating and building new things.</string>
-    <string name="support_dream">The dream: earn %1$s ₽ with my own app 😄</string>
-    <string name="support_progress">Donated at release time: %1$s ₽ · %2$s%% of the way</string>
+    <string name="support_dream">The dream: earn %1$s with my own app 😄</string>
+    <string name="support_progress">Donated so far: %1$s · %2$s%% of the way</string>
     <string name="support_cloudtips">Donate via CloudTips (RUB)</string>
     <string name="support_crypto">With crypto</string>
     <string name="support_copy_action">Copy address</string>
     <string name="support_copied">%1$s address copied</string>
+    <string name="support_ton_hint">no Memo needed · fee ≈ 0</string>
+    <string name="support_qr_action">Show QR code</string>
+    <string name="support_qr_network">Network: %1$s</string>
+    <string name="support_qr_warning">Send only %1$s on the %2$s network</string>
+    <string name="support_qr_copy">Copy</string>
+    <string name="support_qr_close">Close</string>
     <string name="support_thanks">Thanks to everyone who uses and shares the app ❤️</string>
 
     <string name="support_disclaimer">⚠️ Educational project, made for learning and research purposes. The author is not responsible for how you use the app. In Russia, VPN services intended to bypass blocking are restricted by law and may be considered illegal. Use at your own risk.</string>

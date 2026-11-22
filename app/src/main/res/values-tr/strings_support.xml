@@ -12,12 +12,18 @@
 
     <string name="support_title">Bağış yap ☕</string>
     <string name="support_text">Uygulama ücretsizdir ve ücretsiz kalacak. Bağışlar tamamen gönüllüdür, ancak her küçük katkı devam etmek için motivasyon verir: hataları düzeltmek, güncellemek ve yeni şeyler geliştirmek.</string>
-    <string name="support_dream">Hayalim: kendi uygulamamla %1$s ₽ kazanmak 😄</string>
-    <string name="support_progress">Sürüm anında bağışlanan: %1$s ₽ · yolun %%%2$s kadarı</string>
+    <string name="support_dream">Hayalim: kendi uygulamamla %1$s kazanmak 😄</string>
+    <string name="support_progress">Şimdiye kadar bağışlanan: %1$s · yolun %%%2$s kadarı</string>
     <string name="support_cloudtips">CloudTips ile bağış yap (RUB)</string>
     <string name="support_crypto">Kripto ile</string>
     <string name="support_copy_action">Adresi kopyala</string>
     <string name="support_copied">%1$s adresi kopyalandı</string>
+    <string name="support_ton_hint">Memo gerekmez · komisyon ≈ 0</string>
+    <string name="support_qr_action">QR kodunu göster</string>
+    <string name="support_qr_network">Ağ: %1$s</string>
+    <string name="support_qr_warning">Yalnızca %2$s ağında %1$s gönderin</string>
+    <string name="support_qr_copy">Kopyala</string>
+    <string name="support_qr_close">Kapat</string>
     <string name="support_thanks">Uygulamayı kullanan ve paylaşan herkese teşekkürler ❤️</string>
 
     <string name="support_disclaimer">⚠️ Eğitim amaçlı bir projedir; öğrenme ve araştırma amacıyla geliştirilmiştir. Yazar, uygulamayı nasıl kullandığınızdan sorumlu değildir. Rusya\'da engellemeleri aşmaya yönelik VPN hizmetleri yasalarla kısıtlanmıştır ve yasa dışı sayılabilir. Kullanım riski size aittir.</string>

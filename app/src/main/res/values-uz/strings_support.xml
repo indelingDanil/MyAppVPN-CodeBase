@@ -12,12 +12,18 @@
 
     <string name="support_title">Xayriya ☕</string>
     <string name="support_text">Ilova bepul va bepulligicha qoladi. Xayriya butunlay ixtiyoriy, lekin har bir kichik yordam ishni davom ettirishga turtki beradi: tuzatish, yangilash va yangi narsalar yaratish.</string>
-    <string name="support_dream">Orzu: oʻz ilovam bilan %1$s ₽ ishlab topish 😄</string>
-    <string name="support_progress">Reliz vaqtida yigʻilgan: %1$s ₽ · yoʻlning %2$s%%</string>
+    <string name="support_dream">Orzu: oʻz ilovam bilan %1$s ishlab topish 😄</string>
+    <string name="support_progress">Yigʻilgan: %1$s · yoʻlning %2$s%%</string>
     <string name="support_cloudtips">CloudTips orqali xayriya (RUB)</string>
     <string name="support_crypto">Kriptovalyutada</string>
     <string name="support_copy_action">Manzilni nusxalash</string>
     <string name="support_copied">%1$s manzili nusxalandi</string>
+    <string name="support_ton_hint">Memo shart emas · komissiya ≈ 0</string>
+    <string name="support_qr_action">QR-kodni koʻrsatish</string>
+    <string name="support_qr_network">Tarmoq: %1$s</string>
+    <string name="support_qr_warning">Faqat %2$s tarmogʻida %1$s yuboring</string>
+    <string name="support_qr_copy">Nusxalash</string>
+    <string name="support_qr_close">Yopish</string>
     <string name="support_thanks">Ilovadan foydalanayotgan va uni ulashayotgan hammaga rahmat ❤️</string>
 
     <string name="support_disclaimer">⚠️ Taʼlimiy loyiha, oʻrganish va tadqiqot maqsadida yaratilgan. Muallif ilovadan qanday foydalanishingiz uchun javobgar emas. Rossiyada bloklashlarni chetlab oʻtishga moʻljallangan VPN xizmatlari qonun bilan cheklangan va noqonuniy deb hisoblanishi mumkin. Oʻz xavfingiz ostida foydalaning.</string>

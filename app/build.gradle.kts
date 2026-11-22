@@ -163,5 +163,8 @@ dependencies {
     // JSON
     implementation(libs.gson)
 
+    // QR codes for donation addresses (generated locally)
+    implementation(libs.zxing.core)
+
     debugImplementation(libs.androidx.ui.tooling)
 }

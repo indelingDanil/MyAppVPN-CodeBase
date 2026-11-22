@@ -12,12 +12,18 @@
 
     <string name="support_title">捐助 ☕</string>
     <string name="support_text">本应用免费，并将一直免费。捐助完全自愿，但每一份心意都能让我更有动力继续下去：修复问题、更新版本、开发新功能。</string>
-    <string name="support_dream">梦想：靠自己的应用赚到 %1$s ₽ 😄</string>
-    <string name="support_progress">截至发布时已收到捐助：%1$s ₽ · 已完成 %2$s%%</string>
+    <string name="support_dream">梦想：靠自己的应用赚到 %1$s 😄</string>
+    <string name="support_progress">目前已收到捐助：%1$s · 已完成 %2$s%%</string>
     <string name="support_cloudtips">通过 CloudTips 捐助（卢布）</string>
     <string name="support_crypto">使用加密货币</string>
     <string name="support_copy_action">复制地址</string>
     <string name="support_copied">已复制 %1$s 地址</string>
+    <string name="support_ton_hint">无需 Memo · 手续费 ≈ 0</string>
+    <string name="support_qr_action">显示二维码</string>
+    <string name="support_qr_network">网络：%1$s</string>
+    <string name="support_qr_warning">仅可通过 %2$s 网络发送 %1$s</string>
+    <string name="support_qr_copy">复制</string>
+    <string name="support_qr_close">关闭</string>
     <string name="support_thanks">感谢每一位使用和分享本应用的人 ❤️</string>
 
     <string name="support_disclaimer">⚠️ 本项目为教育项目，仅用于学习和研究目的。作者不对你如何使用本应用承担任何责任。在俄罗斯，用于绕过封锁的 VPN 服务受到法律限制，可能被视为违法。使用风险由你自行承担。</string>

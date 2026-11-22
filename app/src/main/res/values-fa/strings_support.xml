@@ -12,12 +12,18 @@
 
     <string name="support_title">حمایت مالی ☕</string>
     <string name="support_text">این برنامه رایگان است و رایگان خواهد ماند. حمایت مالی کاملاً داوطلبانه است، اما هر مبلغ کوچکی انگیزه ادامه کار را بیشتر می‌کند: رفع اشکال، به‌روزرسانی و ساختن چیزهای تازه.</string>
-    <string name="support_dream">آرزو: درآمد %1$s ₽ با برنامه خودم 😄</string>
-    <string name="support_progress">مبلغ اهدایی تا زمان انتشار: %1$s ₽ · %2$s%% از مسیر</string>
+    <string name="support_dream">آرزو: درآمد %1$s با برنامه خودم 😄</string>
+    <string name="support_progress">مبلغ اهدایی تاکنون: %1$s · %2$s%% از مسیر</string>
     <string name="support_cloudtips">حمایت از طریق CloudTips (روبل)</string>
     <string name="support_crypto">با رمزارز</string>
     <string name="support_copy_action">کپی آدرس</string>
     <string name="support_copied">آدرس %1$s کپی شد</string>
+    <string name="support_ton_hint">بدون Memo · کارمزد ≈ ۰</string>
+    <string name="support_qr_action">نمایش کد QR</string>
+    <string name="support_qr_network">شبکه: %1$s</string>
+    <string name="support_qr_warning">فقط %1$s را در شبکه %2$s ارسال کنید</string>
+    <string name="support_qr_copy">کپی</string>
+    <string name="support_qr_close">بستن</string>
     <string name="support_thanks">از همه کسانی که از برنامه استفاده می‌کنند و آن را به دیگران معرفی می‌کنند سپاسگزارم ❤️</string>
 
     <string name="support_disclaimer">⚠️ این یک پروژه آموزشی است که برای یادگیری و پژوهش ساخته شده است. نویسنده هیچ مسئولیتی در قبال نحوه استفاده شما از برنامه ندارد. در روسیه، سرویس‌های VPN که برای دور زدن مسدودسازی‌ها در نظر گرفته شده‌اند طبق قانون محدود شده‌اند و ممکن است غیرقانونی تلقی شوند. استفاده از آن با مسئولیت خود شماست.</string>

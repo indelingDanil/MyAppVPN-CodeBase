@@ -12,12 +12,18 @@
 
     <string name="support_title">Задонатить ☕</string>
     <string name="support_text">Приложение бесплатное и таким останется. Донаты — дело сугубо добровольное, но любая копеечка добавляет мотивации продолжать: чинить, обновлять и пилить новое.</string>
-    <string name="support_dream">Мечта — заработать на своём приложении %1$s ₽ 😄</string>
-    <string name="support_progress">На момент релиза задоначено: %1$s ₽ · %2$s%% пути</string>
+    <string name="support_dream">Мечта — заработать на своём приложении %1$s 😄</string>
+    <string name="support_progress">Задоначено: %1$s · %2$s%% пути</string>
     <string name="support_cloudtips">Задонатить через CloudTips (₽)</string>
     <string name="support_crypto">Криптовалютой</string>
     <string name="support_copy_action">Скопировать адрес</string>
     <string name="support_copied">Адрес %1$s скопирован</string>
+    <string name="support_ton_hint">без Memo · комиссия ≈ 0</string>
+    <string name="support_qr_action">Показать QR-код</string>
+    <string name="support_qr_network">Сеть: %1$s</string>
+    <string name="support_qr_warning">Отправляйте только %1$s в сети %2$s</string>
+    <string name="support_qr_copy">Скопировать</string>
+    <string name="support_qr_close">Закрыть</string>
     <string name="support_thanks">Спасибо всем, кто пользуется и делится приложением ❤️</string>
 
     <string name="support_disclaimer">⚠️ Учебный проект, сделан в образовательных и исследовательских целях. Автор не несёт ответственности за то, как вы используете приложение. В РФ VPN-сервисы для обхода блокировок ограничены законом и могут считаться незаконными. Используете на свой страх и риск.</string>

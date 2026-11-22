@@ -12,12 +12,18 @@
 
     <string name="support_title">Донат ☕</string>
     <string name="support_text">Қолданба тегін және тегін болып қала береді. Донат толығымен ерікті, бірақ әрбір кішкентай үлес жұмысты жалғастыруға — түзетуге, жаңартуға және жаңа нәрселер жасауға — ынта қосады.</string>
-    <string name="support_dream">Арман: өз қолданбаммен %1$s ₽ табу 😄</string>
-    <string name="support_progress">Релиз кезінде жиналғаны: %1$s ₽ · жолдың %2$s%%</string>
+    <string name="support_dream">Арман: өз қолданбаммен %1$s табу 😄</string>
+    <string name="support_progress">Жиналғаны: %1$s · жолдың %2$s%%</string>
     <string name="support_cloudtips">CloudTips арқылы донат (RUB)</string>
     <string name="support_crypto">Криптовалютамен</string>
     <string name="support_copy_action">Мекенжайды көшіру</string>
     <string name="support_copied">%1$s мекенжайы көшірілді</string>
+    <string name="support_ton_hint">Memo қажет емес · комиссия ≈ 0</string>
+    <string name="support_qr_action">QR-кодты көрсету</string>
+    <string name="support_qr_network">Желі: %1$s</string>
+    <string name="support_qr_warning">Тек %2$s желісінде %1$s жіберіңіз</string>
+    <string name="support_qr_copy">Көшіру</string>
+    <string name="support_qr_close">Жабу</string>
     <string name="support_thanks">Қолданбаны пайдаланып, бөлісіп жүрген барлығыңызға рахмет ❤️</string>
 
     <string name="support_disclaimer">⚠️ Білім беру жобасы, оқу және зерттеу мақсатында жасалған. Автор қолданбаны қалай пайдаланатыныңызға жауапты емес. Ресейде бұғаттауларды айналып өтуге арналған VPN қызметтері заңмен шектелген және заңсыз деп танылуы мүмкін. Өз тәуекеліңізбен пайдаланыңыз.</string>
