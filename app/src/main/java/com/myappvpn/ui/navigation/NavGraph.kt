@@ -22,6 +22,9 @@ fun AppNavGraph(navController: NavHostController) {
                 },
                 onNavigateToOpenFlux = {
                     navController.navigate(Screen.OpenFlux.route) { launchSingleTop = true }
+                },
+                onNavigateToOffers = {
+                    navController.navigate(Screen.Offers.route) { launchSingleTop = true }
                 }
             )
         }
@@ -35,7 +38,11 @@ fun AppNavGraph(navController: NavHostController) {
         }
 
         composable(Screen.Project.route) {
-            ProjectScreen()
+            ProjectScreen(
+                onNavigateToOffers = {
+                    navController.navigate(Screen.Offers.route) { launchSingleTop = true }
+                }
+            )
         }
 
         composable(Screen.Stats.route) {
@@ -83,6 +90,15 @@ fun AppNavGraph(navController: NavHostController) {
         composable(Screen.Subscriptions.route) {
             SubscriptionsScreen(
                 onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.Offers.route) {
+            OffersScreen(
+                onBack = { navController.popBackStack() },
+                onAddSubscription = {
+                    navController.navigate(Screen.Subscriptions.route) { launchSingleTop = true }
+                }
             )
         }
 

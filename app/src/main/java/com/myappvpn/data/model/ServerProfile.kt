@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "servers")
 data class ServerProfile(
     @PrimaryKey val id: String,         // VlessUriParser.stableId: md5 of normalized identity (no #name)
+    // (vlessUri below holds the raw share link of ANY supported protocol — vless:// or hysteria2://)
     val name: String,                   // e.g. "🇩🇪 DE #12"
     val flag: String,                   // country flag emoji
     val country: String,                // "Germany", "Russia", etc.
@@ -28,7 +29,12 @@ data class ServerProfile(
     val consecutiveFailures: Int = 0,
     val handshakeOk: Boolean = false,
     val verifiedAt: Long = 0L,
+    // DB v6: share-link protocol — "vless" (every row from before v6) or "hysteria2" (QUIC/UDP).
+    val protocol: String = VlessConfig.PROTOCOL_VLESS,
 ) {
+    /** Hysteria2 runs over QUIC/UDP: TCP pings and TLS-over-TCP probes don't apply to it. */
+    val isHysteria2: Boolean get() = protocol == VlessConfig.PROTOCOL_HYSTERIA2
+
     /** TCP+Reality bypasses carrier DPI — best for mobile internet. */
     val isTcpReality: Boolean get() = transport == "tcp" && security == "reality"
 
@@ -86,7 +92,7 @@ data class ServerProfile(
             else                     -> 1f + failCount.toFloat() / total.toFloat()
         }
 
-        val protocol = if (isTcpReality) 0.75f else 1.0f
+        val protocolFactor = if (isTcpReality) 0.75f else 1.0f
 
         // Speed: softened penalties (was 8x for <0.5, now 2x)
         val speed = when {
@@ -105,7 +111,7 @@ data class ServerProfile(
             else           -> 1.0f
         }
 
-        return effectiveLatency * validation * reliability * protocol * speed * confidence
+        return effectiveLatency * validation * reliability * protocolFactor * speed * confidence
     }
 }
 

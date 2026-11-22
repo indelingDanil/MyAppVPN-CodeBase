@@ -29,7 +29,8 @@ class HandshakeProbe @Inject constructor() {
      */
     suspend fun probe(server: ServerProfile): HandshakeResult = withContext(Dispatchers.IO) {
         // No TLS expected — skip handshake, auto-pass
-        if (server.security == "none") {
+        // (Hysteria2 = TLS over QUIC/UDP — a TCP handshake can't test it; leave it to micro-tests.)
+        if (server.security == "none" || server.isHysteria2) {
             return@withContext HandshakeResult(server.id, true)
         }
 

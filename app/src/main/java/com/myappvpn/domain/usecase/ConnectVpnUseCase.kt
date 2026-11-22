@@ -41,7 +41,7 @@ class ConnectVpnUseCase @Inject constructor(
         if (com.myappvpn.BuildConfig.DEBUG) Log.i(TAG, "Connecting (manual) to ${server.name} (${server.validationState})")
 
         val vlessConfig = VlessUriParser.parse(server.vlessUri)
-            ?: throw IllegalArgumentException("Cannot parse VLESS URI for ${server.name}")
+            ?: throw IllegalArgumentException("Cannot parse server URI for ${server.name}")
 
         val hotspotSharing = preferences.hotspotSharing.first()
         val xrayJson = XrayConfigBuilder.build(vlessConfig, socksPort = TEMPLATE_SOCKS_PORT)
@@ -121,7 +121,8 @@ class ConnectVpnUseCase @Inject constructor(
         // Candidates already come ordered by latency (DB sort). Take the top N WITHOUT a
         // live TCP sweep — the in-core observatory does the real (Telegram) probing, so the
         // service can start immediately instead of blocking the user for 1-2 minutes first.
-        val pool = candidates.take(POOL_LIMIT)
+        // (Hysteria2 servers get reserved slots — they have no TCP latency, see getBalancerPool.)
+        val pool = configRepository.getBalancerPool(excluded, POOL_LIMIT)
 
         // Keep server↔config pairs so the proxy-N index in the balancer config maps back to a
         // real server id (mapNotNull alone would desync indices when a server fails to parse).

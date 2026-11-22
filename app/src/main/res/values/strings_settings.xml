@@ -29,7 +29,7 @@
     <string name="settings_hotspot_guide_subtitle">Пошаговая инструкция для Android, iPhone, ПК и Telegram</string>
     <string name="settings_about_version">Версия</string>
     <string name="settings_about_sources">Источники серверов</string>
-    <string name="settings_about_sources_value">zieng2/wl, igareck + свои</string>
+    <string name="settings_about_sources_value">MyAppVPN + свои</string>
     <string name="settings_about_protocol">Протокол</string>
     <string name="settings_about_protocol_value" translatable="false">VLESS + Xray</string>
 

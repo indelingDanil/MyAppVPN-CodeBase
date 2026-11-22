@@ -80,9 +80,13 @@
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
             tools:node="merge">
+            <!-- Removed: WorkManager must be initialised on demand via MyApp (Configuration.Provider)
+                 so it uses HiltWorkerFactory; the startup initializer used the default factory and
+                 RefreshServersWorker (@HiltWorker) could never be created. -->
             <meta-data
                 android:name="androidx.work.WorkManagerInitializer"
-                android:value="androidx.startup" />
+                android:value="androidx.startup"
+                tools:node="remove" />
         </provider>
 
         <!-- Boot receiver for reconnect (not exported — system BOOT_COMPLETED still delivered) -->

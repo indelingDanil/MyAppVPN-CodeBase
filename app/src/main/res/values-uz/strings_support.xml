@@ -22,6 +22,28 @@
 
     <string name="support_disclaimer">⚠️ Taʼlimiy loyiha, oʻrganish va tadqiqot maqsadida yaratilgan. Muallif ilovadan qanday foydalanishingiz uchun javobgar emas. Rossiyada bloklashlarni chetlab oʻtishga moʻljallangan VPN xizmatlari qonun bilan cheklangan va noqonuniy deb hisoblanishi mumkin. Oʻz xavfingiz ostida foydalaning.</string>
     <string name="partner_text">Steam, oʻyinlar va xizmatlarni toʻldirish</string>
-    <string name="partner_hide">Yashirish</string>
     <string name="partner_open_tg">Telegramda ochish</string>
+    <string name="offer_tested">MyAppVPN bilan sinovdan oʻtgan</string>
+    <string name="offer_tested_subscription">MyAppVPN bilan sinovdan oʻtgan · obuna sifatida qoʻshish mumkin</string>
+
+    <string name="offers_link_title">Tekshirilgan pullik obunalar</string>
+    <string name="offers_link_subtitle">MyAppVPN bilan sinalgan barqaror VPN xizmatlari</string>
+    <string name="offers_title">Tekshirilgan pullik obunalar</string>
+    <string name="offers_cd_back">Orqaga</string>
+    <string name="offers_intro">Muallif MyAppVPN bilan oʻzi sinab koʻrgan pullik xizmatlar. Havolalar referal havolalardir: ular orqali xarid qilsangiz, loyihani qoʻllab-quvvatlaysiz. Muallif uchinchi tomon xizmatlari uchun javobgar emas.</string>
+    <string name="offers_section_vpn">VPN obunalari</string>
+    <string name="offers_section_other">Boshqa xizmatlar</string>
+    <string name="offers_howto_title">Sotib olingan obunani qanday qoʻshish mumkin</string>
+    <string name="offers_howto_step1">Xizmatdan obuna sotib oling va uning havolasini oling.</string>
+    <string name="offers_howto_step2">Havolani nusxalang.</string>
+    <string name="offers_howto_step3">Quyidagi «Obuna qoʻshish» tugmasini bosing va havolani maydonga joylashtiring.</string>
+
+    <!-- Free-trial button on an offer card (offers.json "trialUrl" / "trialNote") -->
+    <string name="offer_trial_button">Bepul sinab koʻrish</string>
+    <string name="offer_trial_added">Qoʻshildi ✓</string>
+    <string name="offer_trial_note">Sinov muddati: %1$s</string>
+    <string name="offer_trial_sub_name">%1$s (sinov)</string>
+    <string name="offer_trial_added_msg">Obuna qoʻshildi — serverlar roʻyxatda paydo boʻladi</string>
+    <string name="offer_trial_already_msg">Allaqachon qoʻshilgan</string>
+    <string name="offer_open_site">Saytni ochish</string>
 </resources>

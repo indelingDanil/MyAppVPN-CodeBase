@@ -19,31 +19,33 @@ interface GithubApiService {
 }
 
 /**
- * Subscription sources. Each source is a *fallback chain*: mirrors are identical,
- * so we try them in order and take the first that responds with vless:// links.
+ * Subscription sources. Each source is a *fallback chain*: mirrors are identical, so they are
+ * raced and the first one that responds with vless:// links wins.
  *
- * - UNIVERSAL: zieng2/wl unified "Universal" list (formerly the xync source).
- *   Last two entries are experimental mirrors that keep working under restrictions
- *   (note: different filename `list_universal.txt`, and GitVerse uses the `master` branch).
- * - IGARECK_BLACK: igareck/vpn-configs-for-russia BLACK list — a separate project,
- *   used as an additional pool.
+ * The only visible built-in source is MyAppVPN (our own aggregated list). [FALLBACK_CHAIN]
+ * (zieng2/wl "Universal") is not shown anywhere: ConfigRepository fetches it silently only when
+ * MyAppVPN is enabled and every one of its mirrors failed (typical for whitelist-only mobile
+ * networks that block jsDelivr/githack/GitHub).
+ *
+ * The former visible sources "Universal (zieng2/wl)" and "igareck BLACK" were removed. Their old
+ * ids ("builtin:universal", "builtin:igareck") may still sit in the DataStore set of disabled
+ * built-ins — harmless, that set is only matched against [BUILTIN_SOURCES] ids. Their servers are
+ * pruned from Room by the next refresh (rows absent from every fetched list are deleted).
  */
 object SubscriptionUrls {
 
-    val UNIVERSAL_CHAIN = listOf(
+    /**
+     * zieng2/wl unified "Universal" list — silent fallback for [MYAPPVPN_CHAIN]. RU mirrors first
+     * (Mos.Hub / GitVerse stay reachable under whitelist restrictions; note the different filename
+     * `list_universal.txt` and GitVerse's `master` branch). All mirrors are raced, so on a
+     * whitelist network the RU ones simply win while the blocked ones time out.
+     */
+    val FALLBACK_CHAIN = listOf(
+        "https://hub.mos.ru/zieng2/wl/raw/main/list_universal.txt",
+        "https://gitverse.ru/api/repos/zieng2/wl/raw/branch/master/list_universal.txt",
         "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
         "https://codeberg.org/zieng2/wl/raw/branch/main/vless_universal.txt",
         "https://gitlab.com/zieng2/wl/raw/main/vless_universal.txt",
-        // Experimental mirrors (work under white-list restrictions). Different filename.
-        "https://hub.mos.ru/zieng2/wl/raw/main/list_universal.txt",
-        "https://gitverse.ru/api/repos/zieng2/wl/raw/branch/master/list_universal.txt",
-    )
-
-    val IGARECK_BLACK_CHAIN = listOf(
-        "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
-        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
-        "https://gitlab.com/igareck/vpn-configs-for-russia/-/raw/main/BLACK_VLESS_RUS.txt",
-        "https://codeberg.org/igareck/vpn-configs-for-russia/raw/branch/main/BLACK_VLESS_RUS.txt",
     )
 
     /**
@@ -57,10 +59,8 @@ object SubscriptionUrls {
         "https://raw.githubusercontent.com/indelingDanil/MyAppVPN-subs/output/vless.txt",
     )
 
-    /** Stable ids for the built-in sources (used as DataStore keys for enable/disable state). */
+    /** Stable id of the built-in source (DataStore key for its enable/disable state). */
     const val ID_MYAPPVPN = "builtin:myappvpn"
-    const val ID_UNIVERSAL = "builtin:universal"
-    const val ID_IGARECK = "builtin:igareck"
 
     /**
      * Built-in subscription sources. These ship with the app; users can disable them but not
@@ -71,20 +71,6 @@ object SubscriptionUrls {
             id = ID_MYAPPVPN,
             name = "MyAppVPN (авто-сбор)",
             urls = MYAPPVPN_CHAIN,
-            enabled = true,
-            isBuiltin = true,
-        ),
-        SubscriptionSource(
-            id = ID_UNIVERSAL,
-            name = "Universal (zieng2/wl)",
-            urls = UNIVERSAL_CHAIN,
-            enabled = true,
-            isBuiltin = true,
-        ),
-        SubscriptionSource(
-            id = ID_IGARECK,
-            name = "igareck BLACK",
-            urls = IGARECK_BLACK_CHAIN,
             enabled = true,
             isBuiltin = true,
         ),

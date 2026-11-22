@@ -16,11 +16,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manages the list of subscription sources: built-in (Universal, igareck) + custom (user-added).
+ * Manages the list of subscription sources: built-in (MyAppVPN) + custom (user-added).
  * Built-ins can be enabled/disabled but not deleted; custom ones can be added, toggled and deleted.
  *
  * Only ENABLED sources are fetched ([getEnabledChains]); disabled sources' servers are pruned by
  * ConfigRepository's refresh (ServerDao.applyRefresh deletes rows not in any enabled source).
+ * The hidden zieng2 fallback is not a source here — ConfigRepository handles it.
  */
 @Singleton
 class SubscriptionRepository @Inject constructor(
@@ -36,28 +37,44 @@ class SubscriptionRepository @Inject constructor(
      */
     private val prefsMutex = Mutex()
 
+    sealed interface AddResult {
+        data object Added : AddResult
+        data object AlreadyAdded : AddResult
+        data class Invalid(val reason: String) : AddResult
+    }
+
     /** Reason string on failure, or null on success. */
-    suspend fun addCustom(rawUrl: String): String? {
+    suspend fun addCustom(rawUrl: String): String? = when (val r = addCustomNamed(rawUrl, null)) {
+        AddResult.Added -> null
+        AddResult.AlreadyAdded -> "Эта подписка уже добавлена"
+        is AddResult.Invalid -> r.reason
+    }
+
+    /**
+     * Adds an enabled custom subscription. [name] = display name (null/blank → derived from the
+     * host). Same validation and URL dedupe as the manual add on the Subscriptions screen.
+     */
+    suspend fun addCustomNamed(rawUrl: String, name: String?): AddResult {
         val url = rawUrl.trim()
         when (val v = SubscriptionUrlValidator.validate(url)) {
-            is SubscriptionUrlValidator.Result.Invalid -> return v.reason
+            is SubscriptionUrlValidator.Result.Invalid -> return AddResult.Invalid(v.reason)
             SubscriptionUrlValidator.Result.Valid -> {}
         }
         return prefsMutex.withLock {
             val current = readCustom()
             if (current.any { it.urls.firstOrNull() == url }) {
-                "Эта подписка уже добавлена"
+                AddResult.AlreadyAdded
             } else {
                 writeCustom(
                     current + SubscriptionSource(
                         id = url,
-                        name = deriveName(url),
+                        name = name?.trim()?.takeIf { it.isNotEmpty() } ?: deriveName(url),
                         urls = listOf(url),
                         enabled = true,
                         isBuiltin = false,
                     )
                 )
-                null
+                AddResult.Added
             }
         }
     }

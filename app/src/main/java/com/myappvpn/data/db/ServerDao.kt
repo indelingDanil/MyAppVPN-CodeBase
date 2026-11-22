@@ -40,7 +40,7 @@ abstract class ServerDao {
      */
     @Query(
         "UPDATE servers SET name = :name, flag = :flag, country = :country, address = :address, " +
-            "port = :port, vlessUri = :vlessUri, transport = :transport, security = :security, " +
+            "port = :port, vlessUri = :vlessUri, transport = :transport, security = :security, protocol = :protocol, " +
             "lastUpdated = :lastUpdated WHERE id = :id"
     )
     abstract suspend fun updateStaticColumns(
@@ -53,6 +53,7 @@ abstract class ServerDao {
         vlessUri: String,
         transport: String,
         security: String,
+        protocol: String,
         lastUpdated: Long,
     )
 
@@ -85,7 +86,8 @@ abstract class ServerDao {
                 updateStaticColumns(
                     id = f.id, name = f.name, flag = f.flag, country = f.country,
                     address = f.address, port = f.port, vlessUri = f.vlessUri,
-                    transport = f.transport, security = f.security, lastUpdated = f.lastUpdated,
+                    transport = f.transport, security = f.security, protocol = f.protocol,
+                    lastUpdated = f.lastUpdated,
                 )
             } else {
                 val legacy = legacyByIdentity[f.id]

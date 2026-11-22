@@ -49,12 +49,16 @@ class TcpReachabilityProbe @Inject constructor(
         servers: List<ServerProfile>,
         onProgress: suspend (completed: Int, total: Int, result: TcpResult) -> Unit = { _, _, _ -> }
     ): List<TcpResult> = coroutineScope {
+        // Hysteria2 is QUIC/UDP-only: a TCP connect to its port says nothing (usually refused) and
+        // would record a fake timeout + drop it from the 24h working pool. Its stats are left as
+        // they are — real reachability comes from the balancer observatory / side micro-tests.
+        val tcpServers = servers.filterNot { it.isHysteria2 }
         val semaphore = Semaphore(PARALLEL_LIMIT)
-        val total = servers.size
+        val total = tcpServers.size
         val results = java.util.concurrent.ConcurrentHashMap<String, TcpResult>()
         val completed = java.util.concurrent.atomic.AtomicInteger(0)
 
-        servers.map { server ->
+        tcpServers.map { server ->
             async(Dispatchers.IO) {
                 semaphore.withPermit {
                     // Resolve ONCE, bounded, before timing: latency excludes DNS and a slow

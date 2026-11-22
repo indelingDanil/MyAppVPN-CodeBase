@@ -15,14 +15,14 @@ import com.myappvpn.BuildConfig
 import com.myappvpn.R
 import com.myappvpn.ui.components.DisclaimerText
 import com.myappvpn.ui.components.LocalBottomBarPadding
-import com.myappvpn.ui.components.PartnerCard
+import com.myappvpn.ui.components.OffersLinkCard
 import com.myappvpn.ui.components.ProjectLinksCard
 import com.myappvpn.ui.components.SupportCard
 import com.myappvpn.ui.theme.*
 
 /** "Проект" tab: news channel, source code, voluntary support, disclaimer. No nagging anywhere else. */
 @Composable
-fun ProjectScreen() {
+fun ProjectScreen(onNavigateToOffers: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -46,7 +46,7 @@ fun ProjectScreen() {
         }
         ProjectLinksCard()
         SupportCard()
-        PartnerCard()
+        OffersLinkCard(onClick = onNavigateToOffers)
         DisclaimerText()
         Spacer(Modifier.height(8.dp))
     }

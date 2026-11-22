@@ -59,7 +59,8 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     onNavigateToServers: () -> Unit,
     onNavigateToHotspotSetup: () -> Unit = {},
-    onNavigateToOpenFlux: () -> Unit = {}
+    onNavigateToOpenFlux: () -> Unit = {},
+    onNavigateToOffers: () -> Unit = {}
 ) {
     val vpnState by viewModel.vpnState.collectAsStateWithLifecycle()
     val trafficStats by viewModel.trafficStats.collectAsStateWithLifecycle()
@@ -342,12 +343,10 @@ fun HomeScreen(
                     }
                 }
 
-                // Partner link — one quiet row, can be hidden for good with ✕.
-                com.myappvpn.ui.components.PartnerCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 12.dp),
-                    dismissible = true
+                // One quiet row to the "Verified paid subscriptions" screen.
+                OffersLinkCard(
+                    onClick = onNavigateToOffers,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp)
                 )
 
                 Spacer(modifier = Modifier.height(16.dp + LocalBottomBarPadding.current))

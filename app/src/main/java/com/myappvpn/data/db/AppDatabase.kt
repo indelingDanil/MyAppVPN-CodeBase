@@ -8,7 +8,7 @@ import com.myappvpn.data.model.ServerProfile
 
 @Database(
     entities = [ServerProfile::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,6 +24,13 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE servers ADD COLUMN consecutiveFailures INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE servers ADD COLUMN handshakeOk INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE servers ADD COLUMN verifiedAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** v6: Hysteria2 support — every existing row is a VLESS server. Ids/stats/pin untouched. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE servers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'vless'")
             }
         }
     }

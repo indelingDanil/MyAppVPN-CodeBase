@@ -21,8 +21,30 @@
     <string name="support_thanks">Спасибо всем, кто пользуется и делится приложением ❤️</string>
 
     <string name="support_disclaimer">⚠️ Учебный проект, сделан в образовательных и исследовательских целях. Автор не несёт ответственности за то, как вы используете приложение. В РФ VPN-сервисы для обхода блокировок ограничены законом и могут считаться незаконными. Используете на свой страх и риск.</string>
-    <string name="partner_title" translatable="false">YepShop</string>
     <string name="partner_text">Пополнение Steam, игр и сервисов</string>
-    <string name="partner_hide">Скрыть</string>
     <string name="partner_open_tg">Открыть в Telegram</string>
+    <string name="offer_tested">Проверено с MyAppVPN</string>
+    <string name="offer_tested_subscription">Проверено с MyAppVPN · подписку можно добавить в приложение</string>
+
+    <!-- "Verified paid subscriptions" screen + the link row on Home / Support tab -->
+    <string name="offers_link_title">Проверенные платные подписки</string>
+    <string name="offers_link_subtitle">Стабильные VPN, протестированные с MyAppVPN</string>
+    <string name="offers_title">Проверенные платные подписки</string>
+    <string name="offers_cd_back">Назад</string>
+    <string name="offers_intro">Платные сервисы, которые автор сам проверил с MyAppVPN. Ссылки реферальные: покупая по ним, вы поддерживаете проект. За работу сторонних сервисов автор не отвечает.</string>
+    <string name="offers_section_vpn">VPN-подписки</string>
+    <string name="offers_section_other">Другие сервисы</string>
+    <string name="offers_howto_title">Как подключить купленную подписку</string>
+    <string name="offers_howto_step1">Купите подписку у сервиса и получите ссылку на неё.</string>
+    <string name="offers_howto_step2">Скопируйте ссылку.</string>
+    <string name="offers_howto_step3">Нажмите «Добавить подписку» ниже и вставьте ссылку в поле.</string>
+
+    <!-- Free-trial button on an offer card (offers.json "trialUrl" / "trialNote") -->
+    <string name="offer_trial_button">Попробовать бесплатно</string>
+    <string name="offer_trial_added">Добавлено ✓</string>
+    <string name="offer_trial_note">Пробный период: %1$s</string>
+    <string name="offer_trial_sub_name">%1$s (триал)</string>
+    <string name="offer_trial_added_msg">Подписка добавлена — серверы появятся в списке</string>
+    <string name="offer_trial_already_msg">Уже добавлено</string>
+    <string name="offer_open_site">Открыть сайт</string>
 </resources>

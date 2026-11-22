@@ -5,6 +5,7 @@ import com.myappvpn.data.db.ServerDao
 import com.myappvpn.data.model.ServerProfile
 import com.myappvpn.data.parser.VlessUriParser
 import com.myappvpn.data.remote.SubscriptionFetcher
+import com.myappvpn.data.remote.SubscriptionUrls
 import com.myappvpn.service.MyVpnService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -33,6 +34,8 @@ class ConfigRepository @Inject constructor(
 ) {
     companion object {
         private val BLOCKED_COUNTRIES = setOf("Ukraine")
+        /** Max Hysteria2 servers guaranteed a slot in the Auto pool (see [getBalancerPool]). */
+        private const val HY2_POOL_RESERVE = 10
     }
 
     /** Serializes refreshes (worker / pull-to-refresh / in-tunnel refresh) — one at a time. */
@@ -53,11 +56,16 @@ class ConfigRepository @Inject constructor(
         // toggles everything off). Just report 0; the current servers stay usable.
         if (chains.isEmpty()) return@runCatching 0
 
-        val texts: List<String?> = coroutineScope {
+        val fetched: List<String?> = coroutineScope {
             chains.map { chain ->
                 async { fetchFirstWorking(chain) }
             }.map { it.await() }
         }
+        // Silent fallback: MyAppVPN enabled but none of its mirrors answered (whitelist-only
+        // mobile networks block jsDelivr/githack/GitHub) → take the zieng2 list instead, whose RU
+        // mirrors usually stay reachable. Never used while the MyAppVPN list itself works.
+        val myAppVpnFailed = chains.indices.any { chains[it] == SubscriptionUrls.MYAPPVPN_CHAIN && fetched[it] == null }
+        val texts = if (myAppVpnFailed) fetched + fetchFirstWorking(SubscriptionUrls.FALLBACK_CHAIN) else fetched
         // If ALL sources failed → no network → throw so Worker retries with backoff
         // instead of silently reporting "0 servers updated" and waiting a full hour.
         if (texts.all { it == null }) throw IOException("All subscription sources unreachable")
@@ -99,7 +107,8 @@ class ConfigRepository @Inject constructor(
                         .onFailure { if (it is CancellationException) throw it }
                         .getOrNull()
                 }
-                // Validate AFTER decoding (base64 subscriptions have no literal "vless://"):
+                // Validate AFTER decoding (base64 subscriptions have no literal "vless://" /
+                // "hysteria2://"):
                 // accept only if it yields ≥1 server. Parsing is CPU work → Default dispatcher.
                 if (text != null) {
                     val ok = withContext(Dispatchers.Default) {
@@ -135,6 +144,26 @@ class ConfigRepository @Inject constructor(
     suspend fun getServersExcludingCountries(excluded: Set<String>): List<ServerProfile> =
         serverDao.getAllServers().first()
             .filter { it.country !in BLOCKED_COUNTRIES && it.country !in excluded }
+
+    /**
+     * Auto-balancer pool: the top [limit] of [getServersExcludingCountries] (latency order), but
+     * with up to [HY2_POOL_RESERVE] Hysteria2 servers guaranteed a slot. Hysteria2 is never TCP-
+     * pinged (QUIC/UDP), so it has no latency and would always sort behind every pinged VLESS
+     * server and never reach the pool; the in-core observatory probes it for real once it's in.
+     * Recently verified ones go first, the rest are appended (dead ones cost only probe traffic).
+     */
+    suspend fun getBalancerPool(excluded: Set<String>, limit: Int): List<ServerProfile> {
+        val all = getServersExcludingCountries(excluded)
+        val hy2 = all.filter { it.isHysteria2 && it.consecutiveFailures < 3 }
+            .sortedBy { it.score() }
+            .take(HY2_POOL_RESERVE)
+        if (hy2.isEmpty()) return all.take(limit)
+        val hy2Ids = hy2.mapTo(HashSet()) { it.id }
+        val recent = System.currentTimeMillis() - 60 * 60_000L
+        val (hy2Front, hy2Back) = hy2.partition { it.verifiedAt > recent }
+        val rest = all.filter { it.id !in hy2Ids }.take((limit - hy2.size).coerceAtLeast(0))
+        return (hy2Front + rest + hy2Back).take(limit)
+    }
 
     suspend fun getSelectedServer(): ServerProfile? = serverDao.getSelectedServer()
 

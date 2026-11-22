@@ -29,7 +29,7 @@
     <string name="settings_hotspot_guide_subtitle">Step-by-step guide for Android, iPhone, PC and Telegram</string>
     <string name="settings_about_version">Version</string>
     <string name="settings_about_sources">Server sources</string>
-    <string name="settings_about_sources_value">zieng2/wl, igareck + custom</string>
+    <string name="settings_about_sources_value">MyAppVPN + custom</string>
     <string name="settings_about_protocol">Protocol</string>
 
     <!-- Split tunneling -->

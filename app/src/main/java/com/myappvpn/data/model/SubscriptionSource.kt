@@ -3,8 +3,8 @@ package com.myappvpn.data.model
 /**
  * A subscription source the app fetches servers from.
  *
- * - Built-in sources (Universal, igareck) are defined in code with their mirror chains and can be
- *   enabled/disabled but never deleted.
+ * - Built-in sources (currently only MyAppVPN) are defined in code with their mirror chains and
+ *   can be enabled/disabled but never deleted.
  * - Custom sources are user-added single URLs and can be enabled/disabled and deleted.
  *
  * Only ENABLED sources are fetched; servers from disabled sources are pruned by the existing

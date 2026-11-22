@@ -22,6 +22,28 @@
 
     <string name="support_disclaimer">⚠️ Eğitim amaçlı bir projedir; öğrenme ve araştırma amacıyla geliştirilmiştir. Yazar, uygulamayı nasıl kullandığınızdan sorumlu değildir. Rusya\'da engellemeleri aşmaya yönelik VPN hizmetleri yasalarla kısıtlanmıştır ve yasa dışı sayılabilir. Kullanım riski size aittir.</string>
     <string name="partner_text">Steam, oyun ve hizmet bakiyesi yükleme</string>
-    <string name="partner_hide">Gizle</string>
     <string name="partner_open_tg">Telegram\'da aç</string>
+    <string name="offer_tested">MyAppVPN ile test edildi</string>
+    <string name="offer_tested_subscription">MyAppVPN ile test edildi · abonelik olarak eklenebilir</string>
+
+    <string name="offers_link_title">Doğrulanmış ücretli abonelikler</string>
+    <string name="offers_link_subtitle">MyAppVPN ile test edilmiş kararlı VPN\'ler</string>
+    <string name="offers_title">Doğrulanmış ücretli abonelikler</string>
+    <string name="offers_cd_back">Geri</string>
+    <string name="offers_intro">Yazarın MyAppVPN ile bizzat test ettiği ücretli hizmetler. Bağlantılar referans bağlantılarıdır: bunlar üzerinden satın alarak projeye destek olursunuz. Yazar, üçüncü taraf hizmetlerden sorumlu değildir.</string>
+    <string name="offers_section_vpn">VPN abonelikleri</string>
+    <string name="offers_section_other">Diğer hizmetler</string>
+    <string name="offers_howto_title">Satın aldığınız abonelik nasıl eklenir</string>
+    <string name="offers_howto_step1">Hizmetten bir abonelik satın alın ve bağlantısını edinin.</string>
+    <string name="offers_howto_step2">Bağlantıyı kopyalayın.</string>
+    <string name="offers_howto_step3">Aşağıdaki “Abonelik ekle” düğmesine dokunun ve bağlantıyı alana yapıştırın.</string>
+
+    <!-- Free-trial button on an offer card (offers.json "trialUrl" / "trialNote") -->
+    <string name="offer_trial_button">Ücretsiz dene</string>
+    <string name="offer_trial_added">Eklendi ✓</string>
+    <string name="offer_trial_note">Ücretsiz deneme: %1$s</string>
+    <string name="offer_trial_sub_name">%1$s (deneme)</string>
+    <string name="offer_trial_added_msg">Abonelik eklendi — sunucular listede görünecek</string>
+    <string name="offer_trial_already_msg">Zaten eklendi</string>
+    <string name="offer_open_site">Web sitesini aç</string>
 </resources>

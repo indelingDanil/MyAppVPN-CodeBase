@@ -29,7 +29,7 @@
     <string name="settings_hotspot_guide_subtitle">Android, iPhone, ДК және Telegram үшін қадамдық нұсқаулық</string>
     <string name="settings_about_version">Нұсқа</string>
     <string name="settings_about_sources">Сервер көздері</string>
-    <string name="settings_about_sources_value">zieng2/wl, igareck + өзіңіздікі</string>
+    <string name="settings_about_sources_value">MyAppVPN + өзіңіздікі</string>
     <string name="settings_about_protocol">Хаттама</string>
 
     <!-- Split tunneling -->

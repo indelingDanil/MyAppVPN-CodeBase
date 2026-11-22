@@ -106,7 +106,7 @@ object XrayConfigBuilder {
         // Outbounds
         root.put("outbounds", JSONArray().apply {
             // VLESS outbound
-            put(buildVlessOutbound(config))
+            put(buildProxyOutbound(config))
             // DNS outbound — answers hijacked :53 queries via the DoH resolver (dns{} above)
             put(JSONObject().apply {
                 put("tag", "dns-out")
@@ -211,7 +211,7 @@ object XrayConfigBuilder {
         // One VLESS outbound per server, tagged proxy-0 … proxy-N
         root.put("outbounds", JSONArray().apply {
             configs.forEachIndexed { index, cfg ->
-                put(buildVlessOutbound(cfg, "proxy-$index"))
+                put(buildProxyOutbound(cfg, "proxy-$index"))
             }
             // DNS outbound — answers hijacked :53 queries via the DoH resolver (dns{} above)
             put(JSONObject().apply {
@@ -649,6 +649,60 @@ object XrayConfigBuilder {
         if (stream.optString("network").lowercase() in FRAGMENT_SKIP_NETWORKS) return false
         val existing = stream.optJSONObject("sockopt")?.optString("dialerProxy").orEmpty()
         return existing.isEmpty()
+    }
+
+    /** The server outbound for [config] — VLESS or Hysteria2 — tagged [tag]. */
+    private fun buildProxyOutbound(config: VlessConfig, tag: String = "proxy"): JSONObject =
+        if (config.isHysteria2) buildHysteria2Outbound(config, tag) else buildVlessOutbound(config, tag)
+
+    /**
+     * Hysteria2 outbound for Xray v26.2.6 (infra/conf: HysteriaClientConfig, HysteriaConfig,
+     * TLSConfig, FinalMask/Salamander):
+     *
+     *     {"tag":T,"protocol":"hysteria","settings":{"version":2,"address":H,"port":P},
+     *      "streamSettings":{"network":"hysteria","security":"tls",
+     *        "tlsSettings":{"serverName":SNI,"alpn":["h3"],"pinnedPeerCertSha256":"hex"?},
+     *        "hysteriaSettings":{"version":2,"auth":A,"congestion"?,"maxIdleTimeout"?,"keepAlivePeriod"?},
+     *        "finalmask":{"udp":[{"type":"salamander","settings":{"password":PW}}]}?}}
+     *
+     * Deliberately absent: flow / reality / mux / tcpSettings / sockopt (VLESS/TCP-only), the
+     * TLS-fragment dialerProxy (applyTlsFragment skips network "hysteria" and protocol "hysteria"),
+     * `allowInsecure` (26.x refuses the whole config with it after 2026-06-01), up/down bandwidth
+     * and udphop (port hopping) — not in the share links we support. 26.2.6 has no
+     * finalmask.quicParams: those knobs live in hysteriaSettings.
+     */
+    private fun buildHysteria2Outbound(config: VlessConfig, tag: String): JSONObject = JSONObject().apply {
+        put("tag", tag)
+        put("protocol", "hysteria")
+        put("settings", JSONObject().apply {
+            put("version", 2)
+            put("address", config.address)
+            put("port", config.port)
+        })
+        put("streamSettings", JSONObject().apply {
+            put("network", "hysteria")
+            put("security", "tls")
+            put("tlsSettings", JSONObject().apply {
+                put("serverName", config.sni.ifEmpty { config.address })
+                put("alpn", JSONArray().apply { config.alpn.ifEmpty { listOf("h3") }.forEach { put(it) } })
+                if (config.hyPinSha256.isNotEmpty()) put("pinnedPeerCertSha256", config.hyPinSha256)
+            })
+            put("hysteriaSettings", JSONObject().apply {
+                put("version", 2)
+                put("auth", config.hyAuth)
+                if (config.hyCongestion.isNotEmpty()) put("congestion", config.hyCongestion)
+                if (config.hyMaxIdleTimeout > 0) put("maxIdleTimeout", config.hyMaxIdleTimeout)
+                if (config.hyKeepAlivePeriod > 0) put("keepAlivePeriod", config.hyKeepAlivePeriod)
+            })
+            if (config.hyObfsPassword.isNotEmpty()) {
+                put("finalmask", JSONObject().apply {
+                    put("udp", JSONArray().put(JSONObject().apply {
+                        put("type", "salamander")
+                        put("settings", JSONObject().apply { put("password", config.hyObfsPassword) })
+                    }))
+                })
+            }
+        })
     }
 
     private fun buildVlessOutbound(config: VlessConfig, tag: String = "proxy"): JSONObject {

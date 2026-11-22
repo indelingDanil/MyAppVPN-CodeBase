@@ -29,7 +29,7 @@
     <string name="settings_hotspot_guide_subtitle">Android, iPhone, PC ve Telegram için adım adım rehber</string>
     <string name="settings_about_version">Sürüm</string>
     <string name="settings_about_sources">Sunucu kaynakları</string>
-    <string name="settings_about_sources_value">zieng2/wl, igareck + özel</string>
+    <string name="settings_about_sources_value">MyAppVPN + özel</string>
     <string name="settings_about_protocol">Protokol</string>
 
     <!-- Split tunneling -->

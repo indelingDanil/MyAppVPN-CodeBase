@@ -22,6 +22,28 @@
 
     <string name="support_disclaimer">⚠️ این یک پروژه آموزشی است که برای یادگیری و پژوهش ساخته شده است. نویسنده هیچ مسئولیتی در قبال نحوه استفاده شما از برنامه ندارد. در روسیه، سرویس‌های VPN که برای دور زدن مسدودسازی‌ها در نظر گرفته شده‌اند طبق قانون محدود شده‌اند و ممکن است غیرقانونی تلقی شوند. استفاده از آن با مسئولیت خود شماست.</string>
     <string name="partner_text">شارژ Steam، بازی‌ها و سرویس‌ها</string>
-    <string name="partner_hide">پنهان کردن</string>
     <string name="partner_open_tg">باز کردن در Telegram</string>
+    <string name="offer_tested">آزمایش‌شده با MyAppVPN</string>
+    <string name="offer_tested_subscription">آزمایش‌شده با MyAppVPN · قابل افزودن به‌عنوان اشتراک</string>
+
+    <string name="offers_link_title">اشتراک‌های پولی تأییدشده</string>
+    <string name="offers_link_subtitle">سرویس‌های VPN پایدار، آزمایش‌شده با MyAppVPN</string>
+    <string name="offers_title">اشتراک‌های پولی تأییدشده</string>
+    <string name="offers_cd_back">بازگشت</string>
+    <string name="offers_intro">سرویس‌های پولی که نویسنده خودش با MyAppVPN آزمایش کرده است. لینک‌ها ارجاعی هستند: با خرید از طریق آن‌ها از پروژه حمایت می‌کنید. نویسنده مسئولیتی در قبال سرویس‌های شخص ثالث ندارد.</string>
+    <string name="offers_section_vpn">اشتراک‌های VPN</string>
+    <string name="offers_section_other">سرویس‌های دیگر</string>
+    <string name="offers_howto_title">چگونه اشتراک خریداری‌شده را اضافه کنیم</string>
+    <string name="offers_howto_step1">از سرویس اشتراک بخرید و لینک آن را دریافت کنید.</string>
+    <string name="offers_howto_step2">لینک را کپی کنید.</string>
+    <string name="offers_howto_step3">روی «افزودن اشتراک» در پایین بزنید و لینک را در کادر بچسبانید.</string>
+
+    <!-- Free-trial button on an offer card (offers.json "trialUrl" / "trialNote") -->
+    <string name="offer_trial_button">رایگان امتحان کنید</string>
+    <string name="offer_trial_added">افزوده شد ✓</string>
+    <string name="offer_trial_note">دورهٔ آزمایشی: %1$s</string>
+    <string name="offer_trial_sub_name">%1$s (آزمایشی)</string>
+    <string name="offer_trial_added_msg">اشتراک افزوده شد — سرورها در فهرست نمایش داده می‌شوند</string>
+    <string name="offer_trial_already_msg">قبلاً افزوده شده است</string>
+    <string name="offer_open_site">باز کردن وب‌سایت</string>
 </resources>

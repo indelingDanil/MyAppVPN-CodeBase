@@ -11,7 +11,133 @@ object VlessUriParser {
      * Parse a VLESS URI into VlessConfig.
      * Format: vless://UUID@host:port?params#fragment
      */
-    fun parse(uri: String): VlessConfig? = runCatching {
+    fun parse(uri: String): VlessConfig? {
+        if (hysteria2Prefix(uri) != null) return parseHysteria2(uri)
+        return parseVless(uri)
+    }
+
+    // ── Hysteria2 ───────────────────────────────────────────────────────────────
+
+    private const val HY2_SCHEME = "hysteria2://"
+    private const val HY2_ALIAS = "hy2://"
+
+    /** The Hysteria2 scheme prefix [uri] starts with ("hysteria2://" or the "hy2://" alias), any case; else null. */
+    internal fun hysteria2Prefix(uri: String): String? = when {
+        uri.regionMatches(0, HY2_SCHEME, 0, HY2_SCHEME.length, ignoreCase = true) -> uri.substring(0, HY2_SCHEME.length)
+        uri.regionMatches(0, HY2_ALIAS, 0, HY2_ALIAS.length, ignoreCase = true) -> uri.substring(0, HY2_ALIAS.length)
+        else -> null
+    }
+
+    /** True if [line] (already trimmed) is a share link of a supported protocol. */
+    fun isSupportedLink(line: String): Boolean = line.startsWith("vless://") || hysteria2Prefix(line) != null
+
+    private val HY2_CONGESTIONS = setOf("bbr", "reno", "brutal")   // force-brutal needs `up` → not supported
+    private val HEX64 = Regex("^[0-9a-f]{64}$")
+
+    /**
+     * Official Hysteria2 share link:
+     * `hysteria2://AUTH@HOST:PORT/?sni=..&insecure=0|1&pinSHA256=..&obfs=salamander&obfs-password=..&alpn=..&mport=..#NAME`
+     * (`hy2://` is an alias). Plus the Xray-style `fm` param (finalmask JSON) used by some
+     * providers: `quicParams.{congestion,maxIdleTimeout,keepAlivePeriod}` and `udp` salamander masks.
+     *
+     * Rules (null = server skipped):
+     *  - AUTH = the whole userinfo, percent-decoded ("user:pass" kept as one string); must be non-empty.
+     *  - Port hopping is NOT supported: an authority port list/range ("443,5000-6000") → its FIRST
+     *    port is used; `mport` is ignored. Port must be 1..65535 (absent → 443).
+     *  - `obfs` other than salamander, or salamander without a password → skipped (can't connect).
+     *  - `pinSHA256`: colons stripped, lowercased; entries that aren't 32-byte hex are dropped
+     *    (Xray would refuse the WHOLE config on a bad pin — in Auto that kills the balancer).
+     *  - `insecure=1` is ignored: Xray 26.x refuses to start with `allowInsecure` after 2026-06-01.
+     *    Such a server only works if its cert verifies (or via pinSHA256).
+     */
+    private fun parseHysteria2(uri: String): VlessConfig? = runCatching {
+        val prefix = hysteria2Prefix(uri) ?: return null
+        val fragmentIdx = uri.indexOf('#')
+        val name = if (fragmentIdx >= 0) percentDecode(uri.substring(fragmentIdx + 1)) else ""
+        val withoutScheme = (if (fragmentIdx >= 0) uri.substring(0, fragmentIdx) else uri).substring(prefix.length)
+
+        val queryIdx = withoutScheme.indexOf('?')
+        val beforeQuery = if (queryIdx >= 0) withoutScheme.substring(0, queryIdx) else withoutScheme
+        val queryString = if (queryIdx >= 0) withoutScheme.substring(queryIdx + 1) else ""
+
+        // userinfo may itself contain an (unencoded) '@' → split at the LAST '@' before the query.
+        val atIdx = beforeQuery.lastIndexOf('@')
+        if (atIdx <= 0) return null
+        val auth = percentDecode(beforeQuery.substring(0, atIdx)).trim()
+        if (auth.isEmpty()) return null
+        val authority = beforeQuery.substring(atIdx + 1).substringBefore('/')
+        val (address, port) = parseHostPort(firstHopPort(authority)) ?: return null
+
+        val params = parseQueryParams(queryString)
+
+        val obfs = params["obfs"].orEmpty().trim().lowercase()
+        var obfsPassword = ""
+        if (obfs.isNotEmpty() && obfs != "none") {
+            if (obfs != "salamander") return null
+            obfsPassword = params["obfs-password"].orEmpty()
+            if (obfsPassword.isEmpty()) return null
+        }
+
+        var congestion = ""
+        var maxIdle = 0
+        var keepAlive = 0
+        params["fm"]?.takeIf { it.isNotBlank() }?.let { raw ->
+            val fm = runCatching { org.json.JSONObject(raw) }.getOrNull() ?: return@let
+            fm.optJSONObject("quicParams")?.let { q ->
+                congestion = q.optString("congestion").trim().lowercase().takeIf { it in HY2_CONGESTIONS }.orEmpty()
+                // Same bounds Xray's HysteriaConfig.Build enforces — out-of-range = refused config.
+                maxIdle = q.optInt("maxIdleTimeout", 0).takeIf { it in 4..120 } ?: 0
+                keepAlive = q.optInt("keepAlivePeriod", 0).takeIf { it in 2..60 } ?: 0
+            }
+            if (obfsPassword.isEmpty()) {
+                val udp = fm.optJSONArray("udp")
+                for (i in 0 until (udp?.length() ?: 0)) {
+                    val m = udp?.optJSONObject(i) ?: continue
+                    if (m.optString("type").equals("salamander", ignoreCase = true)) {
+                        obfsPassword = m.optJSONObject("settings")?.optString("password").orEmpty()
+                        if (obfsPassword.isEmpty()) return null
+                        break
+                    }
+                }
+            }
+        }
+
+        val pins = params["pinSHA256"].orEmpty().split(',')
+            .map { it.replace(":", "").trim().lowercase() }
+            .filter { HEX64.matches(it) }
+            .joinToString(",")
+
+        VlessConfig(
+            uuid = "",
+            address = address,
+            port = port,
+            security = "tls",
+            sni = (params["sni"] ?: params["peer"]).orEmpty().trim().ifEmpty { address },
+            transport = "hysteria",
+            fingerprint = "",
+            name = name,
+            alpn = params["alpn"]?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+                .ifEmpty { listOf("h3") },
+            protocol = VlessConfig.PROTOCOL_HYSTERIA2,
+            hyAuth = auth,
+            hyPinSha256 = pins,
+            hyObfsPassword = obfsPassword,
+            hyCongestion = congestion,
+            hyMaxIdleTimeout = maxIdle,
+            hyKeepAlivePeriod = keepAlive,
+        )
+    }.getOrNull()
+
+    /** "host:443,5000-6000" / "[v6]:20000-30000" → the authority with only the first port. */
+    private fun firstHopPort(authority: String): String {
+        val m = HOP_PORTS.matchEntire(authority) ?: return authority
+        return m.groupValues[1] + m.groupValues[2]
+    }
+    private val HOP_PORTS = Regex("""^(.*:)(\d+)[,\-].*$""")
+
+    // ── VLESS ───────────────────────────────────────────────────────────────────
+
+    private fun parseVless(uri: String): VlessConfig? = runCatching {
         if (!uri.startsWith("vless://")) return null
 
         // Split off the fragment (#name) first
@@ -106,20 +232,21 @@ object VlessUriParser {
             port = config.port,
             vlessUri = rawUri,
             transport = config.transport,
-            security = config.security
+            security = config.security,
+            protocol = config.protocol,
         )
     }
 
     /**
-     * Parse list of VLESS URIs from subscription text (one per line).
-     * If the text contains no `vless://` lines, try decoding it as base64 first — many third-party
+     * Parse list of share links (vless://, hysteria2://, hy2://) from subscription text (one per line).
+     * If the text contains no such links, try decoding it as base64 first — many third-party
      * subscriptions ship the whole list as a single base64 blob.
      */
     fun parseSubscription(text: String): List<Pair<VlessConfig, String>> {
-        val effective = if (text.contains("vless://")) text else (decodeBase64(text) ?: text)
+        val effective = if (containsLink(text)) text else (decodeBase64(text) ?: text)
         return effective.lines()
             .map { it.trim() }
-            .filter { it.startsWith("vless://") }
+            .filter { isSupportedLink(it) }
             .mapNotNull { uri ->
                 parse(uri)?.let { config -> config to uri }
             }
@@ -140,10 +267,15 @@ object VlessUriParser {
         for (flags in flagsToTry) {
             val decoded = runCatching { android.util.Base64.decode(padded, flags) }.getOrNull() ?: continue
             val s = String(decoded, Charsets.UTF_8)
-            if (s.contains("vless://")) return s
+            if (containsLink(s)) return s
         }
         return null
     }
+
+    /** Text holds at least one supported share link (literal, not base64). */
+    private fun containsLink(text: String): Boolean =
+        text.contains("vless://") ||
+            text.contains(HY2_SCHEME, ignoreCase = true) || text.contains(HY2_ALIAS, ignoreCase = true)
 
     // ── Stable identity ──────────────────────────────────────────────────────────
 
@@ -165,6 +297,7 @@ object VlessUriParser {
      */
     internal fun identityKey(uri: String): String? = runCatching {
         val trimmed = uri.trim()
+        if (hysteria2Prefix(trimmed) != null) return hysteria2IdentityKey(trimmed)
         if (!trimmed.regionMatches(0, "vless://", 0, 8, ignoreCase = true)) return null
         val withoutScheme = trimmed.substringBefore('#').substring(8)
 
@@ -191,6 +324,37 @@ object VlessUriParser {
             .joinToString("&") { (k, v) -> "${encode(k)}=${encode(v)}" }
 
         "vless://$uuid@$normHost:$port?$query"
+    }.getOrNull()
+
+    /**
+     * `hysteria2://<auth, decoded then re-encoded>@<host>:<first port>?<sorted k=v>` — the `hy2://`
+     * alias maps to the same key (same server listed under both schemes = one row). Host / port /
+     * query normalised exactly like VLESS. (A separate key space from VLESS: VLESS ids unchanged.)
+     */
+    private fun hysteria2IdentityKey(trimmed: String): String? = runCatching {
+        val prefix = hysteria2Prefix(trimmed) ?: return null
+        val withoutScheme = trimmed.substringBefore('#').substring(prefix.length)
+        val queryIdx = withoutScheme.indexOf('?')
+        val beforeQuery = if (queryIdx >= 0) withoutScheme.substring(0, queryIdx) else withoutScheme
+        val queryString = if (queryIdx >= 0) withoutScheme.substring(queryIdx + 1) else ""
+
+        val atIdx = beforeQuery.lastIndexOf('@')
+        if (atIdx <= 0) return null
+        val auth = percentDecode(beforeQuery.substring(0, atIdx)).trim()
+        if (auth.isEmpty()) return null
+        val authority = beforeQuery.substring(atIdx + 1).substringBefore('/')
+        val (host, port) = parseHostPort(firstHopPort(authority)) ?: return null
+
+        val lowerHost = host.lowercase()
+        val normHost = if (lowerHost.contains(':')) {
+            "[" + (IpLiteral.canonicalIpv6(lowerHost) ?: lowerHost) + "]"
+        } else lowerHost.trimEnd('.')
+
+        val query = parseQueryList(queryString)
+            .sortedWith(compareBy<Pair<String, String>> { it.first }.thenBy { it.second })
+            .joinToString("&") { (k, v) -> "${encode(k)}=${encode(v)}" }
+
+        "hysteria2://${encode(auth)}@$normHost:$port?$query"
     }.getOrNull()
 
     /** All params as decoded (key, value) pairs, keeping duplicates and dropping empty segments. */

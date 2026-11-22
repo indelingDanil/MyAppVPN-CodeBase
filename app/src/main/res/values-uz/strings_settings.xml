@@ -29,7 +29,7 @@
     <string name="settings_hotspot_guide_subtitle">Android, iPhone, kompyuter va Telegram uchun bosqichma-bosqich yoʻriqnoma</string>
     <string name="settings_about_version">Versiya</string>
     <string name="settings_about_sources">Server manbalari</string>
-    <string name="settings_about_sources_value">zieng2/wl, igareck + shaxsiy</string>
+    <string name="settings_about_sources_value">MyAppVPN + shaxsiy</string>
     <string name="settings_about_protocol">Protokol</string>
 
     <!-- Split tunneling -->

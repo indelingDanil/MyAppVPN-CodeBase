@@ -2288,7 +2288,7 @@ class MyVpnService : VpnService() {
             Log.w(TAG, "rebuildBalancer: re-fetch failed: ${e.message}")
         }
         val excluded = preferences.excludedCountries.first()
-        val candidates = configRepository.getServersExcludingCountries(excluded).take(50)
+        val candidates = configRepository.getBalancerPool(excluded, 50)
         // Keep server↔config pairs so proxy-N still maps to a real server after the rebuild.
         val pairs = candidates.mapNotNull { sp -> VlessUriParser.parse(sp.vlessUri)?.let { sp to it } }
         if (pairs.isEmpty()) {

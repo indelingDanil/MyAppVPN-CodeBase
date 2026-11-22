@@ -22,6 +22,28 @@
 
     <string name="support_disclaimer">⚠️ Educational project, made for learning and research purposes. The author is not responsible for how you use the app. In Russia, VPN services intended to bypass blocking are restricted by law and may be considered illegal. Use at your own risk.</string>
     <string name="partner_text">Top up Steam, games and services</string>
-    <string name="partner_hide">Hide</string>
     <string name="partner_open_tg">Open in Telegram</string>
+    <string name="offer_tested">Tested with MyAppVPN</string>
+    <string name="offer_tested_subscription">Tested with MyAppVPN · can be added as a subscription</string>
+
+    <string name="offers_link_title">Verified paid subscriptions</string>
+    <string name="offers_link_subtitle">Stable VPNs tested with MyAppVPN</string>
+    <string name="offers_title">Verified paid subscriptions</string>
+    <string name="offers_cd_back">Back</string>
+    <string name="offers_intro">Paid services the author has tested with MyAppVPN. These are referral links: buying through them supports the project. The author is not responsible for third-party services.</string>
+    <string name="offers_section_vpn">VPN subscriptions</string>
+    <string name="offers_section_other">Other services</string>
+    <string name="offers_howto_title">How to add a subscription you bought</string>
+    <string name="offers_howto_step1">Buy a subscription from the service and get its link.</string>
+    <string name="offers_howto_step2">Copy the link.</string>
+    <string name="offers_howto_step3">Tap “Add subscription” below and paste the link into the field.</string>
+
+    <!-- Free-trial button on an offer card (offers.json "trialUrl" / "trialNote") -->
+    <string name="offer_trial_button">Try for free</string>
+    <string name="offer_trial_added">Added ✓</string>
+    <string name="offer_trial_note">Free trial: %1$s</string>
+    <string name="offer_trial_sub_name">%1$s (trial)</string>
+    <string name="offer_trial_added_msg">Subscription added — servers will appear in the list</string>
+    <string name="offer_trial_already_msg">Already added</string>
+    <string name="offer_open_site">Open website</string>
 </resources>

@@ -132,12 +132,14 @@ object DnsConfigInjector {
         return port == -1 || port == 443
     }
 
-    /** Tag of the first VLESS outbound ("proxy" in XrayConfigBuilder.build); fallback "proxy". */
+    private val PROXY_PROTOCOLS = setOf("vless", "hysteria")
+
+    /** Tag of the first server (VLESS / Hysteria2) outbound ("proxy" in XrayConfigBuilder.build); fallback "proxy". */
     private fun findProxyOutboundTag(root: JSONObject): String {
         val outs = root.optJSONArray("outbounds") ?: return "proxy"
         for (i in 0 until outs.length()) {
             val o = outs.optJSONObject(i) ?: continue
-            if (o.optString("protocol") == "vless") return o.optString("tag").ifEmpty { "proxy" }
+            if (o.optString("protocol") in PROXY_PROTOCOLS) return o.optString("tag").ifEmpty { "proxy" }
         }
         return "proxy"
     }

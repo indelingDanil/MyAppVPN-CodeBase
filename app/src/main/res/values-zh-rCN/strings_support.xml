@@ -22,6 +22,28 @@
 
     <string name="support_disclaimer">⚠️ 本项目为教育项目，仅用于学习和研究目的。作者不对你如何使用本应用承担任何责任。在俄罗斯，用于绕过封锁的 VPN 服务受到法律限制，可能被视为违法。使用风险由你自行承担。</string>
     <string name="partner_text">充值 Steam、游戏和服务</string>
-    <string name="partner_hide">隐藏</string>
     <string name="partner_open_tg">在 Telegram 中打开</string>
+    <string name="offer_tested">已在 MyAppVPN 上测试</string>
+    <string name="offer_tested_subscription">已在 MyAppVPN 上测试 · 可作为订阅添加</string>
+
+    <string name="offers_link_title">已验证的付费订阅</string>
+    <string name="offers_link_subtitle">经 MyAppVPN 测试的稳定 VPN</string>
+    <string name="offers_title">已验证的付费订阅</string>
+    <string name="offers_cd_back">返回</string>
+    <string name="offers_intro">作者亲自用 MyAppVPN 测试过的付费服务。这些是推荐链接：通过它们购买即可支持本项目。作者不对第三方服务负责。</string>
+    <string name="offers_section_vpn">VPN 订阅</string>
+    <string name="offers_section_other">其他服务</string>
+    <string name="offers_howto_title">如何添加已购买的订阅</string>
+    <string name="offers_howto_step1">向服务商购买订阅并获取订阅链接。</string>
+    <string name="offers_howto_step2">复制该链接。</string>
+    <string name="offers_howto_step3">点击下方的“添加订阅”，将链接粘贴到输入框中。</string>
+
+    <!-- Free-trial button on an offer card (offers.json "trialUrl" / "trialNote") -->
+    <string name="offer_trial_button">免费试用</string>
+    <string name="offer_trial_added">已添加 ✓</string>
+    <string name="offer_trial_note">免费试用：%1$s</string>
+    <string name="offer_trial_sub_name">%1$s（试用）</string>
+    <string name="offer_trial_added_msg">订阅已添加 — 服务器将出现在列表中</string>
+    <string name="offer_trial_already_msg">已添加过</string>
+    <string name="offer_open_site">打开网站</string>
 </resources>

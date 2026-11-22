@@ -6,11 +6,14 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -30,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.myappvpn.R
+import com.myappvpn.data.repository.Offer
 import com.myappvpn.ui.theme.*
 import java.text.NumberFormat
 import java.util.Locale
@@ -46,12 +51,6 @@ object SupportInfo {
     const val TELEGRAM_URL = "https://t.me/myappvpn_dprog"
     const val GITHUB_URL = "https://github.com/indelingDanil/MyAppVPN"
     const val CLOUDTIPS_URL = "https://pay.cloudtips.ru/p/8c90d7a5"
-
-    /** Partner (referral) link — a plain link, no SDK, no tracking from the app side. */
-    const val PARTNER_URL = "https://yepshop.app/?ref=6A086889"
-    const val PARTNER_TG_URL = "https://t.me/YepShopBot?start=ref_6A086889"
-    /** Opens the bot straight in the Telegram app (t.me links are often grabbed by the browser). */
-    const val PARTNER_TG_APP_URL = "tg://resolve?domain=YepShopBot&start=ref_6A086889"
 
     val CRYPTO = listOf(
         "USDT (TRC20)" to "TB3Qn2guzVdj93kUi43KG8gQY6mruGZbNG",
@@ -222,69 +221,168 @@ fun SupportCard() {
     }
 }
 
-private const val UI_PREFS = "ui_prefs"
-private const val KEY_PARTNER_HOME_HIDDEN = "partner_home_hidden"
-
 /**
- * Quiet partner banner: one row, opens the partner site in the browser. It's a plain link —
- * no ad SDK, no network calls from the app. On Home it can be hidden for good ([dismissible]).
+ * One quiet row leading to the "Verified paid subscriptions" screen (Home under the connect
+ * button, and the Support tab) — the offers themselves live only on that screen.
  */
 @Composable
-fun PartnerCard(modifier: Modifier = Modifier, dismissible: Boolean = false) {
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences(UI_PREFS, Context.MODE_PRIVATE) }
-    var hidden by remember { mutableStateOf(dismissible && prefs.getBoolean(KEY_PARTNER_HOME_HIDDEN, false)) }
+fun OffersLinkCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    GlassCard(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(Icons.Default.Verified, contentDescription = null, tint = AetherCyan, modifier = Modifier.size(20.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.offers_link_title), color = AetherTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    stringResource(R.string.offers_link_subtitle),
+                    color = AetherTextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = AetherTextTertiary)
+        }
+    }
+}
 
-    AnimatedVisibility(visible = !hidden, modifier = modifier) {
-        GlassCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
+/**
+ * Quiet partner card: tap opens the partner site in the browser, the paper-plane opens the
+ * Telegram bot/channel. Plain links — no ad SDK, no tracking.
+ *
+ * With a valid [Offer.trialUrl] and [onTrial] set, a compact "Try for free" button adds the trial
+ * link as a custom subscription (the callback gets the localized "<title> (trial)" name);
+ * [trialAdded] = that URL is already among the user's subscriptions → disabled "Added ✓".
+ */
+@Composable
+fun OfferCard(
+    offer: Offer,
+    trialAdded: Boolean = false,
+    onTrial: ((name: String) -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val lang = LocalConfiguration.current.locales[0].language
+    val text = if (offer.textRes != 0) stringResource(offer.textRes) else offer.textFor(lang)
+    val showTrial = offer.trialUrl != null && onTrial != null
+    val trialNote = if (showTrial) offer.trialNoteFor(lang) else null
+    val trialName = stringResource(R.string.offer_trial_sub_name, offer.title)
+
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .clickable(role = Role.Button) { openUrl(context, offer.url) }
+                .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 56.dp)
-                    .clickable(role = Role.Button) { openUrl(context, SupportInfo.PARTNER_URL) }
-                    .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AetherCyan.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AetherCyan.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Default.SportsEsports, contentDescription = null, tint = AetherCyan, modifier = Modifier.size(20.dp))
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.partner_title), color = AetherTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Icon(offerIcon(offer.icon), contentDescription = null, tint = AetherCyan, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(offer.title, color = AetherTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                trialNote?.let {
                     Text(
-                        stringResource(R.string.partner_text),
-                        color = AetherTextSecondary,
+                        stringResource(R.string.offer_trial_note, it),
+                        color = AetherCyan,
                         fontSize = 11.sp,
                         lineHeight = 15.sp,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(onClick = {
-                    try {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SupportInfo.PARTNER_TG_APP_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } catch (_: ActivityNotFoundException) {
-                        openUrl(context, SupportInfo.PARTNER_TG_URL)   // no Telegram app → web link
-                    }
-                }) {
-                    Icon(Icons.Default.Send, contentDescription = stringResource(R.string.partner_open_tg), tint = AetherCyan, modifier = Modifier.size(18.dp))
+                Text(
+                    text,
+                    color = AetherTextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    modifier = Modifier.padding(top = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(Icons.Default.Verified, contentDescription = null, tint = AetherCyan.copy(alpha = 0.6f), modifier = Modifier.size(11.dp))
+                    Text(
+                        if (offer.subscription) stringResource(R.string.offer_tested_subscription) else stringResource(R.string.offer_tested),
+                        color = AetherTextTertiary,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                    )
                 }
-                if (dismissible) {
-                    IconButton(onClick = {
-                        hidden = true
-                        prefs.edit().putBoolean(KEY_PARTNER_HOME_HIDDEN, true).apply()
-                    }) {
-                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.partner_hide), tint = AetherTextTertiary, modifier = Modifier.size(18.dp))
+                if (showTrial) {
+                    FilledTonalButton(
+                        onClick = { onTrial?.invoke(trialName) },
+                        enabled = !trialAdded,
+                        modifier = Modifier.padding(top = 6.dp).heightIn(min = 32.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = AetherCyan.copy(alpha = 0.15f),
+                            contentColor = AetherCyan,
+                            disabledContainerColor = AetherCyan.copy(alpha = 0.06f),
+                            disabledContentColor = AetherTextSecondary,
+                        ),
+                    ) {
+                        Text(
+                            stringResource(if (trialAdded) R.string.offer_trial_added else R.string.offer_trial_button),
+                            fontSize = 12.sp,
+                        )
                     }
                 }
             }
+            // Two explicit actions: website (globe) and Telegram (real logo, not a generic "send").
+            IconButton(onClick = { openUrl(context, offer.url) }) {
+                Icon(Icons.Default.Language, contentDescription = stringResource(R.string.offer_open_site), tint = AetherCyan, modifier = Modifier.size(22.dp))
+            }
+            offer.tg?.let { tg ->
+                IconButton(onClick = { openTelegram(context, tg, offer.tgStart) }) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_telegram),
+                        contentDescription = stringResource(R.string.partner_open_tg),
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+            }
         }
+    }
+}
+
+private fun offerIcon(name: String): ImageVector = when (name) {
+    "game" -> Icons.Default.SportsEsports
+    "vpn" -> Icons.Default.VpnKey
+    "ai" -> Icons.Default.AutoAwesome
+    "card" -> Icons.Default.CreditCard
+    "gift" -> Icons.Default.CardGiftcard
+    else -> Icons.Default.ShoppingBag
+}
+
+/**
+ * Opens the bot/channel straight in the Telegram app (t.me links are often grabbed by the
+ * browser); without Telegram installed falls back to the t.me web link.
+ */
+private fun openTelegram(context: Context, tg: String, start: String?) {
+    try {
+        val appUrl = "tg://resolve?domain=$tg" + (start?.let { "&start=$it" } ?: "")
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(appUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: ActivityNotFoundException) {
+        openUrl(context, "https://t.me/$tg" + (start?.let { "?start=$it" } ?: ""))
     }
 }
 

@@ -22,6 +22,28 @@
 
     <string name="support_disclaimer">⚠️ Білім беру жобасы, оқу және зерттеу мақсатында жасалған. Автор қолданбаны қалай пайдаланатыныңызға жауапты емес. Ресейде бұғаттауларды айналып өтуге арналған VPN қызметтері заңмен шектелген және заңсыз деп танылуы мүмкін. Өз тәуекеліңізбен пайдаланыңыз.</string>
     <string name="partner_text">Steam, ойындар мен сервистерді толтыру</string>
-    <string name="partner_hide">Жасыру</string>
     <string name="partner_open_tg">Telegram-да ашу</string>
+    <string name="offer_tested">MyAppVPN-мен тексерілген</string>
+    <string name="offer_tested_subscription">MyAppVPN-мен тексерілген · жазылым ретінде қосуға болады</string>
+
+    <string name="offers_link_title">Тексерілген ақылы жазылымдар</string>
+    <string name="offers_link_subtitle">MyAppVPN-мен тексерілген тұрақты VPN-дер</string>
+    <string name="offers_title">Тексерілген ақылы жазылымдар</string>
+    <string name="offers_cd_back">Артқа</string>
+    <string name="offers_intro">Автор MyAppVPN-мен өзі тексерген ақылы сервистер. Сілтемелер — рефералдық: олар арқылы сатып алсаңыз, жобаға қолдау көрсетесіз. Автор үшінші тарап сервистері үшін жауап бермейді.</string>
+    <string name="offers_section_vpn">VPN-жазылымдар</string>
+    <string name="offers_section_other">Басқа сервистер</string>
+    <string name="offers_howto_title">Сатып алған жазылымды қалай қосуға болады</string>
+    <string name="offers_howto_step1">Сервистен жазылым сатып алып, оның сілтемесін алыңыз.</string>
+    <string name="offers_howto_step2">Сілтемені көшіріңіз.</string>
+    <string name="offers_howto_step3">Төмендегі «Жазылым қосу» түймесін басып, сілтемені өріске қойыңыз.</string>
+
+    <!-- Free-trial button on an offer card (offers.json "trialUrl" / "trialNote") -->
+    <string name="offer_trial_button">Тегін байқап көру</string>
+    <string name="offer_trial_added">Қосылды ✓</string>
+    <string name="offer_trial_note">Сынақ мерзімі: %1$s</string>
+    <string name="offer_trial_sub_name">%1$s (сынақ)</string>
+    <string name="offer_trial_added_msg">Жазылым қосылды — серверлер тізімде пайда болады</string>
+    <string name="offer_trial_already_msg">Бұрын қосылған</string>
+    <string name="offer_open_site">Сайтты ашу</string>
 </resources>
